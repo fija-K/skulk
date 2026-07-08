@@ -547,12 +547,16 @@ export default function App() {
   const canJoin = async (targetRoom: Room) => {
     const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
     if (!myId) return false;
-    const presenceRef = collection(db, 'rooms', targetRoom.id, 'participants');
-    const snapshot = await getDocs(presenceRef);
-    const activeParts = snapshot.docs.map(doc => doc.id);
-    
-    if (activeParts.length >= (targetRoom.maxParticipants || 10) && !activeParts.includes(myId)) {
-      return false;
+    try {
+      const presenceRef = collection(db, 'rooms', targetRoom.id, 'participants');
+      const snapshot = await getDocs(presenceRef);
+      const activeParts = snapshot.docs.map(doc => doc.id);
+      
+      if (activeParts.length >= (targetRoom.maxParticipants || 10) && !activeParts.includes(myId)) {
+        return false;
+      }
+    } catch (e) {
+      console.warn("Failed to check room capacity in Firestore, allowing access (Offline Fallback):", e);
     }
     return true;
   };
@@ -1297,7 +1301,7 @@ export default function App() {
     e.preventDefault();
 
     const randomId = Math.random().toString(36).substring(2, 8);
-    const roomLink = `http://skulk.vercel.app/room/${randomId}`;
+    const roomLink = `${window.location.origin}/room/${randomId}`;
 
     const roomDetails = {
       name: newRoomName || 'Untitled Room',
