@@ -84,54 +84,60 @@ export default function App() {
   // Load and synchronize rooms list from Firestore in real time
   useEffect(() => {
     const q = query(collection(db, 'rooms'), orderBy('createdAt', 'asc'));
+    
+    const defaultRooms: Room[] = [
+      {
+        id: '1',
+        name: 'DSA grind - arrays',
+        type: 'public',
+        buttonText: 'Join',
+        participants: [],
+        maxParticipants: 3,
+        link: 'http://skulk.vercel.app/room/dsa123',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: '2',
+        name: 'GATE CS - OS revision',
+        type: 'public-ask',
+        buttonText: 'Ask to join',
+        participants: [],
+        maxParticipants: 5,
+        link: 'http://skulk.vercel.app/room/gate45',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: '3',
+        name: 'IELTS speaking practice',
+        type: 'public',
+        buttonText: 'Join',
+        participants: [],
+        maxParticipants: 3,
+        link: 'http://skulk.vercel.app/room/ielts9',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: '4',
+        name: 'General study session',
+        type: 'public',
+        buttonText: 'Join',
+        participants: [],
+        maxParticipants: 10,
+        link: 'http://skulk.vercel.app/room/study5',
+        createdAt: new Date().toISOString()
+      }
+    ];
+
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       if (snapshot.empty) {
         // Seeding database with initial default rooms (using vercel link structure)
-        const defaultRooms: Room[] = [
-          {
-            id: '1',
-            name: 'DSA grind - arrays',
-            type: 'public',
-            buttonText: 'Join',
-            participants: [],
-            maxParticipants: 3,
-            link: 'http://skulk.vercel.app/room/dsa123',
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: '2',
-            name: 'GATE CS - OS revision',
-            type: 'public-ask',
-            buttonText: 'Ask to join',
-            participants: [],
-            maxParticipants: 5,
-            link: 'http://skulk.vercel.app/room/gate45',
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: '3',
-            name: 'IELTS speaking practice',
-            type: 'public',
-            buttonText: 'Join',
-            participants: [],
-            maxParticipants: 3,
-            link: 'http://skulk.vercel.app/room/ielts9',
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: '4',
-            name: 'General study session',
-            type: 'public',
-            buttonText: 'Join',
-            participants: [],
-            maxParticipants: 10,
-            link: 'http://skulk.vercel.app/room/study5',
-            createdAt: new Date().toISOString()
+        try {
+          for (const room of defaultRooms) {
+            await setDoc(doc(db, 'rooms', room.id), room);
           }
-        ];
-        
-        for (const room of defaultRooms) {
-          await setDoc(doc(db, 'rooms', room.id), room);
+        } catch (e) {
+          console.warn("Failed to seed Firestore, falling back to local state:", e);
+          setRooms(defaultRooms);
         }
       } else {
         const list: Room[] = [];
@@ -140,6 +146,9 @@ export default function App() {
         });
         setRooms(list);
       }
+    }, (error) => {
+      console.warn("Firestore subscription failed, falling back to local mock data:", error);
+      setRooms(defaultRooms);
     });
     return () => unsubscribe();
   }, []);
@@ -731,6 +740,21 @@ export default function App() {
       });
       
       setCallParticipants(list);
+    }, (error) => {
+      console.warn("Firestore call presence subscription failed, falling back to local user presence:", error);
+      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+      setCallParticipants([
+        {
+          id: myId,
+          name: `${user ? user.displayName || 'Google User' : guestName} (You)`,
+          initials: guestInitials,
+          color: guestColor,
+          isMuted: isMicMuted,
+          isCamOff: isCamOff,
+          isSpeaking: false,
+          isPinned: false
+        }
+      ]);
     });
     
     return () => unsubscribe();
@@ -1305,8 +1329,12 @@ export default function App() {
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
     } catch (err) {
-      console.error('Error saving room to Firestore:', err);
-      showToast('Failed to create room.');
+      console.warn('Error saving room to Firestore, fallback to local creation:', err);
+      // Fallback: Add to local state so the user is not blocked!
+      setRooms(prev => [...prev, newRoomObj]);
+      setGeneratedRoomLink(roomLink);
+      setModalStep('confirmation');
+      showToast('Created room locally (Offline Fallback)');
     }
   };
 
