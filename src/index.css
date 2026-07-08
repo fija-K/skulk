@@ -1660,3 +1660,241 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
 }
 
+/* ==========================================================================
+   Focus & Fun Tools Styles (YouTube, Games, Pomodoro)
+   ========================================================================== */
+
+.tools-sub-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 12px;
+}
+
+.tools-back-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all var(--transition-speed) ease;
+}
+
+.tools-back-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--button-secondary-bg);
+}
+
+.tools-sub-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Games Panel styles */
+.games-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.game-card-item {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: var(--btn-radius);
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  transition: all var(--transition-speed) ease;
+}
+
+.game-card-item:hover {
+  border-color: var(--primary-color);
+  background-color: var(--button-secondary-bg);
+}
+
+.game-item-icon-wrapper {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: var(--button-secondary-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  font-size: 16px;
+}
+
+.game-card-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Pomodoro panel styles */
+.pomodoro-panel-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.pomodoro-timer-circle {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 4px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 20px 0;
+  position: relative;
+  transition: all var(--transition-speed) ease;
+}
+
+.pomodoro-timer-circle.active-focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 16px rgba(241, 196, 15, 0.15); /* Nightwatch gold glow default */
+}
+
+/* Custom glow borders per active theme */
+html.theme-nightwatch .pomodoro-timer-circle.active-focus { border-color: #f1c40f; box-shadow: 0 0 16px rgba(241, 196, 15, 0.2); }
+html.theme-reactor .pomodoro-timer-circle.active-focus { border-color: #e74c3c; box-shadow: 0 0 16px rgba(231, 76, 60, 0.2); }
+html.theme-crimson .pomodoro-timer-circle.active-focus { border-color: #dc2626; box-shadow: 0 0 16px rgba(220, 38, 38, 0.2); }
+html.theme-bloom .pomodoro-timer-circle.active-focus { border-color: #ec4899; box-shadow: 0 0 16px rgba(236, 72, 153, 0.2); }
+html.theme-symbiote .pomodoro-timer-circle.active-focus { border-color: #84cc16; box-shadow: 0 0 16px rgba(132, 204, 22, 0.2); }
+html.theme-webslinger .pomodoro-timer-circle.active-focus { border-color: #e11d48; box-shadow: 0 0 16px rgba(225, 29, 72, 0.2); }
+
+.pomodoro-timer-circle.active-break {
+  border-color: #3b82f6; /* Blue for breaks */
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.15);
+}
+
+.pomodoro-time-digits {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+.pomodoro-phase-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+.pomodoro-phase-label.focus {
+  color: var(--primary-color);
+}
+
+.pomodoro-phase-label.break {
+  color: #3b82f6;
+}
+
+.pomodoro-button-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.pomodoro-adjusters-container {
+  width: 100%;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pomodoro-adjust-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.pomodoro-adjust-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pomodoro-adjust-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pomodoro-adjust-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: var(--button-secondary-bg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 700;
+  transition: all var(--transition-speed) ease;
+}
+
+.pomodoro-adjust-btn:hover {
+  background-color: var(--button-secondary-hover);
+  border-color: var(--primary-color);
+}
+
+.pomodoro-adjust-val {
+  font-size: 12px;
+  font-weight: 700;
+  width: 48px;
+  text-align: center;
+  font-family: monospace;
+}
+
+/* Call top-bar Pomodoro status badge */
+.topbar-pomodoro-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--button-secondary-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  transition: all var(--transition-speed) ease;
+  cursor: pointer;
+}
+
+.topbar-pomodoro-badge:hover {
+  border-color: var(--primary-color);
+}
+
+.topbar-pomodoro-badge.focus-phase {
+  color: var(--primary-color);
+}
+
+.topbar-pomodoro-badge.break-phase {
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
