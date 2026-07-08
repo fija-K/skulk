@@ -2,7 +2,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import { auth, googleProvider, signInWithPopup, signOut } from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  getDocs, 
+  onSnapshot, 
+  query, 
+  orderBy 
+} from 'firebase/firestore';
+import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 
 interface Room {
   id: string;
@@ -10,9 +20,11 @@ interface Room {
   type: 'private' | 'public-ask' | 'public';
   buttonText: string;
   participants: string[];
+  maxParticipants: number;
   scheduledDate?: string;
   scheduledTime?: string;
   link?: string;
+  createdAt?: string;
 }
 
 interface Participant {
@@ -52,41 +64,104 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'rooms' | 'community'>('rooms');
   
-  // Rooms state list (Topics entirely removed)
-  const [rooms, setRooms] = useState<Room[]>([
-    {
-      id: '1',
-      name: 'DSA grind - arrays',
-      type: 'public',
-      buttonText: 'Join',
-      participants: ['JD', 'AM'], // 2/3 filled
-      link: 'skulk.app/room/dsa123'
-    },
-    {
-      id: '2',
-      name: 'GATE CS - OS revision',
-      type: 'public-ask',
-      buttonText: 'Ask to join',
-      participants: ['SK', 'PL', 'RK'], // 3/3 filled
-      link: 'skulk.app/room/gate45'
-    },
-    {
-      id: '3',
-      name: 'IELTS speaking practice',
-      type: 'public',
-      buttonText: 'Join',
-      participants: ['JS'], // 1/3 filled
-      link: 'skulk.app/room/ielts9'
-    },
-    {
-      id: '4',
-      name: 'General study session',
-      type: 'public',
-      buttonText: 'Join',
-      participants: [], // 0/3 filled
-      link: 'skulk.app/room/study5'
-    },
-  ]);
+  // Real-time rooms state list
+  const [rooms, setRooms] = useState<Room[]>([]);
+  // Map of participant lists for rooms: room.id -> Participant[]
+  const [roomsParticipants, setRoomsParticipants] = useState<Record<string, any[]>>({});
+
+  // Persistent Guest ID
+  const [guestId, setGuestId] = useState<string>('');
+
+  useEffect(() => {
+    let gid = localStorage.getItem('skulk_guest_id');
+    if (!gid) {
+      gid = 'guest_' + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem('skulk_guest_id', gid);
+    }
+    setGuestId(gid);
+  }, []);
+
+  // Load and synchronize rooms list from Firestore in real time
+  useEffect(() => {
+    const q = query(collection(db, 'rooms'), orderBy('createdAt', 'asc'));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Seeding database with initial default rooms (using vercel link structure)
+        const defaultRooms: Room[] = [
+          {
+            id: '1',
+            name: 'DSA grind - arrays',
+            type: 'public',
+            buttonText: 'Join',
+            participants: [],
+            maxParticipants: 3,
+            link: 'http://skulk.vercel.app/room/dsa123',
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: '2',
+            name: 'GATE CS - OS revision',
+            type: 'public-ask',
+            buttonText: 'Ask to join',
+            participants: [],
+            maxParticipants: 5,
+            link: 'http://skulk.vercel.app/room/gate45',
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: '3',
+            name: 'IELTS speaking practice',
+            type: 'public',
+            buttonText: 'Join',
+            participants: [],
+            maxParticipants: 3,
+            link: 'http://skulk.vercel.app/room/ielts9',
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: '4',
+            name: 'General study session',
+            type: 'public',
+            buttonText: 'Join',
+            participants: [],
+            maxParticipants: 10,
+            link: 'http://skulk.vercel.app/room/study5',
+            createdAt: new Date().toISOString()
+          }
+        ];
+        
+        for (const room of defaultRooms) {
+          await setDoc(doc(db, 'rooms', room.id), room);
+        }
+      } else {
+        const list: Room[] = [];
+        snapshot.forEach(doc => {
+          list.push({ id: doc.id, ...doc.data() } as Room);
+        });
+        setRooms(list);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to participants subcollection for each room listed on the dashboard
+  useEffect(() => {
+    if (rooms.length === 0) return;
+    
+    const unsubscribes = rooms.map(room => {
+      return onSnapshot(collection(db, 'rooms', room.id, 'participants'), (snapshot) => {
+        const participantsList = snapshot.docs.map(doc => doc.data());
+        setRoomsParticipants(prev => ({
+          ...prev,
+          [room.id]: participantsList
+        }));
+      });
+    });
+    
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [rooms]);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -450,9 +525,38 @@ export default function App() {
     return parts[parts.length - 1];
   };
 
+  const leavePresence = async (roomIdToLeave: string) => {
+    const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+    if (!myId || !roomIdToLeave) return;
+    try {
+      await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
+    } catch (e) {
+      console.error('Error removing presence document:', e);
+    }
+  };
+
+  const canJoin = async (targetRoom: Room) => {
+    const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+    if (!myId) return false;
+    const presenceRef = collection(db, 'rooms', targetRoom.id, 'participants');
+    const snapshot = await getDocs(presenceRef);
+    const activeParts = snapshot.docs.map(doc => doc.id);
+    
+    if (activeParts.length >= (targetRoom.maxParticipants || 10) && !activeParts.includes(myId)) {
+      return false;
+    }
+    return true;
+  };
+
   // Join Room Handlers (wiring direct vs pending status)
-  const handleJoinRoomClick = (room: Room) => {
+  const handleJoinRoomClick = async (room: Room) => {
     const id = getRoomIdFromLink(room.link);
+    const allowed = await canJoin(room);
+    if (!allowed) {
+      showToast(`This room is full (${room.maxParticipants}/${room.maxParticipants})`);
+      return;
+    }
+
     if (room.type === 'public') {
       navigate(`/room/${id}`);
     } else if (room.type === 'public-ask') {
@@ -473,70 +577,26 @@ export default function App() {
   };
 
   // Setup conference shell room data
-  const enterCallRoom = (room: Room) => {
+  const enterCallRoom = async (room: Room) => {
+    const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+    if (myId) {
+      const presenceRef = doc(db, 'rooms', room.id, 'participants', myId);
+      await setDoc(presenceRef, {
+        uid: myId,
+        name: user ? user.displayName || 'Google User' : guestName,
+        photoURL: user ? user.photoURL : null,
+        initials: guestInitials,
+        color: guestColor,
+        joinedAt: new Date().toISOString()
+      });
+    }
+
     setCurrentRoom(room);
     setIsMicMuted(false);
     setIsCamOff(false);
     setIsGalleryView(false);
     setCallTab('chat');
     
-    // Setup initial mock call participant states
-    const initialParticipants: Participant[] = [
-      {
-        id: 'user_you',
-        name: `${guestName || 'You'} (You)`,
-        initials: guestInitials || 'Y',
-        color: guestColor || '#8b5cf6',
-        isMuted: false,
-        isCamOff: false,
-        isSpeaking: false,
-        isPinned: false,
-        isHost: true
-      },
-      {
-        id: 'part_jd',
-        name: 'John Doe',
-        initials: 'JD',
-        color: '#3b82f6', // Blue
-        isMuted: true,
-        isCamOff: false,
-        isSpeaking: false,
-        isPinned: false
-      },
-      {
-        id: 'part_am',
-        name: 'Anna Miller',
-        initials: 'AM',
-        color: '#ec4899', // Pink
-        isMuted: false,
-        isCamOff: false,
-        isSpeaking: true, // Speaking highlight active
-        isPinned: false
-      }
-    ];
-
-    // Adjust list based on who was already in the room in the mock dashboard data
-    const list = [...initialParticipants];
-    if (room.participants.length === 1 && room.participants[0] === 'JS') {
-      // IELTS room has only JS
-      list.splice(1, 2); // Remove JD and AM
-      list.push({
-        id: 'part_js',
-        name: 'James Smith',
-        initials: 'JS',
-        color: '#06b6d4',
-        isMuted: false,
-        isCamOff: false,
-        isSpeaking: false,
-        isPinned: false
-      });
-    } else if (room.participants.length === 0) {
-      // Empty study session has only you
-      list.splice(1, 2);
-    }
-    
-    setCallParticipants(list);
-
     // Initial mock messages
     setChatMessages([
       { id: 'msg_1', sender: 'John Doe', text: 'Hey everyone! Ready to study?' },
@@ -554,30 +614,127 @@ export default function App() {
       const currentRoomId = currentRoom ? getRoomIdFromLink(currentRoom.link) : null;
       if (!currentRoom || currentRoomId !== roomId) {
         const match = rooms.find(r => getRoomIdFromLink(r.link) === roomId);
-        if (match) {
-          enterCallRoom(match);
-        } else {
-          // If room not found in dashboard rooms, create a mock fallback room object
-          const fallbackRoom: Room = {
-            id: roomId,
-            name: `Room - ${roomId}`,
-            type: 'public',
-            buttonText: 'Join',
-            participants: [],
-            link: `skulk.app/room/${roomId}`
-          };
-          enterCallRoom(fallbackRoom);
-        }
+        const roomObj = match || {
+          id: roomId,
+          name: `Room - ${roomId}`,
+          type: 'public',
+          buttonText: 'Join',
+          participants: [],
+          maxParticipants: 10,
+          link: `http://skulk.vercel.app/room/${roomId}`
+        };
+        
+        canJoin(roomObj).then(allowed => {
+          if (allowed) {
+            enterCallRoom(roomObj);
+          } else {
+            showToast(`This room is full (${roomObj.maxParticipants}/${roomObj.maxParticipants})`);
+            navigate('/');
+          }
+        });
       }
     } else {
       if (currentRoom) {
         // Leaving room cleanups
+        const prevRoomId = currentRoom.id;
+        leavePresence(prevRoomId);
         setCurrentRoom(null);
         setCallParticipants([]);
         setChatMessages([]);
       }
     }
-  }, [roomId, rooms]);
+  }, [roomId, rooms, user, guestId]);
+
+  // Clean up presence when component unmounts or call ends
+  useEffect(() => {
+    return () => {
+      if (currentRoom) {
+        const prevRoomId = currentRoom.id;
+        leavePresence(prevRoomId);
+      }
+    };
+  }, [currentRoom]);
+
+  // Update or migrate Firestore presence document when authentication state changes
+  useEffect(() => {
+    if (!currentRoom) return;
+    
+    const syncAuthPresence = async () => {
+      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+      if (!myId) return;
+
+      // If user signed in, remove the old guest presence document
+      if (user) {
+        const storedGid = localStorage.getItem('skulk_guest_id');
+        if (storedGid && storedGid !== user.uid) {
+          try {
+            await deleteDoc(doc(db, 'rooms', currentRoom.id, 'participants', storedGid));
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+      
+      const presenceRef = doc(db, 'rooms', currentRoom.id, 'participants', myId);
+      await setDoc(presenceRef, {
+        uid: myId,
+        name: user ? user.displayName || 'Google User' : guestName,
+        photoURL: user ? user.photoURL : null,
+        initials: guestInitials,
+        color: guestColor,
+        joinedAt: new Date().toISOString()
+      });
+    };
+    
+    syncAuthPresence();
+  }, [user, currentRoom, guestName, guestInitials, guestColor, guestId]);
+
+  // Synchronous XMLHttp Delete on tab/browser close to clean up presence immediately
+  useEffect(() => {
+    const handleUnload = () => {
+      if (currentRoom) {
+        const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+        if (myId) {
+          const xhr = new XMLHttpRequest();
+          const url = `https://firestore.googleapis.com/v1/projects/skulk-45c23/databases/(default)/documents/rooms/${currentRoom.id}/participants/${myId}`;
+          xhr.open('DELETE', url, false); // synchronous delete
+          xhr.send();
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [currentRoom, user, guestId]);
+
+  // Real-time synchronization of call participants list inside calls
+  useEffect(() => {
+    if (!currentRoom) return;
+    
+    const presenceRef = collection(db, 'rooms', currentRoom.id, 'participants');
+    const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
+      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+      const list = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const isMe = doc.id === myId;
+        
+        return {
+          id: doc.id,
+          name: isMe ? `${data.name} (You)` : data.name,
+          initials: data.initials,
+          color: data.color,
+          photoURL: data.photoURL,
+          isMuted: isMe ? isMicMuted : false,
+          isCamOff: isMe ? isCamOff : false,
+          isSpeaking: false,
+          isPinned: false
+        } as Participant;
+      });
+      
+      setCallParticipants(list);
+    });
+    
+    return () => unsubscribe();
+  }, [currentRoom, user, guestId, isMicMuted, isCamOff]);
 
   // Clean up screen presenting tracks when leaving call
   useEffect(() => {
@@ -1112,11 +1269,11 @@ export default function App() {
   };
 
   // Submit Handler for modal creation
-  const handleCreateRoom = (e: React.FormEvent) => {
+  const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const randomId = Math.random().toString(36).substring(2, 8);
-    const roomLink = `skulk.app/room/${randomId}`;
+    const roomLink = `http://skulk.vercel.app/room/${randomId}`;
 
     const roomDetails = {
       name: newRoomName || 'Untitled Room',
@@ -1136,14 +1293,21 @@ export default function App() {
       type: roomDetails.type,
       buttonText: roomDetails.type === 'public-ask' ? 'Ask to join' : 'Join',
       participants: [], 
+      maxParticipants: roomDetails.maxParticipants,
       scheduledDate: roomDetails.scheduledDate,
       scheduledTime: roomDetails.scheduledTime,
-      link: roomDetails.link
+      link: roomDetails.link,
+      createdAt: new Date().toISOString()
     };
 
-    setRooms(prev => [...prev, newRoomObj]);
-    setGeneratedRoomLink(roomLink);
-    setModalStep('confirmation');
+    try {
+      await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
+      setGeneratedRoomLink(roomLink);
+      setModalStep('confirmation');
+    } catch (err) {
+      console.error('Error saving room to Firestore:', err);
+      showToast('Failed to create room.');
+    }
   };
 
   // Clipboard copy helper
@@ -1245,18 +1409,6 @@ export default function App() {
     return dateStr;
   };
 
-  // Map participant initials to theme-appropriate color circles
-  const getAvatarColor = (initials: string) => {
-    const colorMap: Record<string, string> = {
-      'JD': '#3b82f6',
-      'AM': '#ec4899',
-      'SK': '#f59e0b',
-      'PL': '#8b5cf6',
-      'RK': '#10b981',
-      'JS': '#06b6d4',
-    };
-    return colorMap[initials] || '#64748b';
-  };
 
   // Filtered rooms based on name search
   const filteredRooms = rooms.filter(room => {
@@ -1507,18 +1659,29 @@ export default function App() {
               <div className="rooms-grid">
                 {filteredRooms.map((room) => {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
+                  const currentRoomParticipants = roomsParticipants[room.id] || [];
+                  const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
+                  
                   return (
                     <div className="room-card" key={room.id}>
                       {/* Room Header */}
-                      <div className="room-card-header">
-                        <div 
-                          className="room-dot" 
-                          style={{ 
-                            backgroundColor: isScheduled ? 'var(--primary-color)' : 'var(--dot-color)',
-                            boxShadow: isScheduled ? '0 0 8px var(--primary-color)' : '0 0 8px var(--dot-color)'
-                          }}
-                        ></div>
-                        <h3 className="room-title">{room.name}</h3>
+                      <div className="room-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div 
+                            className="room-dot" 
+                            style={{ 
+                              backgroundColor: isScheduled ? 'var(--primary-color)' : 'var(--dot-color)',
+                              boxShadow: isScheduled ? '0 0 8px var(--primary-color)' : '0 0 8px var(--dot-color)'
+                            }}
+                          ></div>
+                          <h3 className="room-title">{room.name}</h3>
+                        </div>
+                        {isRoomFull && (
+                          <div className="recording-dot-wrapper" style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', height: '20px', padding: '0 8px', gap: '4px' }}>
+                            <div className="recording-dot" style={{ backgroundColor: '#ffffff' }}></div>
+                            <span style={{ color: '#ffffff', fontSize: '9px', fontWeight: 800 }}>FULL</span>
+                          </div>
+                        )}
                       </div>
                       
                       {/* Room Subtitle */}
@@ -1531,21 +1694,34 @@ export default function App() {
                       
                       {/* Participant Avatars Row */}
                       <div className="avatar-row">
-                        {[0, 1, 2].map((index) => {
-                          const participant = room.participants[index];
+                        {Array.from({ length: room.maxParticipants || 10 }).map((_, index) => {
+                          const participant = currentRoomParticipants[index];
                           if (participant) {
-                            return (
+                            return participant.photoURL ? (
+                              <img 
+                                key={index}
+                                src={participant.photoURL}
+                                alt={participant.name}
+                                className="avatar-slot avatar-filled"
+                                style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
                               <div 
                                 key={index} 
                                 className="avatar-slot avatar-filled"
-                                style={{ backgroundColor: getAvatarColor(participant) }}
+                                style={{ backgroundColor: participant.color || '#8b5cf6' }}
                               >
-                                {participant}
+                                {participant.initials}
                               </div>
                             );
                           } else {
                             return (
-                              <div key={index} className="avatar-slot avatar-empty" />
+                              <div 
+                                key={index} 
+                                className="avatar-slot avatar-empty" 
+                                style={{ borderStyle: 'dashed' }}
+                              />
                             );
                           }
                         })}
@@ -1556,8 +1732,15 @@ export default function App() {
                         <button 
                           onClick={() => handleJoinRoomClick(room)} 
                           className="btn-join"
+                          disabled={isRoomFull}
+                          style={{
+                            opacity: isRoomFull ? 0.5 : 1,
+                            cursor: isRoomFull ? 'not-allowed' : 'pointer',
+                            backgroundColor: isRoomFull ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
+                            color: isRoomFull ? 'var(--text-secondary)' : 'var(--primary-text)'
+                          }}
                         >
-                          {isScheduled ? 'Register' : room.buttonText}
+                          {isRoomFull ? 'Full' : (isScheduled ? 'Register' : room.buttonText)}
                         </button>
                       </div>
                     </div>
@@ -1685,7 +1868,7 @@ export default function App() {
                 )}
               </div>
               {/* Guest Profile Identity Badge in Call */}
-              {guestName && (
+              {guestName && !user && (
                 <button 
                   onClick={() => {
                     setProfileEditName(guestName);
@@ -1703,7 +1886,45 @@ export default function App() {
                 </button>
               )}
 
-              <button className="btn-signin" style={{ padding: '6px 14px', fontSize: '13px' }}>Sign in</button>
+              {!user ? (
+                <button onClick={handleSignIn} className="btn-signin" style={{ padding: '6px 14px', fontSize: '13px' }}>Sign in</button>
+              ) : (
+                <div className="user-profile-container" ref={userDropdownRef} style={{ position: 'relative' }}>
+                  <button 
+                    onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)} 
+                    className="guest-profile-badge"
+                    style={{ border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 10px 4px 4px', fontSize: '12px' }}
+                  >
+                    {user.photoURL ? (
+                      <img 
+                        src={user.photoURL} 
+                        alt={user.displayName || 'User'} 
+                        style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover' }} 
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="guest-badge-avatar" style={{ backgroundColor: '#8b5cf6', width: '20px', height: '20px', fontSize: '9px' }}>
+                        {guestInitials}
+                      </div>
+                    )}
+                    <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {user.displayName || 'Google User'}
+                    </span>
+                  </button>
+                  
+                  {isUserDropdownOpen && (
+                    <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: 0, marginTop: '8px', minWidth: '150px', zIndex: 1000 }}>
+                      <button 
+                        onClick={handleSignOut} 
+                        className="theme-item-btn"
+                        style={{ color: '#ef4444', width: '100%', textAlign: 'left', padding: '10px 16px' }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
