@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams, Routes, Route, Navigate } from 'react-router-dom';
+import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { auth, googleProvider, signInWithPopup, signOut } from './firebase';
@@ -35,7 +35,14 @@ interface ChatMessage {
 
 export default function App() {
   const navigate = useNavigate();
-  const { roomId } = useParams<{ roomId?: string }>();
+  const location = useLocation();
+
+  // Helper to extract room ID from pathname since useParams() is empty at App level
+  const getRoomIdFromPath = (path: string) => {
+    const match = path.match(/^\/room\/([^/]+)/);
+    return match ? match[1] : undefined;
+  };
+  const roomId = getRoomIdFromPath(location.pathname);
 
   // Firebase auth state
   const [user, setUser] = useState<User | null>(null);
