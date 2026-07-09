@@ -80,7 +80,26 @@ export default function App() {
     }
     setGuestId(gid);
   }, []);
+  // Load local rooms from localStorage as a fallback when Firestore is blocked
+  const getLocalRooms = (): Room[] => {
+    try {
+      const stored = localStorage.getItem('skulk_local_rooms');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  };
 
+  const saveLocalRoom = (room: Room) => {
+    try {
+      const existing = getLocalRooms();
+      if (!existing.some(r => r.id === room.id)) {
+        localStorage.setItem('skulk_local_rooms', JSON.stringify([...existing, room]));
+      }
+    } catch (e) {
+      console.error('Failed to save room to localStorage:', e);
+    }
+  };
   // Load and synchronize rooms list from Firestore in real time
   useEffect(() => {
     const q = query(collection(db, 'rooms'), orderBy('createdAt', 'asc'));
@@ -137,18 +156,26 @@ export default function App() {
           }
         } catch (e) {
           console.warn("Failed to seed Firestore, falling back to local state:", e);
-          setRooms(defaultRooms);
+          setRooms([...defaultRooms, ...getLocalRooms()]);
         }
       } else {
         const list: Room[] = [];
         snapshot.forEach(doc => {
           list.push({ id: doc.id, ...doc.data() } as Room);
         });
-        setRooms(list);
+        // Merge Firestore rooms with local rooms to make sure local creations are also visible on refresh!
+        const local = getLocalRooms();
+        const merged = [...list];
+        local.forEach(r => {
+          if (!merged.some(m => m.id === r.id)) {
+            merged.push(r);
+          }
+        });
+        setRooms(merged);
       }
     }, (error) => {
       console.warn("Firestore subscription failed, falling back to local mock data:", error);
-      setRooms(defaultRooms);
+      setRooms([...defaultRooms, ...getLocalRooms()]);
     });
     return () => unsubscribe();
   }, []);
@@ -1334,11 +1361,16 @@ export default function App() {
       setModalStep('confirmation');
     } catch (err) {
       console.warn('Error saving room to Firestore, fallback to local creation:', err);
-      // Fallback: Add to local state so the user is not blocked!
-      setRooms(prev => [...prev, newRoomObj]);
+      saveLocalRoom(newRoomObj); // Save to localStorage so it persists on refresh!
+      setRooms(prev => {
+        if (prev.some(r => r.id === newRoomObj.id)) return prev;
+        return [...prev, newRoomObj];
+      });
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
-      showToast('Created room locally (Offline Fallback)');
+      
+      const errMsg = err instanceof Error ? err.message : String(err);
+      showToast(`Firestore Error: ${errMsg.slice(0, 45)}... Created locally.`);
     }
   };
 
