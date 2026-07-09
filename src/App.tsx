@@ -10,7 +10,8 @@ import {
   getDocs, 
   onSnapshot, 
   query, 
-  orderBy 
+  orderBy,
+  updateDoc
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 
@@ -43,6 +44,7 @@ interface ChatMessage {
   id: string;
   sender: string;
   text: string;
+  createdAt?: string;
 }
 
 export default function App() {
@@ -791,6 +793,90 @@ export default function App() {
     return () => unsubscribe();
   }, [currentRoom, user, guestId, isMicMuted, isCamOff]);
 
+  // Real-time synchronization of room document updates (YouTube, Whiteboard, Pomodoro, etc.)
+  useEffect(() => {
+    if (!currentRoom) return;
+    
+    const roomRef = doc(db, 'rooms', currentRoom.id);
+    const unsubscribe = onSnapshot(roomRef, (docSnap) => {
+      if (!docSnap.exists()) return;
+      const data = docSnap.data();
+      
+      // Sync YouTube
+      if (data.youtubeVideoId !== undefined) {
+        setYoutubeVideoId(data.youtubeVideoId);
+      }
+      // Sync Whiteboard active state
+      if (data.isWhiteboardActive !== undefined) {
+        setIsWhiteboardActive(data.isWhiteboardActive);
+      }
+      // Sync Pomodoro
+      if (data.pomodoroIsRunning !== undefined) {
+        setPomodoroIsRunning(data.pomodoroIsRunning);
+      }
+      if (data.pomodoroMinutes !== undefined && !pomodoroIsRunning) {
+        setPomodoroMinutes(data.pomodoroMinutes);
+      }
+      if (data.pomodoroSeconds !== undefined && !pomodoroIsRunning) {
+        setPomodoroSeconds(data.pomodoroSeconds);
+      }
+      if (data.pomodoroPhase !== undefined) {
+        setPomodoroPhase(data.pomodoroPhase);
+      }
+    }, (error) => {
+      console.warn("Room document subscription failed:", error);
+    });
+    
+    return () => unsubscribe();
+  }, [currentRoom, pomodoroIsRunning]);
+
+  // Real-time synchronization of whiteboard drawings
+  useEffect(() => {
+    if (isWhiteboardActive && canvasRef.current && currentRoom) {
+      const roomRef = doc(db, 'rooms', currentRoom.id);
+      const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+        if (!snapshot.exists()) return;
+        const data = snapshot.data();
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        
+        if (data.whiteboardData !== undefined) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            if (!data.whiteboardData) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } else {
+              const img = new Image();
+              img.onload = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+              };
+              img.src = data.whiteboardData;
+            }
+          }
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [isWhiteboardActive, currentRoom]);
+
+  // Real-time synchronization of chat messages inside calls
+  useEffect(() => {
+    if (!currentRoom) return;
+    
+    const messagesRef = collection(db, 'rooms', currentRoom.id, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => doc.data() as ChatMessage);
+      setChatMessages(list);
+    }, (error) => {
+      console.warn("Firestore chat subscription failed:", error);
+    });
+    
+    return () => unsubscribe();
+  }, [currentRoom]);
+
   // Clean up screen presenting tracks when leaving call
   useEffect(() => {
     if (!currentRoom) {
@@ -852,8 +938,17 @@ export default function App() {
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = async () => {
     setIsDrawing(false);
+    const canvas = canvasRef.current;
+    if (canvas && currentRoom) {
+      const dataUrl = canvas.toDataURL();
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), { whiteboardData: dataUrl });
+      } catch (e) {
+        console.warn("Failed to sync whiteboard to Firestore:", e);
+      }
+    }
   };
 
   // Touch drawing handlers (for mobile support)
@@ -886,13 +981,21 @@ export default function App() {
     ctx.stroke();
   };
 
-  const clearCanvas = () => {
+  const clearCanvas = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     showToast('Whiteboard cleared');
+    if (currentRoom) {
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), { whiteboardData: '' });
+      } catch (e) {
+        console.warn("Failed to clear whiteboard in Firestore:", e);
+      }
+    }
   };
 
   // Screen share trigger
@@ -926,17 +1029,27 @@ export default function App() {
   };
 
   // Watch Together Submit Handler
-  const handleWatchTogetherSubmit = (e: React.FormEvent) => {
+  const handleWatchTogetherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ytInputUrl.trim()) return;
+    if (!ytInputUrl.trim() || !currentRoom) return;
 
     const videoId = extractYoutubeVideoId(ytInputUrl.trim());
     if (videoId) {
-      setYoutubeVideoId(videoId);
       setYtInputUrl('');
       // Clear whiteboard if active
       setIsWhiteboardActive(false);
-      showToast('YouTube video loaded!');
+      
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), { 
+          youtubeVideoId: videoId,
+          isWhiteboardActive: false 
+        });
+        showToast('YouTube video loaded!');
+      } catch (err) {
+        console.warn("Failed to update YouTube state in Firestore:", err);
+        setYoutubeVideoId(videoId);
+        showToast('YouTube video loaded locally!');
+      }
     } else {
       showToast('Invalid YouTube URL. Please paste a valid link.');
     }
@@ -1053,38 +1166,80 @@ export default function App() {
     }
   }, [currentRoom, pomodoroFocusLength]);
 
-  const togglePomodoro = () => {
-    setPomodoroIsRunning(prev => !prev);
-  };
-
-  const skipPomodoroPhase = () => {
-    if (pomodoroPhase === 'focus') {
-      setPomodoroPhase('break');
-      setPomodoroMinutes(pomodoroBreakLength);
-      setPomodoroSeconds(0);
-      showToast('Skipped to break phase');
+  const togglePomodoro = async () => {
+    const nextVal = !pomodoroIsRunning;
+    if (currentRoom) {
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), { 
+          pomodoroIsRunning: nextVal,
+          pomodoroMinutes,
+          pomodoroSeconds,
+          pomodoroPhase
+        });
+      } catch {
+        setPomodoroIsRunning(nextVal);
+      }
     } else {
-      setPomodoroPhase('focus');
-      setPomodoroMinutes(pomodoroFocusLength);
-      setPomodoroSeconds(0);
-      showToast('Skipped to focus phase');
+      setPomodoroIsRunning(nextVal);
     }
   };
 
-  const adjustPomodoroLength = (type: 'focus' | 'break', amount: number) => {
-    if (type === 'focus') {
-      const next = Math.max(1, pomodoroFocusLength + amount);
-      setPomodoroFocusLength(next);
-      if (!pomodoroIsRunning && pomodoroPhase === 'focus') {
-        setPomodoroMinutes(next);
+  const skipPomodoroPhase = async () => {
+    let nextPhase = 'focus';
+    let nextMinutes = pomodoroFocusLength;
+    if (pomodoroPhase === 'focus') {
+      nextPhase = 'break';
+      nextMinutes = pomodoroBreakLength;
+    }
+    
+    if (currentRoom) {
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), {
+          pomodoroPhase: nextPhase,
+          pomodoroMinutes: nextMinutes,
+          pomodoroSeconds: 0
+        });
+        showToast(`Skipped to ${nextPhase} phase`);
+      } catch {
+        // local fallback
+        setPomodoroPhase(nextPhase);
+        setPomodoroMinutes(nextMinutes);
         setPomodoroSeconds(0);
       }
     } else {
-      const next = Math.max(1, pomodoroBreakLength + amount);
-      setPomodoroBreakLength(next);
-      if (!pomodoroIsRunning && pomodoroPhase === 'break') {
-        setPomodoroMinutes(next);
+      setPomodoroPhase(nextPhase);
+      setPomodoroMinutes(nextMinutes);
+      setPomodoroSeconds(0);
+    }
+  };
+
+  const adjustPomodoroLength = async (type: 'focus' | 'break', amount: number) => {
+    let nextFocus = pomodoroFocusLength;
+    let nextBreak = pomodoroBreakLength;
+    if (type === 'focus') {
+      nextFocus = Math.max(1, pomodoroFocusLength + amount);
+      setPomodoroFocusLength(nextFocus);
+      if (!pomodoroIsRunning && pomodoroPhase === 'focus') {
+        setPomodoroMinutes(nextFocus);
         setPomodoroSeconds(0);
+      }
+    } else {
+      nextBreak = Math.max(1, pomodoroBreakLength + amount);
+      setPomodoroBreakLength(nextBreak);
+      if (!pomodoroIsRunning && pomodoroPhase === 'break') {
+        setPomodoroMinutes(nextBreak);
+        setPomodoroSeconds(0);
+      }
+    }
+    
+    if (currentRoom) {
+      try {
+        await updateDoc(doc(db, 'rooms', currentRoom.id), {
+          pomodoroMinutes: !pomodoroIsRunning && pomodoroPhase === 'focus' ? nextFocus : (!pomodoroIsRunning && pomodoroPhase === 'break' ? nextBreak : pomodoroMinutes),
+          pomodoroSeconds: !pomodoroIsRunning ? 0 : pomodoroSeconds
+        });
+      } catch (e) {
+        // ignore
       }
     }
   };
@@ -1413,18 +1568,27 @@ export default function App() {
   };
 
   // Local chat submission
-  const handleSendChatMessage = (e: React.FormEvent) => {
+  const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatMessageText.trim()) return;
+    if (!chatMessageText.trim() || !currentRoom) return;
 
+    const senderName = user ? user.displayName || 'Google User' : guestName;
+    const msgId = Date.now().toString();
     const newMsg: ChatMessage = {
-      id: Date.now().toString(),
-      sender: 'You',
-      text: chatMessageText
+      id: msgId,
+      sender: senderName,
+      text: chatMessageText.trim(),
+      createdAt: new Date().toISOString()
     };
-
-    setChatMessages(prev => [...prev, newMsg]);
+    
     setChatMessageText('');
+
+    try {
+      await setDoc(doc(db, 'rooms', currentRoom.id, 'messages', msgId), newMsg);
+    } catch (err) {
+      console.warn("Failed to write chat to Firestore, fallback locally:", err);
+      setChatMessages(prev => [...prev, newMsg]);
+    }
   };
 
   // Co-host control triggers (Mute, Pin, Remove)
@@ -2019,7 +2183,21 @@ export default function App() {
                       <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
                         Clear
                       </button>
-                      <button onClick={() => setIsWhiteboardActive(false)} className="btn-create" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                      <button 
+                        onClick={async () => {
+                          if (currentRoom) {
+                            try {
+                              await updateDoc(doc(db, 'rooms', currentRoom.id), { isWhiteboardActive: false });
+                            } catch {
+                              setIsWhiteboardActive(false);
+                            }
+                          } else {
+                            setIsWhiteboardActive(false);
+                          }
+                        }} 
+                        className="btn-create" 
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                      >
                         Close whiteboard
                       </button>
                     </div>
@@ -2055,11 +2233,19 @@ export default function App() {
                       />
                     )}
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         if (screenShareStream) {
                           stopScreenShare();
                         } else {
-                          setYoutubeVideoId(null);
+                          if (currentRoom) {
+                            try {
+                              await updateDoc(doc(db, 'rooms', currentRoom.id), { youtubeVideoId: null });
+                            } catch {
+                              setYoutubeVideoId(null);
+                            }
+                          } else {
+                            setYoutubeVideoId(null);
+                          }
                           showToast('YouTube presentation closed');
                         }
                       }} 
@@ -2326,9 +2512,22 @@ export default function App() {
                             {/* Whiteboard card button */}
                             <div 
                               className={`tool-card ${isWhiteboardActive ? 'active' : ''}`}
-                              onClick={() => {
-                                setIsWhiteboardActive(!isWhiteboardActive);
-                                setYoutubeVideoId(null); // Close youtube when opening whiteboard
+                              onClick={async () => {
+                                const nextVal = !isWhiteboardActive;
+                                if (currentRoom) {
+                                  try {
+                                    await updateDoc(doc(db, 'rooms', currentRoom.id), { 
+                                      isWhiteboardActive: nextVal,
+                                      youtubeVideoId: null
+                                    });
+                                  } catch {
+                                    setIsWhiteboardActive(nextVal);
+                                    setYoutubeVideoId(null);
+                                  }
+                                } else {
+                                  setIsWhiteboardActive(nextVal);
+                                  setYoutubeVideoId(null);
+                                }
                               }}
                               title="Toggle whiteboard drawing pad"
                             >
