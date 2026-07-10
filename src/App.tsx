@@ -56,6 +56,39 @@ interface ChatMessage {
   createdAt?: string;
 }
 
+interface LocalVideoProps {
+  stream: MediaStream | null;
+}
+
+function LocalVideo({ stream }: LocalVideoProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  if (!stream) return null;
+  return (
+    <video 
+      ref={videoRef} 
+      autoPlay 
+      playsInline 
+      muted 
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        objectFit: 'cover', 
+        borderRadius: '8px',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        zIndex: 1
+      }} 
+    />
+  );
+}
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -336,6 +369,7 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   const themes = [
     { id: 'nightwatch', name: 'Nightwatch', bg: '#0f1013', accent: '#f1c40f' },
@@ -704,10 +738,49 @@ export default function App() {
     setCallTab('chat');
     setViewingShare(null);
     setChatMessages([]);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      setLocalStream(stream);
+      if (myId) {
+        await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
+          isMuted: false,
+          isCamOff: false
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to get local media stream:", e);
+      showToast("Camera/Mic access denied. Continuing with avatar.");
+    }
   };
 
   const handleLeaveCall = () => {
     navigate('/');
+  };
+
+  const toggleMic = async () => {
+    const nextVal = !isMicMuted;
+    setIsMicMuted(nextVal);
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = !nextVal;
+      });
+    }
+    await updateMySharing({ isMuted: nextVal });
+  };
+
+  const toggleCamera = async () => {
+    const nextVal = !isCamOff;
+    setIsCamOff(nextVal);
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = !nextVal;
+      });
+    }
+    await updateMySharing({ isCamOff: nextVal });
   };
 
   // Synchronize route changes with active room state (handles back/forward buttons)
@@ -745,6 +818,10 @@ export default function App() {
         setCallParticipants([]);
         setChatMessages([]);
         setViewingShare(null);
+        if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+          setLocalStream(null);
+        }
       }
     }
   }, [roomId, rooms, user, guestId]);
@@ -756,8 +833,11 @@ export default function App() {
         const prevRoomId = roomDocId(currentRoom);
         leavePresence(prevRoomId);
       }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
     };
-  }, [currentRoom]);
+  }, [currentRoom, localStream]);
 
   // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
@@ -830,8 +910,8 @@ export default function App() {
           initials: data.initials,
           color: data.color,
           photoURL: data.photoURL,
-          isMuted: isMe ? isMicMuted : false,
-          isCamOff: isMe ? isCamOff : false,
+          isMuted: isMe ? isMicMuted : (data.isMuted ?? false),
+          isCamOff: isMe ? isCamOff : (data.isCamOff ?? false),
           isSpeaking: false,
           isPinned: false,
           sharing: data.sharing || null,
@@ -2455,7 +2535,7 @@ export default function App() {
                 <>
                   <div className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}>
                     {callParticipants.map((p) => {
-                      const isUser = p.id === 'user_you';
+                      const isUser = p.id === getMyId();
                       const showMuted = isUser ? isMicMuted : p.isMuted;
                       
                       return (
@@ -2471,7 +2551,8 @@ export default function App() {
                               cursor: p.sharing ? 'pointer' : 'default',
                               position: 'relative',
                               boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                              border: p.sharing ? '2px solid var(--primary-color)' : 'none'
+                              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                              overflow: 'hidden'
                             }}
                             onClick={() => {
                               if (p.sharing) {
@@ -2479,7 +2560,25 @@ export default function App() {
                               }
                             }}
                           >
-                            {p.initials}
+                            {isUser && !isCamOff && localStream ? (
+                              <LocalVideo stream={localStream} />
+                            ) : !isUser && !p.isCamOff ? (
+                              <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {p.initials}
+                                <div style={{
+                                  position: 'absolute',
+                                  top: '6px',
+                                  right: '6px',
+                                  backgroundColor: '#10b981',
+                                  width: '8px',
+                                  height: '8px',
+                                  borderRadius: '50%',
+                                  boxShadow: '0 0 8px #10b981'
+                                }} title="Camera active" />
+                              </div>
+                            ) : (
+                              p.initials
+                            )}
                             {p.sharing && (
                               <div className="sharing-badge-overlay" style={{
                                 position: 'absolute',
@@ -2642,7 +2741,7 @@ export default function App() {
                 {callTab === 'people' && (
                   <div className="people-list animate-fade-in">
                     {callParticipants.map((p) => {
-                      const isUser = p.id === 'user_you';
+                      const isUser = p.id === getMyId();
                       const showMuted = isUser ? isMicMuted : p.isMuted;
                       
                       return (
@@ -3682,7 +3781,7 @@ export default function App() {
             
             {/* Mic Toggle Button */}
             <button 
-              onClick={() => setIsMicMuted(!isMicMuted)} 
+              onClick={toggleMic} 
               className={`dock-btn ${isMicMuted ? 'active-off' : ''}`}
               title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
             >
@@ -3706,7 +3805,7 @@ export default function App() {
             
             {/* Camera Toggle Button */}
             <button 
-              onClick={() => setIsCamOff(!isCamOff)} 
+              onClick={toggleCamera} 
               className={`dock-btn ${isCamOff ? 'active-off' : ''}`}
               title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
             >
