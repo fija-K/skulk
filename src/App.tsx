@@ -662,7 +662,7 @@ export default function App() {
     }
 
     if (room.type === 'public') {
-      navigate(`/room/${id}`);
+      window.open(`/room/${id}`, '_blank');
     } else if (room.type === 'public-ask') {
       // 1. Show waiting dialog banner
       setPendingJoinRoom(room);
@@ -671,7 +671,7 @@ export default function App() {
       setTimeout(() => {
         setPendingJoinRoom(prev => {
           if (prev && prev.id === room.id) {
-            navigate(`/room/${id}`);
+            window.open(`/room/${id}`, '_blank');
             showToast(`Host approved request! Joined "${room.name}"`);
           }
           return null; // Clears pending join state
@@ -4031,7 +4031,7 @@ export default function App() {
                     onClick={(e) => {
                       e.preventDefault();
                       closeModal();
-                      navigate(`/room/${generatedRoomLink.split('/').pop()}`);
+                      window.open(`/room/${generatedRoomLink.split('/').pop()}`, '_blank');
                     }}
                     style={{ 
                       fontFamily: 'monospace', 
