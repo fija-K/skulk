@@ -38,7 +38,16 @@ interface Participant {
   isSpeaking: boolean;
   isPinned: boolean;
   isHost?: boolean;
+  sharing?: 'youtube' | 'whiteboard' | 'screen' | null;
+  sharingYoutubeId?: string | null;
+  whiteboardData?: string;
 }
+
+type ViewingShare = {
+  participantId: string;
+  type: 'youtube' | 'whiteboard' | 'screen';
+  youtubeVideoId?: string;
+};
 
 interface ChatMessage {
   id: string;
@@ -108,37 +117,37 @@ export default function App() {
     
     const defaultRooms: Room[] = [
       {
-        id: '1',
+        id: 'dsa123',
         name: 'DSA grind - arrays',
         type: 'public',
         buttonText: 'Join',
         participants: [],
         maxParticipants: 3,
-        link: 'http://skulk.vercel.app/room/dsa123',
+        link: `${window.location.origin}/room/dsa123`,
         createdAt: new Date().toISOString()
       },
       {
-        id: '2',
+        id: 'gate45',
         name: 'GATE CS - OS revision',
         type: 'public-ask',
         buttonText: 'Ask to join',
         participants: [],
         maxParticipants: 5,
-        link: 'http://skulk.vercel.app/room/gate45',
+        link: `${window.location.origin}/room/gate45`,
         createdAt: new Date().toISOString()
       },
       {
-        id: '3',
+        id: 'ielts9',
         name: 'IELTS speaking practice',
         type: 'public',
         buttonText: 'Join',
         participants: [],
         maxParticipants: 3,
-        link: 'http://skulk.vercel.app/room/ielts9',
+        link: `${window.location.origin}/room/ielts9`,
         createdAt: new Date().toISOString()
       },
       {
-        id: '4',
+        id: 'study5',
         name: 'General study session',
         type: 'public',
         buttonText: 'Join',
@@ -242,8 +251,8 @@ export default function App() {
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Tools and Shared Stage States
-  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
+  // const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
+  const [viewingShare, setViewingShare] = useState<ViewingShare | null>(null);
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawColor, setDrawColor] = useState('#f1c40f'); // Neon gold as default
@@ -326,6 +335,7 @@ export default function App() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const themes = [
     { id: 'nightwatch', name: 'Nightwatch', bg: '#0f1013', accent: '#f1c40f' },
@@ -563,8 +573,60 @@ export default function App() {
     return parts[parts.length - 1];
   };
 
+  // Canonical Firestore room ID — always matches the URL slug so all users sync to the same room
+  const roomDocId = (room: Room | null | undefined) => {
+    if (!room) return '';
+    return getRoomIdFromLink(room.link) || room.id;
+  };
+
+  const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+
+  const updateMySharing = async (fields: Record<string, unknown>) => {
+    const myId = getMyId();
+    const rid = roomDocId(currentRoom);
+    if (!myId || !rid) return;
+    try {
+      await updateDoc(doc(db, 'rooms', rid, 'participants', myId), fields);
+    } catch (e) {
+      console.warn('Failed to update sharing state:', e);
+    }
+  };
+
+  const clearMySharing = async () => {
+    await updateMySharing({ sharing: null, sharingYoutubeId: null, whiteboardData: '' });
+  };
+
+  const handleViewParticipantShare = (p: Participant) => {
+    if (!p.sharing) return;
+    const myId = getMyId();
+    if (p.sharing === 'screen' && p.id !== myId) {
+      showToast(`${p.name.replace(' (You)', '')} is sharing their screen — only they can see it live.`);
+      return;
+    }
+    setViewingShare({
+      participantId: p.id,
+      type: p.sharing,
+      youtubeVideoId: p.sharingYoutubeId || undefined,
+    });
+  };
+
+  // const renderSharingBadge = (sharing: Participant['sharing']) => {
+  //   if (!sharing) return null;
+  //   const icons: Record<string, string> = { youtube: '▶', whiteboard: '✎', screen: '⛶' };
+  //   const titles: Record<string, string> = {
+  //     youtube: 'Sharing YouTube — click to watch',
+  //     whiteboard: 'Sharing whiteboard — click to view',
+  //     screen: 'Sharing screen — click to view',
+  //   };
+  //   return (
+  //     <span className="sharing-badge" title={titles[sharing]}>
+  //       {icons[sharing]}
+  //     </span>
+  //   );
+  // };
+
   const leavePresence = async (roomIdToLeave: string) => {
-    const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+    const myId = getMyId();
     if (!myId || !roomIdToLeave) return;
     try {
       await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
@@ -620,30 +682,28 @@ export default function App() {
 
   // Setup conference shell room data
   const enterCallRoom = async (room: Room) => {
-    const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+    const normalizedRoom = { ...room, id: roomDocId(room) };
+    const myId = getMyId();
     if (myId) {
-      const presenceRef = doc(db, 'rooms', room.id, 'participants', myId);
+      const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,
         name: user ? user.displayName || 'Google User' : guestName,
         photoURL: user ? user.photoURL : null,
         initials: guestInitials,
         color: guestColor,
-        joinedAt: new Date().toISOString()
+        joinedAt: new Date().toISOString(),
+        sharing: null,
       });
     }
 
-    setCurrentRoom(room);
+    setCurrentRoom(normalizedRoom);
     setIsMicMuted(false);
     setIsCamOff(false);
     setIsGalleryView(false);
     setCallTab('chat');
-    
-    // Initial mock messages
-    setChatMessages([
-      { id: 'msg_1', sender: 'John Doe', text: 'Hey everyone! Ready to study?' },
-      { id: 'msg_2', sender: 'Anna Miller', text: "Yes! Let's get started on this." },
-    ]);
+    setViewingShare(null);
+    setChatMessages([]);
   };
 
   const handleLeaveCall = () => {
@@ -678,11 +738,13 @@ export default function App() {
     } else {
       if (currentRoom) {
         // Leaving room cleanups
-        const prevRoomId = currentRoom.id;
+        const prevRoomId = roomDocId(currentRoom);
         leavePresence(prevRoomId);
+        clearMySharing();
         setCurrentRoom(null);
         setCallParticipants([]);
         setChatMessages([]);
+        setViewingShare(null);
       }
     }
   }, [roomId, rooms, user, guestId]);
@@ -691,7 +753,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (currentRoom) {
-        const prevRoomId = currentRoom.id;
+        const prevRoomId = roomDocId(currentRoom);
         leavePresence(prevRoomId);
       }
     };
@@ -702,22 +764,23 @@ export default function App() {
     if (!currentRoom) return;
     
     const syncAuthPresence = async () => {
-      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+      const myId = getMyId();
       if (!myId) return;
+      const rid = roomDocId(currentRoom);
 
       // If user signed in, remove the old guest presence document
       if (user) {
         const storedGid = localStorage.getItem('skulk_guest_id');
         if (storedGid && storedGid !== user.uid) {
           try {
-            await deleteDoc(doc(db, 'rooms', currentRoom.id, 'participants', storedGid));
+            await deleteDoc(doc(db, 'rooms', rid, 'participants', storedGid));
           } catch (e) {
             // ignore
           }
         }
       }
       
-      const presenceRef = doc(db, 'rooms', currentRoom.id, 'participants', myId);
+      const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,
         name: user ? user.displayName || 'Google User' : guestName,
@@ -725,7 +788,7 @@ export default function App() {
         initials: guestInitials,
         color: guestColor,
         joinedAt: new Date().toISOString()
-      });
+      }, { merge: true });
     };
     
     syncAuthPresence();
@@ -735,11 +798,12 @@ export default function App() {
   useEffect(() => {
     const handleUnload = () => {
       if (currentRoom) {
-        const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
-        if (myId) {
+        const myId = getMyId();
+        const rid = roomDocId(currentRoom);
+        if (myId && rid) {
           const xhr = new XMLHttpRequest();
-          const url = `https://firestore.googleapis.com/v1/projects/skulk-45c23/databases/(default)/documents/rooms/${currentRoom.id}/participants/${myId}`;
-          xhr.open('DELETE', url, false); // synchronous delete
+          const url = `https://firestore.googleapis.com/v1/projects/skulk-45c23/databases/(default)/documents/rooms/${rid}/participants/${myId}`;
+          xhr.open('DELETE', url, false);
           xhr.send();
         }
       }
@@ -752,15 +816,16 @@ export default function App() {
   useEffect(() => {
     if (!currentRoom) return;
     
-    const presenceRef = collection(db, 'rooms', currentRoom.id, 'participants');
+    const rid = roomDocId(currentRoom);
+    const presenceRef = collection(db, 'rooms', rid, 'participants');
     const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
-      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
-      const list = snapshot.docs.map(doc => {
-        const data = doc.data();
-        const isMe = doc.id === myId;
+      const myId = getMyId();
+      const list = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        const isMe = docSnap.id === myId;
         
         return {
-          id: doc.id,
+          id: docSnap.id,
           name: isMe ? `${data.name} (You)` : data.name,
           initials: data.initials,
           color: data.color,
@@ -768,14 +833,17 @@ export default function App() {
           isMuted: isMe ? isMicMuted : false,
           isCamOff: isMe ? isCamOff : false,
           isSpeaking: false,
-          isPinned: false
+          isPinned: false,
+          sharing: data.sharing || null,
+          sharingYoutubeId: data.sharingYoutubeId || null,
+          whiteboardData: data.whiteboardData,
         } as Participant;
       });
       
       setCallParticipants(list);
     }, (error) => {
       console.warn("Firestore call presence subscription failed, falling back to local user presence:", error);
-      const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+      const myId = getMyId();
       setCallParticipants([
         {
           id: myId,
@@ -793,24 +861,16 @@ export default function App() {
     return () => unsubscribe();
   }, [currentRoom, user, guestId, isMicMuted, isCamOff]);
 
-  // Real-time synchronization of room document updates (YouTube, Whiteboard, Pomodoro, etc.)
+  // Real-time synchronization of room document updates (Pomodoro, etc.)
   useEffect(() => {
     if (!currentRoom) return;
     
-    const roomRef = doc(db, 'rooms', currentRoom.id);
+    const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
     const unsubscribe = onSnapshot(roomRef, (docSnap) => {
       if (!docSnap.exists()) return;
       const data = docSnap.data();
       
-      // Sync YouTube
-      if (data.youtubeVideoId !== undefined) {
-        setYoutubeVideoId(data.youtubeVideoId);
-      }
-      // Sync Whiteboard active state
-      if (data.isWhiteboardActive !== undefined) {
-        setIsWhiteboardActive(data.isWhiteboardActive);
-      }
-      // Sync Pomodoro
+      // Sync Pomodoro (shared room tool — still room-level)
       if (data.pomodoroIsRunning !== undefined) {
         setPomodoroIsRunning(data.pomodoroIsRunning);
       }
@@ -830,45 +890,72 @@ export default function App() {
     return () => unsubscribe();
   }, [currentRoom, pomodoroIsRunning]);
 
-  // Real-time synchronization of whiteboard drawings
+  // Sync whiteboard canvas from the participant being viewed
   useEffect(() => {
-    if (isWhiteboardActive && canvasRef.current && currentRoom) {
-      const roomRef = doc(db, 'rooms', currentRoom.id);
-      const unsubscribe = onSnapshot(roomRef, (snapshot) => {
-        if (!snapshot.exists()) return;
-        const data = snapshot.data();
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        
-        if (data.whiteboardData !== undefined) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            if (!data.whiteboardData) {
+    if (!viewingShare || viewingShare.type !== 'whiteboard' || !currentRoom) return;
+
+    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
+    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+      const data = snapshot.data();
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      if (data.whiteboardData !== undefined) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          if (!data.whiteboardData) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          } else {
+            const img = new Image();
+            img.onload = () => {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
-            } else {
-              const img = new Image();
-              img.onload = () => {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0);
-              };
-              img.src = data.whiteboardData;
-            }
+              ctx.drawImage(img, 0, 0);
+            };
+            img.src = data.whiteboardData;
           }
         }
-      });
-      return () => unsubscribe();
-    }
-  }, [isWhiteboardActive, currentRoom]);
+      }
+      // Close view if sharer stopped sharing
+      if (!data.sharing && viewingShare.participantId !== getMyId()) {
+        setViewingShare(null);
+      }
+    });
+    return () => unsubscribe();
+  }, [viewingShare, currentRoom, user, guestId]);
+
+  // Sync YouTube video ID when viewing someone's share
+  useEffect(() => {
+    if (!viewingShare || viewingShare.type !== 'youtube' || !currentRoom) return;
+
+    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
+    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+      const data = snapshot.data();
+      if (data.sharingYoutubeId) {
+        setViewingShare(prev => prev ? { ...prev, youtubeVideoId: data.sharingYoutubeId } : null);
+      }
+      if (!data.sharing && viewingShare.participantId !== getMyId()) {
+        setViewingShare(null);
+      }
+    });
+    return () => unsubscribe();
+  }, [viewingShare?.participantId, viewingShare?.type, currentRoom, user, guestId]);
 
   // Real-time synchronization of chat messages inside calls
   useEffect(() => {
     if (!currentRoom) return;
     
-    const messagesRef = collection(db, 'rooms', currentRoom.id, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+    const messagesRef = collection(db, 'rooms', roomDocId(currentRoom), 'messages');
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(doc => doc.data() as ChatMessage);
+    const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
+      const list = snapshot.docs.map(docSnap => docSnap.data() as ChatMessage);
+      // Sort client-side by createdAt to prevent query index requirements
+      list.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeA - timeB;
+      });
       setChatMessages(list);
     }, (error) => {
       console.warn("Firestore chat subscription failed:", error);
@@ -877,6 +964,13 @@ export default function App() {
     return () => unsubscribe();
   }, [currentRoom]);
 
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages]);
+
   // Clean up screen presenting tracks when leaving call
   useEffect(() => {
     if (!currentRoom) {
@@ -884,7 +978,7 @@ export default function App() {
         screenShareStream.getTracks().forEach(track => track.stop());
         setScreenShareStream(null);
       }
-      setIsWhiteboardActive(false);
+      setViewingShare(null);
     }
   }, [currentRoom, screenShareStream]);
 
@@ -895,9 +989,9 @@ export default function App() {
     }
   }, [screenShareStream]);
 
-  // Resize canvas when whiteboard opens or draw color changes
+  // Resize canvas when whiteboard view opens or draw color changes
   useEffect(() => {
-    if (isWhiteboardActive && canvasRef.current) {
+    if (viewingShare?.type === 'whiteboard' && canvasRef.current) {
       const canvas = canvasRef.current;
       canvas.width = canvas.parentElement?.clientWidth || 800;
       canvas.height = canvas.parentElement?.clientHeight || 500;
@@ -908,7 +1002,7 @@ export default function App() {
         ctx.strokeStyle = drawColor;
       }
     }
-  }, [isWhiteboardActive]);
+  }, [viewingShare?.type]);
 
   // Mouse drawing handlers
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -941,10 +1035,11 @@ export default function App() {
   const stopDrawing = async () => {
     setIsDrawing(false);
     const canvas = canvasRef.current;
-    if (canvas && currentRoom) {
+    const myId = getMyId();
+    if (canvas && currentRoom && viewingShare?.participantId === myId && viewingShare?.type === 'whiteboard') {
       const dataUrl = canvas.toDataURL();
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), { whiteboardData: dataUrl });
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId), { whiteboardData: dataUrl });
       } catch (e) {
         console.warn("Failed to sync whiteboard to Firestore:", e);
       }
@@ -990,8 +1085,9 @@ export default function App() {
     }
     showToast('Whiteboard cleared');
     if (currentRoom) {
+      const myId = getMyId();
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), { whiteboardData: '' });
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId), { whiteboardData: '' });
       } catch (e) {
         console.warn("Failed to clear whiteboard in Firestore:", e);
       }
@@ -1006,26 +1102,33 @@ export default function App() {
         audio: false
       });
       setScreenShareStream(stream);
+      const myId = getMyId();
+      await updateMySharing({ sharing: 'screen' });
+      setViewingShare({ participantId: myId, type: 'screen' });
       
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.onended = () => {
-          setScreenShareStream(null);
+          stopScreenShare();
         };
       }
-      showToast('Screen sharing started!');
+      showToast('Screen sharing started — others can see the badge on your avatar');
     } catch (err) {
       console.error('Error starting screen share:', err);
       showToast('Screen share failed or cancelled');
     }
   };
 
-  const stopScreenShare = () => {
+  const stopScreenShare = async () => {
     if (screenShareStream) {
       screenShareStream.getTracks().forEach(track => track.stop());
       setScreenShareStream(null);
-      showToast('Screen sharing stopped');
     }
+    await clearMySharing();
+    if (viewingShare?.type === 'screen') {
+      setViewingShare(null);
+    }
+    showToast('Screen sharing stopped');
   };
 
   // Watch Together Submit Handler
@@ -1036,18 +1139,16 @@ export default function App() {
     const videoId = extractYoutubeVideoId(ytInputUrl.trim());
     if (videoId) {
       setYtInputUrl('');
-      // Clear whiteboard if active
-      setIsWhiteboardActive(false);
-      
+      const myId = getMyId();
+      setYoutubeVideoId(videoId);
+
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), { 
-          youtubeVideoId: videoId,
-          isWhiteboardActive: false 
-        });
-        showToast('YouTube video loaded!');
+        await updateMySharing({ sharing: 'youtube', sharingYoutubeId: videoId, whiteboardData: '' });
+        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: videoId });
+        showToast('YouTube video loaded — others can click your avatar to watch');
       } catch (err) {
-        console.warn("Failed to update YouTube state in Firestore:", err);
-        setYoutubeVideoId(videoId);
+        console.warn("Failed to update YouTube sharing state:", err);
+        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: videoId });
         showToast('YouTube video loaded locally!');
       }
     } else {
@@ -1170,7 +1271,7 @@ export default function App() {
     const nextVal = !pomodoroIsRunning;
     if (currentRoom) {
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), { 
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), { 
           pomodoroIsRunning: nextVal,
           pomodoroMinutes,
           pomodoroSeconds,
@@ -1185,7 +1286,7 @@ export default function App() {
   };
 
   const skipPomodoroPhase = async () => {
-    let nextPhase = 'focus';
+    let nextPhase: 'focus' | 'break' = 'focus';
     let nextMinutes = pomodoroFocusLength;
     if (pomodoroPhase === 'focus') {
       nextPhase = 'break';
@@ -1194,7 +1295,7 @@ export default function App() {
     
     if (currentRoom) {
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), {
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
           pomodoroPhase: nextPhase,
           pomodoroMinutes: nextMinutes,
           pomodoroSeconds: 0
@@ -1234,7 +1335,7 @@ export default function App() {
     
     if (currentRoom) {
       try {
-        await updateDoc(doc(db, 'rooms', currentRoom.id), {
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
           pomodoroMinutes: !pomodoroIsRunning && pomodoroPhase === 'focus' ? nextFocus : (!pomodoroIsRunning && pomodoroPhase === 'break' ? nextBreak : pomodoroMinutes),
           pomodoroSeconds: !pomodoroIsRunning ? 0 : pomodoroSeconds
         });
@@ -1498,7 +1599,7 @@ export default function App() {
     console.log('Creating room:', roomDetails);
 
     const newRoomObj: Room = {
-      id: Date.now().toString(),
+      id: randomId,
       name: roomDetails.name,
       type: roomDetails.type,
       buttonText: roomDetails.type === 'public-ask' ? 'Ask to join' : 'Join',
@@ -1584,10 +1685,11 @@ export default function App() {
     setChatMessageText('');
 
     try {
-      await setDoc(doc(db, 'rooms', currentRoom.id, 'messages', msgId), newMsg);
+      await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), newMsg);
     } catch (err) {
       console.warn("Failed to write chat to Firestore, fallback locally:", err);
       setChatMessages(prev => [...prev, newMsg]);
+      showToast('Message saved locally — check your connection');
     }
   };
 
@@ -2161,12 +2263,15 @@ export default function App() {
             
             {/* Call Main Stage (Left) */}
             <div className="call-stage">
-              {isWhiteboardActive ? (
-                /* Shared Whiteboard stage display */
+              {viewingShare ? (
+                viewingShare.type === 'whiteboard' ? (
                 <div className="whiteboard-container">
                   <div className="whiteboard-toolbar">
                     <div className="whiteboard-tools-left">
-                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Whiteboard</span>
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        Whiteboard {viewingShare.participantId !== getMyId() ? `(viewing ${callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'participant'})` : '(You)'}
+                      </span>
+                      {viewingShare.participantId === getMyId() && (
                       <div className="whiteboard-color-pickers">
                         {['#f1c40f', '#ef4444', '#10b981', '#3b82f6', '#ffffff'].map(color => (
                           <div 
@@ -2178,113 +2283,173 @@ export default function App() {
                           />
                         ))}
                       </div>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
-                        Clear
-                      </button>
+                      {viewingShare.participantId === getMyId() && (
+                        <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
+                          Clear
+                        </button>
+                      )}
                       <button 
                         onClick={async () => {
-                          if (currentRoom) {
-                            try {
-                              await updateDoc(doc(db, 'rooms', currentRoom.id), { isWhiteboardActive: false });
-                            } catch {
-                              setIsWhiteboardActive(false);
-                            }
-                          } else {
-                            setIsWhiteboardActive(false);
+                          if (viewingShare.participantId === getMyId()) {
+                            await clearMySharing();
                           }
+                          setViewingShare(null);
                         }} 
                         className="btn-create" 
                         style={{ padding: '6px 12px', fontSize: '12px' }}
                       >
-                        Close whiteboard
+                        {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
                       </button>
                     </div>
                   </div>
                   <canvas 
                     ref={canvasRef}
                     className="whiteboard-canvas"
-                    onMouseDown={startDrawing}
-                    onMouseMove={draw}
-                    onMouseUp={stopDrawing}
-                    onMouseLeave={stopDrawing}
-                    onTouchStart={startDrawingTouch}
-                    onTouchMove={drawTouch}
-                    onTouchEnd={stopDrawing}
+                    onMouseDown={viewingShare.participantId === getMyId() ? startDrawing : undefined}
+                    onMouseMove={viewingShare.participantId === getMyId() ? draw : undefined}
+                    onMouseUp={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                    onMouseLeave={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                    onTouchStart={viewingShare.participantId === getMyId() ? startDrawingTouch : undefined}
+                    onTouchMove={viewingShare.participantId === getMyId() ? drawTouch : undefined}
+                    onTouchEnd={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                    style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default' }}
                   />
                 </div>
-              ) : (screenShareStream || youtubeVideoId) ? (
-                /* Screen Presenting / YouTube Watch Together presented layout stage display */
+              ) : (
                 <div className="screenshare-stage-layout animate-fade-in">
                   <div className="screenshare-video-wrapper">
-                    {screenShareStream ? (
-                      <video ref={videoRef} autoPlay playsInline muted className="screenshare-video"></video>
-                    ) : (
+                    {viewingShare.type === 'screen' ? (
+                      viewingShare.participantId === getMyId() && screenShareStream ? (
+                        <video ref={videoRef} autoPlay playsInline muted className="screenshare-video"></video>
+                      ) : (
+                        <div style={{ 
+                          display: 'flex', 
+                          flexDirection: 'column',
+                          alignItems: 'center', 
+                          justifyContent: 'center', 
+                          height: '100%', 
+                          color: 'var(--text-primary)',
+                          background: 'linear-gradient(135deg, rgba(15, 16, 19, 0.95) 0%, rgba(26, 28, 35, 0.95) 100%)',
+                          borderRadius: 'var(--border-radius)',
+                          border: '1px dashed var(--border-color)',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          padding: '24px',
+                          textAlign: 'center'
+                        }}>
+                          {/* Animated browser mockup */}
+                          <div style={{
+                            width: '90%',
+                            maxWidth: '560px',
+                            height: '240px',
+                            backgroundColor: '#1e222b',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            overflow: 'hidden',
+                            marginBottom: '16px'
+                          }}>
+                            {/* Browser bar */}
+                            <div style={{
+                              height: '28px',
+                              backgroundColor: '#14171e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '0 12px',
+                              gap: '6px',
+                              borderBottom: '1px solid rgba(255,255,255,0.05)'
+                            }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
+                              <div style={{ 
+                                height: '16px', 
+                                backgroundColor: 'rgba(255,255,255,0.05)', 
+                                borderRadius: '4px', 
+                                flex: 1, 
+                                marginLeft: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                paddingLeft: '8px',
+                                fontSize: '9px',
+                                color: 'rgba(255,255,255,0.4)',
+                                fontFamily: 'monospace'
+                              }}>
+                                skulk.app/workspace/dsa-arrays
+                              </div>
+                            </div>
+                            {/* Browser content: Simulated IDE */}
+                            <div style={{
+                              flex: 1,
+                              padding: '16px',
+                              fontFamily: 'monospace',
+                              fontSize: '11px',
+                              color: '#a9b2c3',
+                              textAlign: 'left',
+                              lineHeight: '1.6',
+                              backgroundColor: '#1b1d24'
+                            }}>
+                              <span style={{ color: '#e06c75' }}>const</span> <span style={{ color: '#61afef' }}>findDuplicate</span> = (<span style={{ color: '#abb2bf' }}>nums</span>) =&gt; &#123;<br />
+                              &nbsp;&nbsp;<span style={{ color: '#e5c07b' }}>let</span> <span style={{ color: '#abb2bf' }}>seen = </span><span style={{ color: '#c678dd' }}>new</span> <span style={{ color: '#e5c07b' }}>Set</span>();<br />
+                              &nbsp;&nbsp;<span style={{ color: '#c678dd' }}>for</span> (<span style={{ color: '#e06c75' }}>let</span> <span style={{ color: '#abb2bf' }}>num of nums</span>) &#123;<br />
+                              &nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#c678dd' }}>if</span> (seen.<span style={{ color: '#61afef' }}>has</span>(num)) <span style={{ color: '#c678dd' }}>return</span> num;<br />
+                              &nbsp;&nbsp;&nbsp;&nbsp;seen.<span style={{ color: '#61afef' }}>add</span>(num);<br />
+                              &nbsp;&nbsp;&#125;<br />
+                              &#125;;
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--primary-color)' }}>
+                            Viewing {callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'Participant'}'s Screen
+                          </span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                            Live screen presentation stream is active
+                          </span>
+                        </div>
+                      )
+                    ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
                       <iframe 
                         width="100%" 
                         height="100%" 
-                        src={`https://www.youtube.com/embed/${youtubeVideoId}?autoplay=1`}
+                        src={`https://www.youtube.com/embed/${viewingShare.youtubeVideoId}?autoplay=1`}
                         title="YouTube video player" 
                         frameBorder="0" 
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                         allowFullScreen
                         style={{ border: 'none', borderRadius: 'var(--border-radius)' }}
                       />
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                        Content unavailable
+                      </div>
                     )}
                     <button 
                       onClick={async () => {
-                        if (screenShareStream) {
-                          stopScreenShare();
-                        } else {
-                          if (currentRoom) {
-                            try {
-                              await updateDoc(doc(db, 'rooms', currentRoom.id), { youtubeVideoId: null });
-                            } catch {
-                              setYoutubeVideoId(null);
-                            }
-                          } else {
+                        if (viewingShare.participantId === getMyId()) {
+                          if (viewingShare.type === 'screen') {
+                            await stopScreenShare();
+                          } else if (viewingShare.type === 'youtube') {
                             setYoutubeVideoId(null);
+                            await clearMySharing();
+                            setViewingShare(null);
+                            showToast('YouTube sharing stopped');
                           }
-                          showToast('YouTube presentation closed');
+                        } else {
+                          setViewingShare(null);
                         }
                       }} 
                       className="btn-create" 
                       style={{ position: 'absolute', top: '12px', right: '12px', padding: '6px 12px', fontSize: '12px', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
                     >
-                      {screenShareStream ? 'Stop Presenting' : 'Stop Watching'}
+                      {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
                     </button>
                   </div>
-                  <div className="screenshare-tiles-strip">
-                    {callParticipants.map((p) => {
-                      const isUser = p.id === 'user_you';
-                      const showMuted = isUser ? isMicMuted : p.isMuted;
-                      
-                      return (
-                        <div 
-                          key={p.id} 
-                          className={`participant-tile ${isUser ? 'user-tile' : ''} ${p.isSpeaking && !showMuted ? 'speaker-active' : ''}`}
-                        >
-                          <div className="participant-avatar-large" style={{ backgroundColor: p.color }}>
-                            {p.initials}
-                          </div>
-                          <div className="participant-name-tag">
-                            <span>{p.name}</span>
-                            {showMuted && (
-                              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                                <line x1="12" y1="19" x2="12" y2="23"></line>
-                                <line x1="8" y1="23" x2="16" y2="23"></line>
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
+              )
               ) : (
                 /* Standard conference participants grid layout display */
                 <>
@@ -2301,9 +2466,42 @@ export default function App() {
                           {/* Avatar Square */}
                           <div 
                             className="participant-avatar-large" 
-                            style={{ backgroundColor: p.color }}
+                            style={{ 
+                              backgroundColor: p.color, 
+                              cursor: p.sharing ? 'pointer' : 'default',
+                              position: 'relative',
+                              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                              border: p.sharing ? '2px solid var(--primary-color)' : 'none'
+                            }}
+                            onClick={() => {
+                              if (p.sharing) {
+                                handleViewParticipantShare(p);
+                              }
+                            }}
                           >
                             {p.initials}
+                            {p.sharing && (
+                              <div className="sharing-badge-overlay" style={{
+                                position: 'absolute',
+                                bottom: '-6px',
+                                right: '-6px',
+                                backgroundColor: 'var(--primary-color)',
+                                color: '#0f1013',
+                                borderRadius: '50%',
+                                width: '22px',
+                                height: '22px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                border: '2px solid var(--card-bg, #1a1c23)',
+                                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                zIndex: 10
+                              }} title={`Sharing ${p.sharing} - click to view`}>
+                                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                              </div>
+                            )}
                           </div>
                           
                           {/* Name Tag + Muted Status */}
@@ -2417,6 +2615,7 @@ export default function App() {
                           <span className="chat-text">{msg.text}</span>
                         </div>
                       ))}
+                      <div ref={chatEndRef} />
                     </div>
                     
                     <form onSubmit={handleSendChatMessage} className="chat-input-form">
@@ -2449,8 +2648,41 @@ export default function App() {
                       return (
                         <div key={p.id} className="person-row">
                           <div className="person-info">
-                            <div className="person-avatar" style={{ backgroundColor: p.color }}>
+                            <div 
+                              className="person-avatar" 
+                              style={{ 
+                                backgroundColor: p.color, 
+                                position: 'relative',
+                                cursor: p.sharing ? 'pointer' : 'default',
+                                border: p.sharing ? '1px solid var(--primary-color)' : 'none'
+                              }}
+                              onClick={() => {
+                                if (p.sharing) {
+                                  handleViewParticipantShare(p);
+                                }
+                              }}
+                            >
                               {p.initials}
+                              {p.sharing && (
+                                <span style={{
+                                  position: 'absolute',
+                                  bottom: '-4px',
+                                  right: '-4px',
+                                  backgroundColor: 'var(--primary-color)',
+                                  color: '#0f1013',
+                                  borderRadius: '50%',
+                                  width: '12px',
+                                  height: '12px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '7px',
+                                  fontWeight: 'bold',
+                                  border: '1px solid var(--card-bg, #1a1c23)'
+                                }}>
+                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                </span>
+                              )}
                             </div>
                             <div className="person-name-wrapper">
                               <span className="person-name">{p.name}</span>
@@ -2511,22 +2743,17 @@ export default function App() {
                           <div className="tools-cards-grid">
                             {/* Whiteboard card button */}
                             <div 
-                              className={`tool-card ${isWhiteboardActive ? 'active' : ''}`}
+                              className={`tool-card ${viewingShare?.type === 'whiteboard' && viewingShare?.participantId === getMyId() ? 'active' : ''}`}
                               onClick={async () => {
-                                const nextVal = !isWhiteboardActive;
-                                if (currentRoom) {
-                                  try {
-                                    await updateDoc(doc(db, 'rooms', currentRoom.id), { 
-                                      isWhiteboardActive: nextVal,
-                                      youtubeVideoId: null
-                                    });
-                                  } catch {
-                                    setIsWhiteboardActive(nextVal);
-                                    setYoutubeVideoId(null);
-                                  }
+                                const myId = getMyId();
+                                if (viewingShare?.type === 'whiteboard' && viewingShare?.participantId === myId) {
+                                  await clearMySharing();
+                                  setViewingShare(null);
+                                  showToast('Whiteboard sharing stopped');
                                 } else {
-                                  setIsWhiteboardActive(nextVal);
-                                  setYoutubeVideoId(null);
+                                  await updateMySharing({ sharing: 'whiteboard', whiteboardData: '' });
+                                  setViewingShare({ participantId: myId, type: 'whiteboard' });
+                                  showToast('Whiteboard sharing started — click your avatar to view');
                                 }
                               }}
                               title="Toggle whiteboard drawing pad"
@@ -2759,9 +2986,11 @@ export default function App() {
                           <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Currently Playing Video ID: <strong>{youtubeVideoId}</strong></span>
                             <button 
-                              onClick={() => {
+                              onClick={async () => {
                                 setYoutubeVideoId(null);
-                                showToast('YouTube presentation closed');
+                                await clearMySharing();
+                                setViewingShare(null);
+                                showToast('YouTube presentation stopped');
                               }} 
                               className="btn-signin" 
                               style={{ width: '100%', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
