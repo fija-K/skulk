@@ -1096,11 +1096,13 @@ export default function App() {
         if (remoteDescriptionSet) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(cand));
+            console.log(`[WebRTC] Successfully added ICE candidate from ${peerId}`);
           } catch (e) {
             console.warn("Failed to add ICE candidate:", e);
           }
         } else {
           candidateQueue.push(cand);
+          console.log(`[WebRTC] Queued ICE candidate from ${peerId} (remote description not set yet)`);
         }
       };
 
@@ -1121,12 +1123,19 @@ export default function App() {
       });
       
       pc.ontrack = (event) => {
+        console.log(`[WebRTC] pc.ontrack fired for peerId: ${peerId}. Track count: ${event.streams[0]?.getTracks().length}, tracks:`, event.streams[0]?.getTracks().map(t => t.kind));
         if (event.streams && event.streams[0]) {
           setRemoteStreams(prev => ({
             ...prev,
             [peerId]: event.streams[0]
           }));
         }
+      };
+      pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] Connection state with ${peerId}: ${pc.connectionState}`);
+      };
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC] ICE Connection state with ${peerId}: ${pc.iceConnectionState}`);
       };
       
       const signalId = myId < peerId ? `${myId}_to_${peerId}` : `${peerId}_to_${myId}`;
@@ -1135,6 +1144,7 @@ export default function App() {
       
       pc.onicecandidate = async (event) => {
         if (event.candidate) {
+          console.log(`[WebRTC] Generated ICE candidate for ${peerId}`);
           try {
             const candidateData = event.candidate.toJSON();
             const candId = `cand_${Math.random().toString(36).substring(2, 9)}`;
@@ -1142,6 +1152,7 @@ export default function App() {
               candidate: candidateData,
               senderId: myId
             });
+            console.log(`[WebRTC] Wrote ICE candidate to Firestore for ${peerId}`);
           } catch (e) {
             console.warn("Failed to write ICE candidate:", e);
           }
@@ -1159,13 +1170,17 @@ export default function App() {
               try { await deleteDoc(d.ref); } catch (e) {}
             }
 
+            console.log(`[WebRTC] Initiator creating offer for ${peerId}`);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
+            console.log(`[WebRTC] Initiator set local description (offer) for ${peerId}`);
+            
             await setDoc(signalDoc, {
               offer: { sdp: offer.sdp, type: offer.type },
               initiatorId: myId,
               receiverId: peerId
             }, { merge: true });
+            console.log(`[WebRTC] Initiator wrote offer to Firestore for ${peerId}`);
           } catch (e) {
             console.warn("Failed to create WebRTC offer:", e);
           }
@@ -1177,8 +1192,10 @@ export default function App() {
           const data = snap.data();
           
           if (data.answer && !pc.remoteDescription) {
+            console.log(`[WebRTC] Initiator read answer from Firestore from ${peerId}`);
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+              console.log(`[WebRTC] Initiator set remote description (answer) from ${peerId}`);
               await processQueue();
             } catch (e) {
               console.warn("Failed to set remote answer:", e);
@@ -1192,13 +1209,20 @@ export default function App() {
           const data = snap.data();
           
           if (data.offer && !pc.remoteDescription) {
+            console.log(`[WebRTC] Receiver read offer from Firestore from ${peerId}`);
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+              console.log(`[WebRTC] Receiver set remote description (offer) from ${peerId}`);
+              
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
+              console.log(`[WebRTC] Receiver created and set local description (answer) for ${peerId}`);
+              
               await setDoc(signalDoc, {
                 answer: { sdp: answer.sdp, type: answer.type }
               }, { merge: true });
+              console.log(`[WebRTC] Receiver wrote answer to Firestore for ${peerId}`);
+              
               await processQueue();
             } catch (e) {
               console.warn("Failed to set remote offer and answer:", e);
@@ -1208,12 +1232,12 @@ export default function App() {
         unsubscribes.push(unsub);
       }
 
-      // Listen for remote ICE candidates in real time
       const unsubCandidates = onSnapshot(candidatesRef, (snap) => {
         snap.docChanges().forEach(change => {
           if (change.type === 'added') {
             const data = change.doc.data();
             if (data.senderId !== myId && data.candidate) {
+              console.log(`[WebRTC] Read remote ICE candidate from Firestore from ${peerId}`);
               addCandidate(data.candidate);
             }
           }
