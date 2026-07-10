@@ -7,6 +7,7 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
+  getDoc,
   getDocs, 
   onSnapshot, 
   updateDoc
@@ -24,6 +25,7 @@ interface Room {
   scheduledTime?: string;
   link?: string;
   creatorId?: string; // Room creator is the Admin
+  creatorName?: string;
   createdAt?: string;
 }
 
@@ -41,6 +43,8 @@ interface Participant {
   sharingYoutubeId?: string | null;
   whiteboardData?: string;
   role?: 'admin' | 'host' | 'cohost' | 'member'; // admin, host, cohost, member
+  mutedBy?: string;
+  camOffBy?: string;
 }
 
 type ViewingShare = {
@@ -662,6 +666,10 @@ export default function App() {
   }, []);
 
   const openModal = () => {
+    if (!user) {
+      showToast("🔒 Please sign in with Google to create a room.");
+      return;
+    }
     setIsModalOpen(true);
     setNewRoomName('');
     setNewRoomType('public-ask');
@@ -834,7 +842,9 @@ export default function App() {
           color: guestColor,
           joinedAt: new Date().toISOString(),
           sharing: null,
-          role: myRole
+          role: myRole,
+          mutedBy: myId,
+          camOffBy: myId
         });
       } catch (err) {
         console.warn("Failed to set presence in Firestore, joining locally:", err);
@@ -865,7 +875,9 @@ export default function App() {
         try {
           await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
             isMuted: false,
-            isCamOff: false
+            isCamOff: false,
+            mutedBy: myId,
+            camOffBy: myId
           });
         } catch (e) {}
       }
@@ -880,7 +892,9 @@ export default function App() {
           try {
             await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
               isMuted: false,
-              isCamOff: true
+              isCamOff: true,
+              mutedBy: myId,
+              camOffBy: myId
             });
           } catch (e) {}
         }
@@ -895,7 +909,9 @@ export default function App() {
             try {
               await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
                 isMuted: true,
-                isCamOff: false
+                isCamOff: false,
+                mutedBy: myId,
+                camOffBy: myId
               });
             } catch (e) {}
           }
@@ -933,7 +949,7 @@ export default function App() {
         track.enabled = !nextVal;
       });
     }
-    await updateMySharing({ isMuted: nextVal });
+    await updateMySharing({ isMuted: nextVal, mutedBy: getMyId() });
   };
 
   const toggleCamera = async () => {
@@ -944,7 +960,7 @@ export default function App() {
         track.enabled = !nextVal;
       });
     }
-    await updateMySharing({ isCamOff: nextVal });
+    await updateMySharing({ isCamOff: nextVal, camOffBy: getMyId() });
   };
 
   // Synchronize route changes with active room state (handles back/forward buttons)
@@ -976,11 +992,11 @@ export default function App() {
           const isCreator = roomObj.creatorId === myId;
           
           if (roomObj.type === 'public-ask' && !isCreator) {
-            // Halt user and verify presence status in participants collection
-            const presenceRef = collection(db, 'rooms', roomObj.id, 'participants');
+            // Halt user and verify presence status in joinRequests document
             try {
-              const snapshot = await getDocs(presenceRef);
-              const isAlreadyApproved = snapshot.docs.some(docSnap => docSnap.id === myId);
+              const reqDocRef = doc(db, 'rooms', roomObj.id, 'joinRequests', myId);
+              const reqDocSnap = await getDoc(reqDocRef);
+              const isAlreadyApproved = reqDocSnap.exists() && reqDocSnap.data()?.status === 'approved';
               if (!isAlreadyApproved) {
                 setPendingJoinRoom(roomObj);
                 return;
@@ -1236,7 +1252,9 @@ export default function App() {
         initials: guestInitials,
         color: guestColor,
         joinedAt: new Date().toISOString(),
-        role: myRole
+        role: myRole,
+        mutedBy: myId,
+        camOffBy: myId
       }, { merge: true });
     };
     
@@ -1286,6 +1304,8 @@ export default function App() {
           sharing: data.sharing || null,
           sharingYoutubeId: data.sharingYoutubeId || null,
           whiteboardData: data.whiteboardData,
+          mutedBy: data.mutedBy || null,
+          camOffBy: data.camOffBy || null,
         } as Participant;
       });
 
@@ -1334,7 +1354,11 @@ export default function App() {
           track.enabled = !myPresence.isMuted;
         });
       }
-      showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
+      
+      // Only show moderation notification if muted by another participant
+      if (myPresence.mutedBy && myPresence.mutedBy !== myId) {
+        showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
+      }
     }
   }, [callParticipants, currentRoom, isMicMuted, localStream]);
 
@@ -1350,7 +1374,11 @@ export default function App() {
           track.enabled = !myPresence.isCamOff;
         });
       }
-      showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
+      
+      // Only show moderation notification if video disabled by another participant
+      if (myPresence.camOffBy && myPresence.camOffBy !== myId) {
+        showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
+      }
     }
   }, [callParticipants, currentRoom, isCamOff, localStream]);
 
@@ -2192,6 +2220,7 @@ export default function App() {
       maxParticipants: roomDetails.maxParticipants,
       link: roomDetails.link,
       creatorId: getMyId(),
+      creatorName: user ? user.displayName || 'Google User' : 'Unknown',
       createdAt: new Date().toISOString()
     };
 
@@ -2296,7 +2325,7 @@ export default function App() {
     if (!target) return;
     const nextMute = !target.isMuted;
     try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isMuted: nextMute });
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isMuted: nextMute, mutedBy: getMyId() });
       showToast(nextMute ? `Muted ${name}` : `Unmuted ${name}`);
     } catch (e) {
       console.warn("Failed to toggle remote mute in Firestore:", e);
@@ -2359,7 +2388,7 @@ export default function App() {
     
     const nextVal = !target.isCamOff;
     try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isCamOff: nextVal });
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isCamOff: nextVal, camOffBy: getMyId() });
       showToast(`${nextVal ? 'Disabled' : 'Enabled'} camera for ${name}`);
     } catch (e) {
       console.warn("Failed to toggle remote camera in Firestore:", e);
@@ -2840,6 +2869,11 @@ export default function App() {
             <div className="call-room-info">
               <a href="/" onClick={(e) => { e.preventDefault(); handleLeaveCall(); }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
               <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
+              {currentRoom.creatorName && (
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px', display: 'flex', alignItems: 'center' }}>
+                  Created by <strong style={{ marginLeft: '4px', color: 'var(--text-primary)' }}>{currentRoom.creatorName}</strong>
+                </span>
+              )}
               <div className="recording-dot-wrapper">
                 <div className="recording-dot"></div>
                 <span>LIVE</span>
