@@ -711,6 +711,15 @@ export default function App() {
     if (!myId || !roomIdToLeave) return;
     try {
       await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
+      const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
+      const snapshot = await getDocs(signalsRef);
+      snapshot.forEach(async (docSnap) => {
+        if (docSnap.id.includes(myId)) {
+          try {
+            await deleteDoc(docSnap.ref);
+          } catch (e) {}
+        }
+      });
     } catch (e) {
       console.error('Error removing presence document:', e);
     }
@@ -980,6 +989,34 @@ export default function App() {
       });
       pcsRef.current[peerId] = pc;
       
+      // Candidate queue to ensure we only add ICE candidates AFTER remoteDescription is set
+      let remoteDescriptionSet = false;
+      const candidateQueue: RTCIceCandidateInit[] = [];
+
+      const addCandidate = async (cand: RTCIceCandidateInit) => {
+        if (remoteDescriptionSet) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {
+            console.warn("Failed to add ICE candidate:", e);
+          }
+        } else {
+          candidateQueue.push(cand);
+        }
+      };
+
+      const processQueue = async () => {
+        remoteDescriptionSet = true;
+        for (const cand of candidateQueue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {
+            console.warn("Failed to add queued candidate:", e);
+          }
+        }
+        candidateQueue.length = 0;
+      };
+
       localStream.getTracks().forEach(track => {
         pc.addTrack(track, localStream);
       });
@@ -1010,7 +1047,8 @@ export default function App() {
       };
       
       if (myId < peerId) {
-        pc.onnegotiationneeded = async () => {
+        // Direct offer creation for Initiator to avoid negotiationneeded timing issues
+        const makeOffer = async () => {
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
@@ -1023,6 +1061,7 @@ export default function App() {
             console.warn("Failed to create WebRTC offer:", e);
           }
         };
+        makeOffer();
         
         const unsub = onSnapshot(signalDoc, async (snap) => {
           if (!snap.exists()) return;
@@ -1031,6 +1070,7 @@ export default function App() {
           if (data.answer && !pc.remoteDescription) {
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+              await processQueue();
             } catch (e) {
               console.warn("Failed to set remote answer:", e);
             }
@@ -1038,11 +1078,7 @@ export default function App() {
           
           if (data.receiverCandidates && Array.isArray(data.receiverCandidates)) {
             data.receiverCandidates.forEach(cand => {
-              try {
-                pc.addIceCandidate(new RTCIceCandidate(cand));
-              } catch (e) {
-                console.warn("Failed to add receiver candidate:", e);
-              }
+              addCandidate(cand);
             });
           }
         });
@@ -1060,6 +1096,7 @@ export default function App() {
               await setDoc(signalDoc, {
                 answer: { sdp: answer.sdp, type: answer.type }
               }, { merge: true });
+              await processQueue();
             } catch (e) {
               console.warn("Failed to set remote offer and answer:", e);
             }
@@ -1067,11 +1104,7 @@ export default function App() {
           
           if (data.initiatorCandidates && Array.isArray(data.initiatorCandidates)) {
             data.initiatorCandidates.forEach(cand => {
-              try {
-                pc.addIceCandidate(new RTCIceCandidate(cand));
-              } catch (e) {
-                console.warn("Failed to add initiator candidate:", e);
-              }
+              addCandidate(cand);
             });
           }
         });
