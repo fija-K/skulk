@@ -52,6 +52,8 @@ type ViewingShare = {
 interface ChatMessage {
   id: string;
   sender: string;
+  senderId?: string;
+  senderRole?: 'admin' | 'host' | 'cohost' | 'member';
   text: string;
   createdAt?: string;
 }
@@ -106,6 +108,7 @@ export default function App() {
 
   // Firebase auth state
   const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -402,6 +405,26 @@ export default function App() {
     return 'member';
   };
 
+  // Helper to enforce kick permissions hierarchy
+  const checkCanKick = (myRole: string, targetRole: string) => {
+    if (targetRole === 'admin') return false; // Nobody can kick admin
+    if (myRole === 'admin') return true; // Admin can kick anybody
+    if (targetRole === 'host') return false; // Nobody except admin can kick host
+    if (myRole === 'host' && (targetRole === 'cohost' || targetRole === 'member')) return true; // Host kicks cohost/member
+    if (myRole === 'cohost' && targetRole === 'member') return true; // Cohost kicks member
+    return false;
+  };
+
+  // Helper to enforce mute permissions hierarchy
+  const checkCanMute = (myRole: string, targetRole: string) => {
+    if (targetRole === 'admin') return false; // Nobody can mute admin
+    if (myRole === 'admin') return true; // Admin can mute anybody
+    if (targetRole === 'host') return false; // Nobody except admin can mute host
+    if (myRole === 'host' && (targetRole === 'cohost' || targetRole === 'member')) return true; // Host mutes cohost/member
+    if (myRole === 'cohost' && targetRole === 'member') return true; // Cohost mutes member
+    return false;
+  };
+
   // Client-side garbage collection for empty custom rooms older than 3 minutes
   useEffect(() => {
     const defaultIds = ['dsa123', 'gate45', 'ielts9', 'study5'];
@@ -537,6 +560,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setIsAuthLoading(false);
       
       if (currentUser) {
         // Override guest identity with Google sign-in details
@@ -749,6 +773,10 @@ export default function App() {
   };
 
   const canJoin = async (targetRoom: Room) => {
+    const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
+    if (user && user.email && adminEmails.includes(user.email.toLowerCase())) {
+      return true; // Admin bypasses room capacity limit!
+    }
     const myId = user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
     if (!myId) return false;
     try {
@@ -921,6 +949,8 @@ export default function App() {
 
   // Synchronize route changes with active room state (handles back/forward buttons)
   useEffect(() => {
+    if (isAuthLoading) return;
+    
     if (roomId) {
       const currentRoomId = currentRoom ? getRoomIdFromLink(currentRoom.link) : null;
       if (!currentRoom || currentRoomId !== roomId) {
@@ -979,7 +1009,7 @@ export default function App() {
         }
       }
     }
-  }, [roomId, rooms, user, guestId]);
+  }, [roomId, rooms, user, guestId, isAuthLoading]);
 
   // Clean up presence when component unmounts or call ends
   useEffect(() => {
@@ -1233,6 +1263,7 @@ export default function App() {
   useEffect(() => {
     if (!currentRoom) return;
     
+    hasSeenSelfInListRef.current = false; // Reset on every subscription/auth change to block race conditions!
     const rid = roomDocId(currentRoom);
     const presenceRef = collection(db, 'rooms', rid, 'participants');
     const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
@@ -1251,7 +1282,7 @@ export default function App() {
           isCamOff: isMe ? isCamOff : (data.isCamOff ?? false),
           isSpeaking: false,
           isPinned: false,
-          role: data.role || (currentRoom.creatorId === docSnap.id ? 'admin' : 'member'),
+          role: data.role || (currentRoom.creatorId === docSnap.id ? 'host' : 'member'),
           sharing: data.sharing || null,
           sharingYoutubeId: data.sharingYoutubeId || null,
           whiteboardData: data.whiteboardData,
@@ -1306,6 +1337,22 @@ export default function App() {
       showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
     }
   }, [callParticipants, currentRoom, isMicMuted, localStream]);
+
+  // Synchronize remote camera actions with local camera state
+  useEffect(() => {
+    if (!currentRoom) return;
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    if (myPresence && myPresence.isCamOff !== isCamOff) {
+      setIsCamOff(myPresence.isCamOff);
+      if (localStream) {
+        localStream.getVideoTracks().forEach(track => {
+          track.enabled = !myPresence.isCamOff;
+        });
+      }
+      showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
+    }
+  }, [callParticipants, currentRoom, isCamOff, localStream]);
 
   // Listen to pending join requests (for Admin, Host, Co-host)
   useEffect(() => {
@@ -1401,7 +1448,11 @@ export default function App() {
     
     const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
     const unsubscribe = onSnapshot(roomRef, (docSnap) => {
-      if (!docSnap.exists()) return;
+      if (!docSnap.exists()) {
+        showToast("⚠️ This room has been closed by the host.");
+        handleLeaveCall();
+        return;
+      }
       const data = docSnap.data();
       
       // Sync Pomodoro (shared room tool — still room-level)
@@ -2213,10 +2264,15 @@ export default function App() {
     if (!chatMessageText.trim() || !currentRoom) return;
 
     const senderName = user ? user.displayName || 'Google User' : guestName;
+    const myId = getMyId();
+    const myRole = callParticipants.find(p => p.id === myId)?.role || determineRole(currentRoom.creatorId);
+    
     const msgId = Date.now().toString();
     const newMsg: ChatMessage = {
       id: msgId,
       sender: senderName,
+      senderId: myId,
+      senderRole: myRole,
       text: chatMessageText.trim(),
       createdAt: new Date().toISOString()
     };
@@ -2295,6 +2351,43 @@ export default function App() {
     setActiveMenuParticipantId(null);
   };
 
+  const handleParticipantCameraToggle = async (id: string, name: string) => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    const target = callParticipants.find(p => p.id === id);
+    if (!target) return;
+    
+    const nextVal = !target.isCamOff;
+    try {
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isCamOff: nextVal });
+      showToast(`${nextVal ? 'Disabled' : 'Enabled'} camera for ${name}`);
+    } catch (e) {
+      console.warn("Failed to toggle remote camera in Firestore:", e);
+    }
+    setActiveMenuParticipantId(null);
+  };
+
+  const handleEndRoom = async () => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    try {
+      // 1. Delete the main room document (triggers snapshot callback on all clients to leave)
+      await deleteDoc(doc(db, 'rooms', rid));
+      
+      // 2. Clean up participants collection
+      const presenceRef = collection(db, 'rooms', rid, 'participants');
+      const snapshot = await getDocs(presenceRef);
+      for (const docSnap of snapshot.docs) {
+        await deleteDoc(docSnap.ref);
+      }
+      
+      showToast("Room closed successfully.");
+    } catch (e) {
+      console.warn("Failed to delete room:", e);
+      showToast("Failed to close room.");
+    }
+  };
+
   // Format date nicely for human eyes
   const formatFriendlyDate = (dateStr?: string) => {
     if (!dateStr) return '';
@@ -2318,6 +2411,24 @@ export default function App() {
     }
     return room.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
+
+  if (isAuthLoading) {
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
+        <div 
+          style={{ 
+            width: '40px', 
+            height: '40px', 
+            borderRadius: '50%',
+            border: '3px solid rgba(255,255,255,0.1)', 
+            borderTopColor: 'var(--primary-color)', 
+            animation: 'spin 1s linear infinite' 
+          }}
+        />
+        <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Loading profile...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
@@ -3222,15 +3333,23 @@ export default function App() {
                               {/* Option Dropdown List */}
                               {activeMenuParticipantId === p.id && (
                                 <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }}>
-                                  {/* Mute action: Admin, Host can mute anyone. Cohost mutes member. */}
-                                  {((callParticipants.find(part => part.id === getMyId())?.role === 'admin') || 
-                                    (callParticipants.find(part => part.id === getMyId())?.role === 'host' && p.role !== 'admin') || 
-                                    (callParticipants.find(part => part.id === getMyId())?.role === 'cohost' && p.role === 'member')) && (
+                                  {/* Mute action */}
+                                  {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
                                     <button 
                                       onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
                                       className="tile-menu-item"
                                     >
                                       {p.isMuted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                  )}
+                                  
+                                  {/* Camera off action */}
+                                  {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
+                                    <button 
+                                      onClick={() => handleParticipantCameraToggle(p.id, p.name)} 
+                                      className="tile-menu-item"
+                                    >
+                                      {p.isCamOff ? 'Turn camera on' : 'Turn camera off'}
                                     </button>
                                   )}
                                   
@@ -3294,9 +3413,7 @@ export default function App() {
                                   )}
 
                                   {/* Kick action */}
-                                  {((callParticipants.find(part => part.id === getMyId())?.role === 'admin') || 
-                                    (callParticipants.find(part => part.id === getMyId())?.role === 'host' && p.role !== 'admin' && p.role !== 'host') || 
-                                    (callParticipants.find(part => part.id === getMyId())?.role === 'cohost' && p.role === 'member')) && (
+                                  {checkCanKick(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
                                     <button 
                                       onClick={() => handleParticipantRemove(p.id, p.name)} 
                                       className="tile-menu-item" 
@@ -3353,12 +3470,43 @@ export default function App() {
                 {callTab === 'chat' && (
                   <>
                     <div className="chat-messages-list">
-                      {chatMessages.map((msg) => (
-                        <div key={msg.id} className="chat-message-item animate-fade-in">
-                          <span className="chat-sender">{msg.sender}:</span>
-                          <span className="chat-text">{msg.text}</span>
-                        </div>
-                      ))}
+                      {chatMessages.map((msg) => {
+                        const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
+                        return (
+                          <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span className="chat-sender" style={{ fontWeight: 700, fontSize: '13px' }}>{msg.sender}</span>
+                              {role && role !== 'member' && (
+                                <span className={`role-badge-${role}`} style={{
+                                  fontSize: '8px',
+                                  fontWeight: 'bold',
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  border: '1px solid',
+                                  textTransform: 'uppercase',
+                                  lineHeight: '1.2',
+                                  ...role === 'admin' ? {
+                                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                                    borderColor: 'var(--primary-color, #f1c40f)',
+                                    color: 'var(--primary-color, #f1c40f)'
+                                  } : role === 'host' ? {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                    borderColor: '#3b82f6',
+                                    color: '#3b82f6'
+                                  } : {
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: '#10b981',
+                                    color: '#10b981'
+                                  }
+                                }}>
+                                  {role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                                </span>
+                              )}
+                            </div>
+                            <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
+                          </div>
+                        );
+                      })}
                       <div ref={chatEndRef} />
                     </div>
                     
@@ -3454,7 +3602,7 @@ export default function App() {
                                     color: '#10b981'
                                   }
                                 }}>
-                                  {p.role === 'admin' ? 'Admin' : p.role === 'host' ? 'Host' : 'Co-host'}
+                                  {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
                                 </span>
                               )}
                             </div>
@@ -4522,10 +4670,24 @@ export default function App() {
             <button 
               onClick={handleLeaveCall} 
               className="dock-btn dock-btn-leave"
+              style={{ marginRight: '8px' }}
               title="Leave room call"
             >
               Leave
             </button>
+            
+            {/* End Room Button */}
+            {(callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
+              (callParticipants.find(part => part.id === getMyId())?.role === 'host' && currentRoom && currentRoom.creatorId === getMyId())) && (
+              <button 
+                onClick={handleEndRoom} 
+                className="dock-btn dock-btn-leave"
+                style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                title="End room call for everyone"
+              >
+                End Room
+              </button>
+            )}
 
           </div>
 
