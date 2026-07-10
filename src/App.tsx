@@ -176,11 +176,22 @@ export default function App() {
         // Merge Firestore rooms with local rooms to make sure local creations are also visible on refresh!
         const local = getLocalRooms();
         const merged = [...list];
+        const updatedLocal = [...local];
+        
         local.forEach(r => {
-          if (!merged.some(m => m.id === r.id)) {
-            merged.push(r);
+          if (!list.some(m => m.id === r.id)) {
+            // Remove from updatedLocal
+            const idx = updatedLocal.findIndex(ul => ul.id === r.id);
+            if (idx !== -1) {
+              updatedLocal.splice(idx, 1);
+            }
+          } else {
+            if (!merged.some(m => m.id === r.id)) {
+              merged.push(r);
+            }
           }
         });
+        localStorage.setItem('skulk_local_rooms', JSON.stringify(updatedLocal));
         setRooms(merged);
       }
     }, (error) => {
@@ -401,6 +412,11 @@ export default function App() {
       
       for (const rid of roomsToDelete) {
         try {
+          // Remove from localStorage first
+          const local = getLocalRooms();
+          const updatedLocal = local.filter(r => r.id !== rid);
+          localStorage.setItem('skulk_local_rooms', JSON.stringify(updatedLocal));
+
           await deleteDoc(doc(db, 'rooms', rid));
           console.log(`Garbage collected empty room: ${rid}`);
           showToast(`Cleaned up empty room: ${rid}`);
@@ -742,13 +758,19 @@ export default function App() {
       // Delete any signals associated with this user
       const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
       const snapshot = await getDocs(signalsRef);
-      snapshot.forEach(async (docSnap) => {
+      for (const docSnap of snapshot.docs) {
         if (docSnap.id.includes(myId)) {
           try {
+            // Delete candidates subcollection first
+            const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
+            const candSnap = await getDocs(candidatesRef);
+            for (const d of candSnap.docs) {
+              try { await deleteDoc(d.ref); } catch (e) {}
+            }
             await deleteDoc(docSnap.ref);
           } catch (e) {}
         }
-      });
+      }
       // Delete my join request doc if any exists
       await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
     } catch (e) {
@@ -1130,6 +1152,13 @@ export default function App() {
         // Direct offer creation for Initiator to avoid negotiationneeded timing issues
         const makeOffer = async () => {
           try {
+            // Delete any stale signals and candidates from a previous session first
+            await deleteDoc(signalDoc);
+            const candidatesSnap = await getDocs(candidatesRef);
+            for (const d of candidatesSnap.docs) {
+              try { await deleteDoc(d.ref); } catch (e) {}
+            }
+
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             await setDoc(signalDoc, {
@@ -2369,11 +2398,15 @@ export default function App() {
     }
     setActiveMenuParticipantId(null);
   };
-
   const handleEndRoom = async () => {
     if (!currentRoom) return;
     const rid = roomDocId(currentRoom);
     try {
+      // Clean up localStorage first
+      const local = getLocalRooms();
+      const updatedLocal = local.filter(r => r.id !== rid);
+      localStorage.setItem('skulk_local_rooms', JSON.stringify(updatedLocal));
+
       // 1. Delete the main room document (triggers snapshot callback on all clients to leave)
       await deleteDoc(doc(db, 'rooms', rid));
       
@@ -3233,7 +3266,7 @@ export default function App() {
                             {isUser && !isCamOff && localStream ? (
                               <LocalVideo stream={localStream} />
                             ) : !isUser && !p.isCamOff && remoteStreams[p.id] ? (
-                              <LocalVideo stream={remoteStreams[p.id]} muted={false} />
+                              <LocalVideo stream={remoteStreams[p.id]} muted={true} />
                             ) : !isUser && !p.isCamOff ? (
                               <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 {p.initials}
@@ -3251,6 +3284,21 @@ export default function App() {
                             ) : (
                               p.initials
                             )}
+                            
+                            {/* Hidden remote audio element to ensure audio is always playing in background even if camera is off */}
+                            {!isUser && remoteStreams[p.id] && (
+                              <audio 
+                                ref={(el) => {
+                                  if (el) {
+                                    el.srcObject = remoteStreams[p.id];
+                                    el.play().catch(e => console.warn("Autoplay remote audio blocked:", e));
+                                  }
+                                }}
+                                autoPlay
+                                style={{ display: 'none' }}
+                              />
+                            )}
+
                             {p.sharing && (
                               <div className="sharing-badge-overlay" style={{
                                 position: 'absolute',
