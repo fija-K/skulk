@@ -9,8 +9,7 @@ import {
   deleteDoc, 
   getDocs, 
   onSnapshot, 
-  updateDoc,
-  arrayUnion
+  updateDoc
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 
@@ -65,6 +64,9 @@ function LocalVideo({ stream, muted = true }: LocalVideoProps) {
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(err => {
+        console.warn("Failed to autoplay video stream:", err);
+      });
     }
   }, [stream]);
 
@@ -1030,16 +1032,19 @@ export default function App() {
         }
       };
       
-      const signalDoc = doc(db, 'rooms', rid, 'signals', myId < peerId ? `${myId}_to_${peerId}` : `${peerId}_to_${myId}`);
+      const signalId = myId < peerId ? `${myId}_to_${peerId}` : `${peerId}_to_${myId}`;
+      const signalDoc = doc(db, 'rooms', rid, 'signals', signalId);
+      const candidatesRef = collection(db, 'rooms', rid, 'signals', signalId, 'candidates');
       
       pc.onicecandidate = async (event) => {
         if (event.candidate) {
           try {
             const candidateData = event.candidate.toJSON();
-            const field = myId < peerId ? 'initiatorCandidates' : 'receiverCandidates';
-            await setDoc(signalDoc, {
-              [field]: arrayUnion(candidateData)
-            }, { merge: true });
+            const candId = `cand_${Math.random().toString(36).substring(2, 9)}`;
+            await setDoc(doc(candidatesRef, candId), {
+              candidate: candidateData,
+              senderId: myId
+            });
           } catch (e) {
             console.warn("Failed to write ICE candidate:", e);
           }
@@ -1075,12 +1080,6 @@ export default function App() {
               console.warn("Failed to set remote answer:", e);
             }
           }
-          
-          if (data.receiverCandidates && Array.isArray(data.receiverCandidates)) {
-            data.receiverCandidates.forEach(cand => {
-              addCandidate(cand);
-            });
-          }
         });
         unsubscribes.push(unsub);
       } else {
@@ -1101,15 +1100,22 @@ export default function App() {
               console.warn("Failed to set remote offer and answer:", e);
             }
           }
-          
-          if (data.initiatorCandidates && Array.isArray(data.initiatorCandidates)) {
-            data.initiatorCandidates.forEach(cand => {
-              addCandidate(cand);
-            });
-          }
         });
         unsubscribes.push(unsub);
       }
+
+      // Listen for remote ICE candidates in real time
+      const unsubCandidates = onSnapshot(candidatesRef, (snap) => {
+        snap.docChanges().forEach(change => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.senderId !== myId && data.candidate) {
+              addCandidate(data.candidate);
+            }
+          }
+        });
+      });
+      unsubscribes.push(unsubCandidates);
     });
 
     return () => {
