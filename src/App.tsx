@@ -386,6 +386,21 @@ export default function App() {
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
+  const hasSeenSelfInListRef = useRef(false);
+
+  // Helper to determine role dynamically based on auth email and room creator
+  const determineRole = (roomCreatorId?: string) => {
+    const myId = getMyId();
+    if (!myId) return 'member';
+    const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
+    if (user && user.email && adminEmails.includes(user.email.toLowerCase())) {
+      return 'admin';
+    }
+    if (roomCreatorId && myId === roomCreatorId) {
+      return 'host';
+    }
+    return 'member';
+  };
 
   // Client-side garbage collection for empty custom rooms older than 3 minutes
   useEffect(() => {
@@ -778,8 +793,9 @@ export default function App() {
   const enterCallRoom = async (room: Room) => {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
+    hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
-      const myRole = normalizedRoom.creatorId === myId ? 'admin' : 'member';
+      const myRole = determineRole(normalizedRoom.creatorId);
       try {
         const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
         await setDoc(presenceRef, {
@@ -864,6 +880,7 @@ export default function App() {
   };
 
   const handleLeaveCall = () => {
+    hasSeenSelfInListRef.current = false;
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
       leavePresence(prevRoomId);
@@ -1180,7 +1197,7 @@ export default function App() {
         }
       }
       
-      const myRole = currentRoom.creatorId === myId ? 'admin' : 'member';
+      const myRole = determineRole(currentRoom.creatorId);
       const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,
@@ -1241,9 +1258,13 @@ export default function App() {
         } as Participant;
       });
 
-      // Kick detection: If we are inside the call and our presence document was deleted
+      // Kick detection: Only trigger if we have seen ourselves in the active list first to prevent join race conditions
       const meStillInRoom = list.some(p => p.id === myId);
-      if (myId && !meStillInRoom) {
+      if (myId && meStillInRoom) {
+        hasSeenSelfInListRef.current = true;
+      }
+      
+      if (myId && hasSeenSelfInListRef.current && !meStillInRoom) {
         showToast("❌ You have been removed from the room by a host.");
         handleLeaveCall();
         return;
@@ -1263,7 +1284,7 @@ export default function App() {
           isCamOff: isCamOff,
           isSpeaking: false,
           isPinned: false,
-          role: currentRoom.creatorId === myId ? 'admin' : 'member'
+          role: determineRole(currentRoom.creatorId)
         }
       ]);
     });
