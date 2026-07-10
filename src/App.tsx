@@ -159,61 +159,9 @@ export default function App() {
   useEffect(() => {
     const roomsRef = collection(db, 'rooms');
     
-    const defaultRooms: Room[] = [
-      {
-        id: 'dsa123',
-        name: 'DSA grind - arrays',
-        type: 'public',
-        buttonText: 'Join',
-        participants: [],
-        maxParticipants: 3,
-        link: `${window.location.origin}/room/dsa123`,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'gate45',
-        name: 'GATE CS - OS revision',
-        type: 'public-ask',
-        buttonText: 'Ask to join',
-        participants: [],
-        maxParticipants: 5,
-        link: `${window.location.origin}/room/gate45`,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ielts9',
-        name: 'IELTS speaking practice',
-        type: 'public',
-        buttonText: 'Join',
-        participants: [],
-        maxParticipants: 3,
-        link: `${window.location.origin}/room/ielts9`,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'study5',
-        name: 'General study session',
-        type: 'public',
-        buttonText: 'Join',
-        participants: [],
-        maxParticipants: 10,
-        link: `${window.location.origin}/room/study5`,
-        createdAt: new Date().toISOString()
-      }
-    ];
-
     const unsubscribe = onSnapshot(roomsRef, async (snapshot) => {
       if (snapshot.empty) {
-        // Seeding database with initial default rooms (using vercel link structure)
-        try {
-          for (const room of defaultRooms) {
-            await setDoc(doc(db, 'rooms', room.id), room);
-          }
-        } catch (e) {
-          console.warn("Failed to seed Firestore, falling back to local state:", e);
-          setIsFirestoreBlocked(true);
-          setRooms([...defaultRooms, ...getLocalRooms()]);
-        }
+        setRooms(getLocalRooms());
       } else {
         const list: Room[] = [];
         snapshot.forEach(doc => {
@@ -238,7 +186,7 @@ export default function App() {
     }, (error) => {
       console.warn("Firestore subscription failed, falling back to local mock data:", error);
       setIsFirestoreBlocked(true);
-      setRooms([...defaultRooms, ...getLocalRooms()]);
+      setRooms(getLocalRooms());
     });
     return () => unsubscribe();
   }, []);
@@ -434,14 +382,11 @@ export default function App() {
 
   // Client-side garbage collection for empty custom rooms older than 3 minutes
   useEffect(() => {
-    const defaultIds = ['dsa123', 'gate45', 'ielts9', 'study5'];
-    
     const cleanupInterval = setInterval(async () => {
       const now = new Date().getTime();
       const roomsToDelete: string[] = [];
       
       rooms.forEach(room => {
-        if (defaultIds.includes(room.id)) return;
         if (currentRoom && room.id === roomDocId(currentRoom)) return;
         
         const participants = roomsParticipants[room.id] || [];
@@ -559,6 +504,16 @@ export default function App() {
       }
     };
     fetchIceServers();
+  }, []);
+
+  // Cleanup old pre-existing default rooms from Firestore if they exist
+  useEffect(() => {
+    const defaultIds = ['dsa123', 'gate45', 'ielts9', 'study5'];
+    defaultIds.forEach(async (id) => {
+      try {
+        await deleteDoc(doc(db, 'rooms', id));
+      } catch (e) {}
+    });
   }, []);
 
   // Click outside handlers
@@ -1369,15 +1324,14 @@ export default function App() {
     const myId = getMyId();
     const myPresence = callParticipants.find(p => p.id === myId);
     if (myPresence && myPresence.isMuted !== isMicMuted) {
-      setIsMicMuted(myPresence.isMuted);
-      if (localStream) {
-        localStream.getAudioTracks().forEach(track => {
-          track.enabled = !myPresence.isMuted;
-        });
-      }
-      
-      // Only show moderation notification if muted by another participant
+      // ONLY apply remote changes if they were initiated by another user (moderator)
       if (myPresence.mutedBy && myPresence.mutedBy !== myId) {
+        setIsMicMuted(myPresence.isMuted);
+        if (localStream) {
+          localStream.getAudioTracks().forEach(track => {
+            track.enabled = !myPresence.isMuted;
+          });
+        }
         showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
       }
     }
@@ -1389,15 +1343,14 @@ export default function App() {
     const myId = getMyId();
     const myPresence = callParticipants.find(p => p.id === myId);
     if (myPresence && myPresence.isCamOff !== isCamOff) {
-      setIsCamOff(myPresence.isCamOff);
-      if (localStream) {
-        localStream.getVideoTracks().forEach(track => {
-          track.enabled = !myPresence.isCamOff;
-        });
-      }
-      
-      // Only show moderation notification if video disabled by another participant
+      // ONLY apply remote changes if they were initiated by another user (moderator)
       if (myPresence.camOffBy && myPresence.camOffBy !== myId) {
+        setIsCamOff(myPresence.isCamOff);
+        if (localStream) {
+          localStream.getVideoTracks().forEach(track => {
+            track.enabled = !myPresence.isCamOff;
+          });
+        }
         showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
       }
     }
