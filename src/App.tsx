@@ -9,8 +9,6 @@ import {
   deleteDoc, 
   getDocs, 
   onSnapshot, 
-  query, 
-  orderBy,
   updateDoc
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
@@ -146,7 +144,7 @@ export default function App() {
   };
   // Load and synchronize rooms list from Firestore in real time
   useEffect(() => {
-    const q = query(collection(db, 'rooms'), orderBy('createdAt', 'asc'));
+    const roomsRef = collection(db, 'rooms');
     
     const defaultRooms: Room[] = [
       {
@@ -191,7 +189,7 @@ export default function App() {
       }
     ];
 
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
+    const unsubscribe = onSnapshot(roomsRef, async (snapshot) => {
       if (snapshot.empty) {
         // Seeding database with initial default rooms (using vercel link structure)
         try {
@@ -207,6 +205,12 @@ export default function App() {
         const list: Room[] = [];
         snapshot.forEach(doc => {
           list.push({ id: doc.id, ...doc.data() } as Room);
+        });
+        // Sort client-side by createdAt to ensure consistent ordering without index requirements
+        list.sort((a, b) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeA - timeB;
         });
         // Merge Firestore rooms with local rooms to make sure local creations are also visible on refresh!
         const local = getLocalRooms();
