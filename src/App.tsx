@@ -378,6 +378,41 @@ export default function App() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
 
+  // Client-side garbage collection for empty custom rooms older than 3 minutes
+  useEffect(() => {
+    const defaultIds = ['dsa123', 'gate45', 'ielts9', 'study5'];
+    
+    const cleanupInterval = setInterval(async () => {
+      const now = new Date().getTime();
+      const roomsToDelete: string[] = [];
+      
+      rooms.forEach(room => {
+        if (defaultIds.includes(room.id)) return;
+        if (currentRoom && room.id === roomDocId(currentRoom)) return;
+        
+        const participants = roomsParticipants[room.id] || [];
+        if (participants.length === 0) {
+          const createdTime = room.createdAt ? new Date(room.createdAt).getTime() : 0;
+          const ageMinutes = (now - createdTime) / 60000;
+          if (ageMinutes >= 3) {
+            roomsToDelete.push(room.id);
+          }
+        }
+      });
+      
+      for (const rid of roomsToDelete) {
+        try {
+          await deleteDoc(doc(db, 'rooms', rid));
+          console.log(`Garbage collected empty room: ${rid}`);
+        } catch (e) {
+          console.warn(`Failed to garbage collect room ${rid}:`, e);
+        }
+      }
+    }, 30000); // Check every 30 seconds
+    
+    return () => clearInterval(cleanupInterval);
+  }, [rooms, roomsParticipants, currentRoom]);
+
   const themes = [
     { id: 'nightwatch', name: 'Nightwatch', bg: '#0f1013', accent: '#f1c40f' },
     { id: 'reactor', name: 'Reactor', bg: '#0b0c10', accent: '#e74c3c' },
@@ -1729,11 +1764,16 @@ export default function App() {
       buttonText: roomDetails.type === 'public-ask' ? 'Ask to join' : 'Join',
       participants: [], 
       maxParticipants: roomDetails.maxParticipants,
-      scheduledDate: roomDetails.scheduledDate,
-      scheduledTime: roomDetails.scheduledTime,
       link: roomDetails.link,
       createdAt: new Date().toISOString()
     };
+
+    if (roomDetails.scheduledDate !== undefined) {
+      newRoomObj.scheduledDate = roomDetails.scheduledDate;
+    }
+    if (roomDetails.scheduledTime !== undefined) {
+      newRoomObj.scheduledTime = roomDetails.scheduledTime;
+    }
 
     try {
       await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
@@ -1749,8 +1789,7 @@ export default function App() {
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
       
-      const errMsg = err instanceof Error ? err.message : String(err);
-      showToast(`Firestore Error: ${errMsg.slice(0, 45)}... Created locally.`);
+      showToast(`⚠️ Database Write Blocked (Permission Denied). Room created locally. Please enable read/write rules in your Firebase Console.`);
     }
   };
 
