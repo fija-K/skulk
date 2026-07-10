@@ -392,7 +392,7 @@ export default function App() {
         
         const participants = roomsParticipants[room.id] || [];
         if (participants.length === 0) {
-          const createdTime = room.createdAt ? new Date(room.createdAt).getTime() : 0;
+          const createdTime = room.createdAt ? new Date(room.createdAt).getTime() : now;
           const ageMinutes = (now - createdTime) / 60000;
           if (ageMinutes >= 3) {
             roomsToDelete.push(room.id);
@@ -404,11 +404,12 @@ export default function App() {
         try {
           await deleteDoc(doc(db, 'rooms', rid));
           console.log(`Garbage collected empty room: ${rid}`);
+          showToast(`Cleaned up empty room: ${rid}`);
         } catch (e) {
           console.warn(`Failed to garbage collect room ${rid}:`, e);
         }
       }
-    }, 30000); // Check every 30 seconds
+    }, 10000); // Check every 10 seconds for faster testing response
     
     return () => clearInterval(cleanupInterval);
   }, [rooms, roomsParticipants, currentRoom]);
@@ -785,6 +786,11 @@ export default function App() {
     setViewingShare(null);
     setChatMessages([]);
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast("⚠️ Microphone & Camera are only available on HTTPS or localhost secure connections.");
+      return;
+    }
+
     try {
       // 1. Try to get both video and audio
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -914,11 +920,17 @@ export default function App() {
         const prevRoomId = roomDocId(currentRoom);
         leavePresence(prevRoomId);
       }
+    };
+  }, [currentRoom]);
+
+  // Clean up local media tracks when stream changes or unmounts
+  useEffect(() => {
+    return () => {
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [currentRoom, localStream]);
+  }, [localStream]);
 
   // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
