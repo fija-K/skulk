@@ -9,7 +9,8 @@ import {
   deleteDoc, 
   getDocs, 
   onSnapshot, 
-  updateDoc
+  updateDoc,
+  arrayUnion
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 
@@ -56,9 +57,10 @@ interface ChatMessage {
 
 interface LocalVideoProps {
   stream: MediaStream | null;
+  muted?: boolean;
 }
 
-function LocalVideo({ stream }: LocalVideoProps) {
+function LocalVideo({ stream, muted = true }: LocalVideoProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -72,7 +74,7 @@ function LocalVideo({ stream }: LocalVideoProps) {
       ref={videoRef} 
       autoPlay 
       playsInline 
-      muted 
+      muted={muted} 
       style={{ 
         width: '100%', 
         height: '100%', 
@@ -376,6 +378,8 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
 
   // Client-side garbage collection for empty custom rooms older than 3 minutes
@@ -931,6 +935,154 @@ export default function App() {
       }
     };
   }, [localStream]);
+
+  // Clean up all WebRTC peer connections on unmount/leave
+  useEffect(() => {
+    return () => {
+      Object.keys(pcsRef.current).forEach(peerId => {
+        pcsRef.current[peerId].close();
+        delete pcsRef.current[peerId];
+      });
+      setRemoteStreams({});
+    };
+  }, [currentRoom]);
+
+  // Real-time WebRTC Mesh signaling over Firestore for participant video/audio
+  useEffect(() => {
+    if (!currentRoom || !localStream) return;
+    const myId = getMyId();
+    const rid = roomDocId(currentRoom);
+    
+    const currentPeerIds = callParticipants.map(p => p.id).filter(id => id !== myId);
+    
+    // Cleanup stale peer connections for peers who left
+    Object.keys(pcsRef.current).forEach(peerId => {
+      if (!currentPeerIds.includes(peerId)) {
+        try {
+          pcsRef.current[peerId].close();
+        } catch (e) {}
+        delete pcsRef.current[peerId];
+        setRemoteStreams(prev => {
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        });
+      }
+    });
+    
+    const unsubscribes: (() => void)[] = [];
+
+    currentPeerIds.forEach(peerId => {
+      if (pcsRef.current[peerId]) return; // Already connected or connecting
+      
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      pcsRef.current[peerId] = pc;
+      
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+      
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          setRemoteStreams(prev => ({
+            ...prev,
+            [peerId]: event.streams[0]
+          }));
+        }
+      };
+      
+      const signalDoc = doc(db, 'rooms', rid, 'signals', myId < peerId ? `${myId}_to_${peerId}` : `${peerId}_to_${myId}`);
+      
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          try {
+            const candidateData = event.candidate.toJSON();
+            const field = myId < peerId ? 'initiatorCandidates' : 'receiverCandidates';
+            await setDoc(signalDoc, {
+              [field]: arrayUnion(candidateData)
+            }, { merge: true });
+          } catch (e) {
+            console.warn("Failed to write ICE candidate:", e);
+          }
+        }
+      };
+      
+      if (myId < peerId) {
+        pc.onnegotiationneeded = async () => {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await setDoc(signalDoc, {
+              offer: { sdp: offer.sdp, type: offer.type },
+              initiatorId: myId,
+              receiverId: peerId
+            }, { merge: true });
+          } catch (e) {
+            console.warn("Failed to create WebRTC offer:", e);
+          }
+        };
+        
+        const unsub = onSnapshot(signalDoc, async (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data();
+          
+          if (data.answer && !pc.remoteDescription) {
+            try {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } catch (e) {
+              console.warn("Failed to set remote answer:", e);
+            }
+          }
+          
+          if (data.receiverCandidates && Array.isArray(data.receiverCandidates)) {
+            data.receiverCandidates.forEach(cand => {
+              try {
+                pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.warn("Failed to add receiver candidate:", e);
+              }
+            });
+          }
+        });
+        unsubscribes.push(unsub);
+      } else {
+        const unsub = onSnapshot(signalDoc, async (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data();
+          
+          if (data.offer && !pc.remoteDescription) {
+            try {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await setDoc(signalDoc, {
+                answer: { sdp: answer.sdp, type: answer.type }
+              }, { merge: true });
+            } catch (e) {
+              console.warn("Failed to set remote offer and answer:", e);
+            }
+          }
+          
+          if (data.initiatorCandidates && Array.isArray(data.initiatorCandidates)) {
+            data.initiatorCandidates.forEach(cand => {
+              try {
+                pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.warn("Failed to add initiator candidate:", e);
+              }
+            });
+          }
+        });
+        unsubscribes.push(unsub);
+      }
+    });
+
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [currentRoom, localStream, callParticipants]);
 
   // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
@@ -2678,6 +2830,8 @@ export default function App() {
                           >
                             {isUser && !isCamOff && localStream ? (
                               <LocalVideo stream={localStream} />
+                            ) : !isUser && !p.isCamOff && remoteStreams[p.id] ? (
+                              <LocalVideo stream={remoteStreams[p.id]} muted={false} />
                             ) : !isUser && !p.isCamOff ? (
                               <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 {p.initials}
