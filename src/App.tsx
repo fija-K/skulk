@@ -186,7 +186,7 @@ export default function App() {
         buttonText: 'Join',
         participants: [],
         maxParticipants: 10,
-        link: 'http://skulk.vercel.app/room/study5',
+        link: `${window.location.origin}/room/study5`,
         createdAt: new Date().toISOString()
       }
     ];
@@ -200,6 +200,7 @@ export default function App() {
           }
         } catch (e) {
           console.warn("Failed to seed Firestore, falling back to local state:", e);
+          setIsFirestoreBlocked(true);
           setRooms([...defaultRooms, ...getLocalRooms()]);
         }
       } else {
@@ -219,6 +220,7 @@ export default function App() {
       }
     }, (error) => {
       console.warn("Firestore subscription failed, falling back to local mock data:", error);
+      setIsFirestoreBlocked(true);
       setRooms([...defaultRooms, ...getLocalRooms()]);
     });
     return () => unsubscribe();
@@ -370,6 +372,7 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
 
   const themes = [
     { id: 'nightwatch', name: 'Nightwatch', bg: '#0f1013', accent: '#f1c40f' },
@@ -719,16 +722,20 @@ export default function App() {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     if (myId) {
-      const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
-      await setDoc(presenceRef, {
-        uid: myId,
-        name: user ? user.displayName || 'Google User' : guestName,
-        photoURL: user ? user.photoURL : null,
-        initials: guestInitials,
-        color: guestColor,
-        joinedAt: new Date().toISOString(),
-        sharing: null,
-      });
+      try {
+        const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
+        await setDoc(presenceRef, {
+          uid: myId,
+          name: user ? user.displayName || 'Google User' : guestName,
+          photoURL: user ? user.photoURL : null,
+          initials: guestInitials,
+          color: guestColor,
+          joinedAt: new Date().toISOString(),
+          sharing: null,
+        });
+      } catch (err) {
+        console.warn("Failed to set presence in Firestore, joining locally:", err);
+      }
     }
 
     setCurrentRoom(normalizedRoom);
@@ -740,20 +747,55 @@ export default function App() {
     setChatMessages([]);
 
     try {
+      // 1. Try to get both video and audio
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
       });
       setLocalStream(stream);
       if (myId) {
-        await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-          isMuted: false,
-          isCamOff: false
-        });
+        try {
+          await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
+            isMuted: false,
+            isCamOff: false
+          });
+        } catch (e) {}
       }
     } catch (e) {
-      console.warn("Failed to get local media stream:", e);
-      showToast("Camera/Mic access denied. Continuing with avatar.");
+      console.warn("Failed to get both video and audio, trying audio only:", e);
+      try {
+        // 2. Try audio only
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setLocalStream(stream);
+        setIsCamOff(true);
+        if (myId) {
+          try {
+            await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
+              isMuted: false,
+              isCamOff: true
+            });
+          } catch (e) {}
+        }
+      } catch (e2) {
+        console.warn("Failed to get audio, trying video only:", e2);
+        try {
+          // 3. Try video only
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setLocalStream(stream);
+          setIsMicMuted(true);
+          if (myId) {
+            try {
+              await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
+                isMuted: true,
+                isCamOff: false
+              });
+            } catch (e) {}
+          }
+        } catch (e3) {
+          console.warn("All media requests failed:", e3);
+          showToast("Mic & Camera blocked. Please click the site settings lock icon in your browser address bar to allow permissions.");
+        }
+      }
     }
   };
 
@@ -874,17 +916,15 @@ export default function App() {
     syncAuthPresence();
   }, [user, currentRoom, guestName, guestInitials, guestColor, guestId]);
 
-  // Synchronous XMLHttp Delete on tab/browser close to clean up presence immediately
+  // Clean up presence immediately on tab/browser close using fetch keepalive
   useEffect(() => {
     const handleUnload = () => {
       if (currentRoom) {
         const myId = getMyId();
         const rid = roomDocId(currentRoom);
         if (myId && rid) {
-          const xhr = new XMLHttpRequest();
           const url = `https://firestore.googleapis.com/v1/projects/skulk-45c23/databases/(default)/documents/rooms/${rid}/participants/${myId}`;
-          xhr.open('DELETE', url, false);
-          xhr.send();
+          fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
         }
       }
     };
@@ -2016,6 +2056,27 @@ export default function App() {
           {/* Rooms Tab Content */}
           {activeTab === 'rooms' ? (
             <div>
+              {isFirestoreBlocked && (
+                <div className="animate-fade-in" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.15)',
+                  borderRadius: 'var(--border-radius)',
+                  padding: '12px 16px',
+                  marginBottom: '24px',
+                  color: '#ef4444',
+                  fontSize: '13px',
+                  lineHeight: '1.5'
+                }}>
+                  <span style={{ fontSize: '18px' }}>⚠️</span>
+                  <span>
+                    <strong>Firebase permissions blocked:</strong> Rooms and chat are operating in local offline fallback mode. Rooms you create will only be visible in this browser window. To enable real-time synchronization, please update your <strong>Firestore Security Rules</strong> in the Firebase Console to allow public access.
+                  </span>
+                </div>
+              )}
+
               {/* Search & Create Row */}
               <div className="filter-row">
                 <div className="search-input-wrapper">
