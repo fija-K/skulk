@@ -23,6 +23,7 @@ interface Room {
   scheduledDate?: string;
   scheduledTime?: string;
   link?: string;
+  creatorId?: string; // Room creator is the Admin
   createdAt?: string;
 }
 
@@ -39,6 +40,7 @@ interface Participant {
   sharing?: 'youtube' | 'whiteboard' | 'screen' | null;
   sharingYoutubeId?: string | null;
   whiteboardData?: string;
+  role?: 'admin' | 'host' | 'cohost' | 'member'; // admin, host, cohost, member
 }
 
 type ViewingShare = {
@@ -382,6 +384,7 @@ export default function App() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
 
   // Client-side garbage collection for empty custom rooms older than 3 minutes
@@ -713,6 +716,7 @@ export default function App() {
     if (!myId || !roomIdToLeave) return;
     try {
       await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
+      // Delete any signals associated with this user
       const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
       const snapshot = await getDocs(signalsRef);
       snapshot.forEach(async (docSnap) => {
@@ -722,6 +726,8 @@ export default function App() {
           } catch (e) {}
         }
       });
+      // Delete my join request doc if any exists
+      await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
     } catch (e) {
       console.error('Error removing presence document:', e);
     }
@@ -753,22 +759,18 @@ export default function App() {
       return;
     }
 
+    const myId = getMyId();
+    const isCreator = room.creatorId === myId;
+
     if (room.type === 'public') {
       window.open(`/room/${id}`, '_blank');
     } else if (room.type === 'public-ask') {
-      // 1. Show waiting dialog banner
-      setPendingJoinRoom(room);
-      
-      // 2. Simulate host auto-approval after 2.5 seconds
-      setTimeout(() => {
-        setPendingJoinRoom(prev => {
-          if (prev && prev.id === room.id) {
-            window.open(`/room/${id}`, '_blank');
-            showToast(`Host approved request! Joined "${room.name}"`);
-          }
-          return null; // Clears pending join state
-        });
-      }, 2500);
+      if (isCreator) {
+        window.open(`/room/${id}`, '_blank');
+      } else {
+        // Show waiting modal triggering the request status useEffect
+        setPendingJoinRoom(room);
+      }
     }
   };
 
@@ -777,6 +779,7 @@ export default function App() {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     if (myId) {
+      const myRole = normalizedRoom.creatorId === myId ? 'admin' : 'member';
       try {
         const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
         await setDoc(presenceRef, {
@@ -787,6 +790,7 @@ export default function App() {
           color: guestColor,
           joinedAt: new Date().toISOString(),
           sharing: null,
+          role: myRole
         });
       } catch (err) {
         console.warn("Failed to set presence in Firestore, joining locally:", err);
@@ -860,6 +864,19 @@ export default function App() {
   };
 
   const handleLeaveCall = () => {
+    if (currentRoom) {
+      const prevRoomId = roomDocId(currentRoom);
+      leavePresence(prevRoomId);
+      clearMySharing();
+      setCurrentRoom(null);
+      setCallParticipants([]);
+      setChatMessages([]);
+      setViewingShare(null);
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        setLocalStream(null);
+      }
+    }
     navigate('/');
   };
 
@@ -901,13 +918,32 @@ export default function App() {
           link: `http://skulk.vercel.app/room/${roomId}`
         };
         
-        canJoin(roomObj).then(allowed => {
-          if (allowed) {
-            enterCallRoom(roomObj);
-          } else {
+        canJoin(roomObj).then(async (allowed) => {
+          if (!allowed) {
             showToast(`This room is full (${roomObj.maxParticipants}/${roomObj.maxParticipants})`);
             navigate('/');
+            return;
           }
+          
+          const myId = getMyId();
+          const isCreator = roomObj.creatorId === myId;
+          
+          if (roomObj.type === 'public-ask' && !isCreator) {
+            // Halt user and verify presence status in participants collection
+            const presenceRef = collection(db, 'rooms', roomObj.id, 'participants');
+            try {
+              const snapshot = await getDocs(presenceRef);
+              const isAlreadyApproved = snapshot.docs.some(docSnap => docSnap.id === myId);
+              if (!isAlreadyApproved) {
+                setPendingJoinRoom(roomObj);
+                return;
+              }
+            } catch (e) {
+              console.warn("Direct link capacity verification failed, joining room.");
+            }
+          }
+          
+          enterCallRoom(roomObj);
         });
       }
     } else {
@@ -1144,6 +1180,7 @@ export default function App() {
         }
       }
       
+      const myRole = currentRoom.creatorId === myId ? 'admin' : 'member';
       const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,
@@ -1151,7 +1188,8 @@ export default function App() {
         photoURL: user ? user.photoURL : null,
         initials: guestInitials,
         color: guestColor,
-        joinedAt: new Date().toISOString()
+        joinedAt: new Date().toISOString(),
+        role: myRole
       }, { merge: true });
     };
     
@@ -1196,11 +1234,20 @@ export default function App() {
           isCamOff: isMe ? isCamOff : (data.isCamOff ?? false),
           isSpeaking: false,
           isPinned: false,
+          role: data.role || (currentRoom.creatorId === docSnap.id ? 'admin' : 'member'),
           sharing: data.sharing || null,
           sharingYoutubeId: data.sharingYoutubeId || null,
           whiteboardData: data.whiteboardData,
         } as Participant;
       });
+
+      // Kick detection: If we are inside the call and our presence document was deleted
+      const meStillInRoom = list.some(p => p.id === myId);
+      if (myId && !meStillInRoom) {
+        showToast("❌ You have been removed from the room by a host.");
+        handleLeaveCall();
+        return;
+      }
       
       setCallParticipants(list);
     }, (error) => {
@@ -1215,14 +1262,118 @@ export default function App() {
           isMuted: isMicMuted,
           isCamOff: isCamOff,
           isSpeaking: false,
-          isPinned: false
+          isPinned: false,
+          role: currentRoom.creatorId === myId ? 'admin' : 'member'
         }
       ]);
     });
     
     return () => unsubscribe();
   }, [currentRoom, user, guestId, isMicMuted, isCamOff]);
+  // Synchronize remote mute actions with local microphone state
+  useEffect(() => {
+    if (!currentRoom) return;
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    if (myPresence && myPresence.isMuted !== isMicMuted) {
+      setIsMicMuted(myPresence.isMuted);
+      if (localStream) {
+        localStream.getAudioTracks().forEach(track => {
+          track.enabled = !myPresence.isMuted;
+        });
+      }
+      showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
+    }
+  }, [callParticipants, currentRoom, isMicMuted, localStream]);
 
+  // Listen to pending join requests (for Admin, Host, Co-host)
+  useEffect(() => {
+    if (!currentRoom) return;
+    const myId = getMyId();
+    const myRole = callParticipants.find(p => p.id === myId)?.role || 'member';
+    
+    if (myRole !== 'admin' && myRole !== 'host' && myRole !== 'cohost') {
+      setPendingRequests([]);
+      return;
+    }
+    
+    const rid = roomDocId(currentRoom);
+    const requestsRef = collection(db, 'rooms', rid, 'joinRequests');
+    
+    const unsubscribe = onSnapshot(requestsRef, (snapshot) => {
+      const reqList = snapshot.docs
+        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+        .filter((req: any) => req.status === 'pending');
+      setPendingRequests(reqList);
+    });
+    
+    return () => unsubscribe();
+  }, [currentRoom, callParticipants]);
+
+  // Listen to the local user's own join request status (when waiting to join)
+  useEffect(() => {
+    if (!pendingJoinRoom) return;
+    const myId = getMyId();
+    const rid = roomDocId(pendingJoinRoom);
+    
+    const reqDoc = doc(db, 'rooms', rid, 'joinRequests', myId);
+    setDoc(reqDoc, {
+      id: myId,
+      uid: myId,
+      name: user ? user.displayName || 'Google User' : guestName,
+      initials: guestInitials,
+      color: guestColor,
+      status: 'pending',
+      requestedAt: new Date().toISOString()
+    }).catch(e => console.warn("Failed to create join request:", e));
+    
+    const unsubscribe = onSnapshot(reqDoc, (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (data.status === 'approved') {
+        const targetRoom = pendingJoinRoom;
+        setPendingJoinRoom(null);
+        if (window.location.pathname.startsWith('/room/')) {
+          enterCallRoom(targetRoom);
+        } else {
+          window.open(`/room/${targetRoom.id}`, '_blank');
+        }
+      } else if (data.status === 'denied') {
+        setPendingJoinRoom(null);
+        showToast(`❌ Join request was denied by the hosts.`);
+        if (window.location.pathname.startsWith('/room/')) {
+          navigate('/');
+        }
+      }
+    });
+    
+    return () => {
+      unsubscribe();
+      deleteDoc(reqDoc).catch(() => {});
+    };
+  }, [pendingJoinRoom, user, guestName, guestInitials, guestColor]);
+
+  const handleApproveRequest = async (req: any) => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    try {
+      await setDoc(doc(db, 'rooms', rid, 'joinRequests', req.id), { status: 'approved' }, { merge: true });
+      showToast(`Accepted ${req.name}'s request.`);
+    } catch (e) {
+      console.warn("Failed to approve request:", e);
+    }
+  };
+
+  const handleDenyRequest = async (req: any) => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    try {
+      await setDoc(doc(db, 'rooms', rid, 'joinRequests', req.id), { status: 'denied' }, { merge: true });
+      showToast(`Denied ${req.name}'s request.`);
+    } catch (e) {
+      console.warn("Failed to deny request:", e);
+    }
+  };
   // Real-time synchronization of room document updates (Pomodoro, etc.)
   useEffect(() => {
     if (!currentRoom) return;
@@ -1968,6 +2119,7 @@ export default function App() {
       participants: [], 
       maxParticipants: roomDetails.maxParticipants,
       link: roomDetails.link,
+      creatorId: getMyId(),
       createdAt: new Date().toISOString()
     };
 
@@ -2060,15 +2212,18 @@ export default function App() {
   };
 
   // Co-host control triggers (Mute, Pin, Remove)
-  const handleParticipantMuteToggle = (id: string, name: string) => {
-    setCallParticipants(prev => prev.map(p => {
-      if (p.id === id) {
-        const nextMute = !p.isMuted;
-        showToast(nextMute ? `Muted ${name}` : `Unmuted ${name}`);
-        return { ...p, isMuted: nextMute };
-      }
-      return p;
-    }));
+  const handleParticipantMuteToggle = async (id: string, name: string) => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    const target = callParticipants.find(p => p.id === id);
+    if (!target) return;
+    const nextMute = !target.isMuted;
+    try {
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isMuted: nextMute });
+      showToast(nextMute ? `Muted ${name}` : `Unmuted ${name}`);
+    } catch (e) {
+      console.warn("Failed to toggle remote mute in Firestore:", e);
+    }
     setActiveMenuParticipantId(null);
   };
 
@@ -2084,9 +2239,38 @@ export default function App() {
     setActiveMenuParticipantId(null);
   };
 
-  const handleParticipantRemove = (id: string, name: string) => {
-    setCallParticipants(prev => prev.filter(p => p.id !== id));
-    showToast(`Removed ${name} from room`);
+  const handleParticipantRemove = async (id: string, name: string) => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    try {
+      await deleteDoc(doc(db, 'rooms', rid, 'participants', id));
+      const signalsRef = collection(db, 'rooms', rid, 'signals');
+      const snapshot = await getDocs(signalsRef);
+      snapshot.forEach(async (docSnap) => {
+        if (docSnap.id.includes(id)) {
+          try {
+            await deleteDoc(docSnap.ref);
+          } catch (e) {}
+        }
+      });
+      showToast(`Kicked ${name} from room`);
+    } catch (e) {
+      console.warn("Failed to kick participant from Firestore:", e);
+      setCallParticipants(prev => prev.filter(p => p.id !== id));
+      showToast(`Removed ${name} from room`);
+    }
+    setActiveMenuParticipantId(null);
+  };
+
+  const handleParticipantRoleChange = async (id: string, newRole: 'host' | 'cohost' | 'member') => {
+    if (!currentRoom) return;
+    const rid = roomDocId(currentRoom);
+    try {
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { role: newRole });
+      showToast(`Updated role to ${newRole}`);
+    } catch (e) {
+      console.warn("Failed to update role in Firestore:", e);
+    }
     setActiveMenuParticipantId(null);
   };
 
@@ -2840,6 +3024,45 @@ export default function App() {
               ) : (
                 /* Standard conference participants grid layout display */
                 <>
+                  {pendingRequests.length > 0 && (
+                    <div className="animate-fade-in" style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                      backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                      border: '1px solid rgba(59, 130, 246, 0.15)',
+                      borderRadius: 'var(--border-radius)',
+                      padding: '16px',
+                      marginBottom: '24px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '18px' }}>🔔</span>
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          Pending Join Requests ({pendingRequests.length})
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                        {pendingRequests.map((req) => (
+                          <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--card-bg, #1a1c23)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ backgroundColor: req.color || '#3b82f6', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: '#fff' }}>
+                                {req.initials || 'P'}
+                              </div>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{req.name}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button onClick={() => handleApproveRequest(req)} className="btn-create" style={{ padding: '4px 10px', fontSize: '12px' }}>
+                                Accept
+                              </button>
+                              <button onClick={() => handleDenyRequest(req)} className="btn-signin" style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
+                                Deny
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}>
                     {callParticipants.map((p) => {
                       const isUser = p.id === getMyId();
@@ -2913,8 +3136,34 @@ export default function App() {
                           </div>
                           
                           {/* Name Tag + Muted Status */}
-                          <div className="participant-name-tag">
+                          <div className="participant-name-tag" style={{ gap: '6px' }}>
                             <span>{p.name}</span>
+                            {p.role && p.role !== 'member' && (
+                              <span className={`role-tag-${p.role}`} style={{
+                                fontSize: '9px',
+                                fontWeight: 'bold',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                textTransform: 'uppercase',
+                                border: '1px solid',
+                                lineHeight: '1.2',
+                                ...p.role === 'admin' ? {
+                                  backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                                  borderColor: 'var(--primary-color, #f1c40f)',
+                                  color: 'var(--primary-color, #f1c40f)'
+                                } : p.role === 'host' ? {
+                                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                  borderColor: '#3b82f6',
+                                  color: '#3b82f6'
+                                } : {
+                                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                  borderColor: '#10b981',
+                                  color: '#10b981'
+                                }
+                              }}>
+                                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                              </span>
+                            )}
                             {showMuted && (
                               <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                 <line x1="1" y1="1" x2="23" y2="23"></line>
@@ -2932,8 +3181,10 @@ export default function App() {
                             )}
                           </div>
 
-                          {/* Host Actions Hover Trigger Menu (Not visible for yourself) */}
-                          {!isUser && (
+                          {/* Host Actions Hover Trigger Menu (Only visible for admin, host, co-host) */}
+                          {!isUser && (callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
+                                       callParticipants.find(part => part.id === getMyId())?.role === 'host' || 
+                                       callParticipants.find(part => part.id === getMyId())?.role === 'cohost') && (
                             <div ref={sidebarMenuRef}>
                               <button 
                                 onClick={() => setActiveMenuParticipantId(activeMenuParticipantId === p.id ? null : p.id)}
@@ -2949,26 +3200,90 @@ export default function App() {
                               
                               {/* Option Dropdown List */}
                               {activeMenuParticipantId === p.id && (
-                                <div className="tile-actions-menu animate-fade-in">
-                                  <button 
-                                    onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
-                                    className="tile-menu-item"
-                                  >
-                                    {p.isMuted ? 'Unmute' : 'Mute'}
-                                  </button>
+                                <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }}>
+                                  {/* Mute action: Admin, Host can mute anyone. Cohost mutes member. */}
+                                  {((callParticipants.find(part => part.id === getMyId())?.role === 'admin') || 
+                                    (callParticipants.find(part => part.id === getMyId())?.role === 'host' && p.role !== 'admin') || 
+                                    (callParticipants.find(part => part.id === getMyId())?.role === 'cohost' && p.role === 'member')) && (
+                                    <button 
+                                      onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
+                                      className="tile-menu-item"
+                                    >
+                                      {p.isMuted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                  )}
+                                  
+                                  {/* Pin action */}
                                   <button 
                                     onClick={() => handleParticipantPinToggle(p.id, p.name)} 
                                     className="tile-menu-item"
                                   >
                                     {p.isPinned ? 'Unpin' : 'Pin'}
                                   </button>
-                                  <button 
-                                    onClick={() => handleParticipantRemove(p.id, p.name)} 
-                                    className="tile-menu-item" 
-                                    style={{ color: '#ef4444' }}
-                                  >
-                                    Remove
-                                  </button>
+                                  
+                                  {/* Role Promotion/Demotion Actions (Admin only can do anything. Host can promote to co-host/demote co-host) */}
+                                  {callParticipants.find(part => part.id === getMyId())?.role === 'admin' && (
+                                    <>
+                                      {p.role !== 'host' && (
+                                        <button 
+                                          onClick={() => handleParticipantRoleChange(p.id, 'host')} 
+                                          className="tile-menu-item"
+                                        >
+                                          Make Host
+                                        </button>
+                                      )}
+                                      {p.role !== 'cohost' && (
+                                        <button 
+                                          onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
+                                          className="tile-menu-item"
+                                        >
+                                          Make Co-host
+                                        </button>
+                                      )}
+                                      {p.role !== 'member' && (
+                                        <button 
+                                          onClick={() => handleParticipantRoleChange(p.id, 'member')} 
+                                          className="tile-menu-item"
+                                        >
+                                          Demote to Member
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {callParticipants.find(part => part.id === getMyId())?.role === 'host' && (
+                                    <>
+                                      {p.role === 'member' && (
+                                        <button 
+                                          onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
+                                          className="tile-menu-item"
+                                        >
+                                          Make Co-host
+                                        </button>
+                                      )}
+                                      {p.role === 'cohost' && (
+                                        <button 
+                                          onClick={() => handleParticipantRoleChange(p.id, 'member')} 
+                                          className="tile-menu-item"
+                                        >
+                                          Demote to Member
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {/* Kick action */}
+                                  {((callParticipants.find(part => part.id === getMyId())?.role === 'admin') || 
+                                    (callParticipants.find(part => part.id === getMyId())?.role === 'host' && p.role !== 'admin' && p.role !== 'host') || 
+                                    (callParticipants.find(part => part.id === getMyId())?.role === 'cohost' && p.role === 'member')) && (
+                                    <button 
+                                      onClick={() => handleParticipantRemove(p.id, p.name)} 
+                                      className="tile-menu-item" 
+                                      style={{ color: '#ef4444' }}
+                                    >
+                                      Kick out
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -3092,9 +3407,35 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-                            <div className="person-name-wrapper">
+                            <div className="person-name-wrapper" style={{ display: 'flex', alignItems: 'center' }}>
                               <span className="person-name">{p.name}</span>
-                              {p.isHost && <span className="person-badge">Host</span>}
+                              {p.role && p.role !== 'member' && (
+                                <span className={`role-badge-${p.role}`} style={{
+                                  fontSize: '9px',
+                                  fontWeight: 'bold',
+                                  padding: '1px 4px',
+                                  borderRadius: '3px',
+                                  border: '1px solid',
+                                  textTransform: 'uppercase',
+                                  lineHeight: '1',
+                                  marginLeft: '6px',
+                                  ...p.role === 'admin' ? {
+                                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                                    borderColor: 'var(--primary-color, #f1c40f)',
+                                    color: 'var(--primary-color, #f1c40f)'
+                                  } : p.role === 'host' ? {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                    borderColor: '#3b82f6',
+                                    color: '#3b82f6'
+                                  } : {
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    borderColor: '#10b981',
+                                    color: '#10b981'
+                                  }
+                                }}>
+                                  {p.role === 'admin' ? 'Admin' : p.role === 'host' ? 'Host' : 'Co-host'}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div className="person-status-icons">
