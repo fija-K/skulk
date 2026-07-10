@@ -394,6 +394,9 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const hasSeenSelfInListRef = useRef(false);
+  const [iceServersConfig, setIceServersConfig] = useState<RTCIceServer[]>([
+    { urls: 'stun:stun.l.google.com:19302' }
+  ]);
 
   // Helper to determine role dynamically based on auth email and room creator
   const determineRole = (roomCreatorId?: string) => {
@@ -539,6 +542,24 @@ export default function App() {
       }));
     }
   }, [guestName, guestColor, guestInitials, currentRoom]);
+
+  // Fetch TURN credentials from serverless api on mount
+  useEffect(() => {
+    const fetchIceServers = async () => {
+      try {
+        const response = await fetch('/api/turn-credentials');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.iceServers) {
+            setIceServersConfig(data.iceServers);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch dynamic TURN credentials, using default STUN fallback:", err);
+      }
+    };
+    fetchIceServers();
+  }, []);
 
   // Click outside handlers
   useEffect(() => {
@@ -1086,7 +1107,7 @@ export default function App() {
       if (pcsRef.current[peerId]) return; // Already connected or connecting
       
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: iceServersConfig
       });
       pcsRef.current[peerId] = pc;
       
@@ -1220,7 +1241,7 @@ export default function App() {
     return () => {
       unsubscribes.forEach(unsub => unsub());
     };
-  }, [currentRoom, localStream, callParticipants]);
+  }, [currentRoom, localStream, callParticipants, iceServersConfig]);
 
   // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
