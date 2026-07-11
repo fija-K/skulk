@@ -487,6 +487,10 @@ function AppContent() {
   const roomSettingsRef = useRef<HTMLDivElement>(null);
   const isEvictedRef = useRef(false);
 
+  // Picture-in-Picture floating mini-mode state
+  const [pipTool, setPipTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'spin' | 'truthordare'>('none');
+  const [pipPosition, setPipPosition] = useState<{ x: number; y: number } | null>(null);
+
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
 
@@ -1157,7 +1161,20 @@ function AppContent() {
       setViewingShare(null);
       setLiveKitToken(null);
     }
+    setPipTool('none'); // Clear PiP on leave
     navigate('/');
+  };
+
+  const handleToggleExpandTool = (tool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin') => {
+    if (expandedTool === tool) {
+      setExpandedTool('none');
+      if (tool !== 'none') {
+        setPipTool(tool);
+      }
+    } else {
+      setExpandedTool(tool);
+      setPipTool('none');
+    }
   };
 
   const toggleMic = async () => {
@@ -4074,6 +4091,251 @@ function AppContent() {
     );
   };
 
+  const renderPipWindow = () => {
+    if (pipTool === 'none') return null;
+
+    const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+      // Don't drag if they clicked buttons
+      if ((e.target as HTMLElement).closest('button')) return;
+      e.preventDefault();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const pipEl = e.currentTarget.parentElement;
+      if (!pipEl) return;
+
+      const rect = pipEl.getBoundingClientRect();
+      const initialLeft = rect.left;
+      const initialTop = rect.top;
+
+      const parentEl = pipEl.offsetParent as HTMLElement;
+      if (!parentEl) return;
+      const parentRect = parentEl.getBoundingClientRect();
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        let newLeft = initialLeft - parentRect.left + dx;
+        let newTop = initialTop - parentRect.top + dy;
+
+        // Clamping to parent container bounds
+        const maxLeft = parentRect.width - rect.width;
+        const maxTop = parentRect.height - rect.height;
+        newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+        newTop = Math.max(0, Math.min(maxTop, newTop));
+
+        setPipPosition({ x: newLeft, y: newTop });
+      };
+
+      const handleMouseUp = () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    };
+
+    const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      const touch = e.touches[0];
+      const startX = touch.clientX;
+      const startY = touch.clientY;
+      const pipEl = e.currentTarget.parentElement;
+      if (!pipEl) return;
+
+      const rect = pipEl.getBoundingClientRect();
+      const initialLeft = rect.left;
+      const initialTop = rect.top;
+
+      const parentEl = pipEl.offsetParent as HTMLElement;
+      if (!parentEl) return;
+      const parentRect = parentEl.getBoundingClientRect();
+
+      const handleTouchMove = (moveEvent: TouchEvent) => {
+        const t = moveEvent.touches[0];
+        const dx = t.clientX - startX;
+        const dy = t.clientY - startY;
+        let newLeft = initialLeft - parentRect.left + dx;
+        let newTop = initialTop - parentRect.top + dy;
+
+        const maxLeft = parentRect.width - rect.width;
+        const maxTop = parentRect.height - rect.height;
+        newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+        newTop = Math.max(0, Math.min(maxTop, newTop));
+
+        setPipPosition({ x: newLeft, y: newTop });
+      };
+
+      const handleTouchEnd = () => {
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
+      };
+
+      window.addEventListener('touchmove', handleTouchMove, { passive: true });
+      window.addEventListener('touchend', handleTouchEnd);
+    };
+
+    const handleRestore = () => {
+      setExpandedTool(pipTool);
+      setPipTool('none');
+    };
+
+    const handleClose = () => {
+      setPipTool('none');
+    };
+
+    // Compact views based on tool type
+    let content = null;
+    let toolIcon = '⏱️';
+    if (pipTool === 'pomodoro') {
+      toolIcon = '⏱️';
+      content = (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '8px' }}>
+          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 800 }}>
+            {pomodoroPhase === 'focus' ? 'Focus Phase' : 'Break Phase'}
+          </span>
+          <span style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
+            {pomodoroMinutes.toString().padStart(2, '0')}:{pomodoroSeconds.toString().padStart(2, '0')}
+          </span>
+          <button 
+            onClick={togglePomodoro} 
+            className="btn-signin"
+            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
+          >
+            {pomodoroIsRunning ? 'Pause' : 'Start'}
+          </button>
+        </div>
+      );
+    } else if (pipTool === 'deadline') {
+      toolIcon = '⏳';
+      const currentStep = deadlineSteps[deadlineActiveIndex];
+      const stepName = currentStep ? `${deadlineActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+      content = (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px' }}>
+          <span 
+            style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}
+            title={stepName}
+          >
+            {stepName}
+          </span>
+          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
+            {deadlineTimerMinutes.toString().padStart(2, '0')}:{deadlineTimerSeconds.toString().padStart(2, '0')}
+          </span>
+          <button 
+            onClick={() => setDeadlineIsRunning(!deadlineIsRunning)} 
+            className="btn-signin"
+            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
+          >
+            {deadlineIsRunning ? 'Pause' : 'Start'}
+          </button>
+        </div>
+      );
+    } else if (pipTool === 'loose') {
+      toolIcon = '🔄';
+      const currentStep = looseSteps[looseActiveIndex];
+      const stepName = currentStep ? `${looseActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+      content = (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px' }}>
+          <span 
+            style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}
+            title={stepName}
+          >
+            {stepName}
+          </span>
+          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
+            {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:{Math.floor(looseTimerSeconds % 60).toString().padStart(2, '0')}
+          </span>
+          <button 
+            onClick={() => setLooseIsRunning(!looseIsRunning)} 
+            className="btn-signin"
+            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
+          >
+            {looseIsRunning ? 'Pause' : 'Start'}
+          </button>
+        </div>
+      );
+    } else if (pipTool === 'spin') {
+      toolIcon = '🎡';
+      const lastSelectedName = spinResult ? (callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant') : null;
+      content = (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800 }}>
+            {lastSelectedName ? `Landed on: ${lastSelectedName}` : 'Ready to spin'}
+          </span>
+          <button 
+            onClick={handleRestore} 
+            className="btn-signin"
+            style={{ width: '100px', height: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, backgroundColor: 'var(--primary-color)', color: '#0f1013', border: 'none', fontSize: '10px' }}
+          >
+            Spin Wheel
+          </button>
+        </div>
+      );
+    } else if (pipTool === 'truthordare') {
+      toolIcon = '🎲';
+      const selectedUser = callParticipants.find(p => p.id === todSelectedId);
+      const titleText = selectedUser && todChoice ? `${selectedUser.name.replace(' (You)', '')} — ${todChoice}` : 'No turn active';
+      content = (
+        <div 
+          onClick={handleRestore}
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '4px', cursor: 'pointer', padding: '0 8px' }}
+          title="Click to view full prompt"
+        >
+          <span style={{ fontSize: '10px', color: 'var(--primary-color)', fontWeight: 800 }}>
+            {titleText}
+          </span>
+          <span style={{ fontSize: '10px', color: 'var(--text-primary)', fontStyle: 'italic', textAlign: 'center', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3 }}>
+            {todText ? `"${todText}"` : 'No prompt selected yet. Click to expand.'}
+          </span>
+        </div>
+      );
+    }
+
+    const positionStyle = pipPosition 
+      ? { left: `${pipPosition.x}px`, top: `${pipPosition.y}px` }
+      : { right: '24px', bottom: '96px' };
+
+    return (
+      <div 
+        className="pip-window-container animate-fade-in"
+        style={{ ...positionStyle }}
+      >
+        <div 
+          className="pip-header"
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>{toolIcon}</span>
+            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Mini View
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button onClick={handleRestore} className="pip-btn" title="Restore to Stage">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <line x1="21" y1="3" x2="14" y2="10"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+              </svg>
+            </button>
+            <button onClick={handleClose} className="pip-btn close" title="Close Mini View">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="pip-content">
+          {content}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-container">
       
@@ -4491,8 +4753,8 @@ function AppContent() {
             <LiveKitRoom
               token={liveKitToken}
               serverUrl={import.meta.env.VITE_LIVEKIT_URL}
-              audio={!isMicMuted}
-              video={!isCamOff}
+              audio={false}
+              video={false}
               style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', width: '100%', overflow: 'hidden' }}
             >
             <DeviceRecoveryManager 
@@ -4703,7 +4965,7 @@ function AppContent() {
                       </span>
                     </div>
                     <button 
-                      onClick={() => setExpandedTool('none')} 
+                      onClick={() => handleToggleExpandTool(expandedTool)} 
                       className="btn-signin" 
                       style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
                       title="Collapse to sidebar"
@@ -5589,7 +5851,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Pomodoro Timer</span>
                           <button 
-                            onClick={() => setExpandedTool(expandedTool === 'pomodoro' ? 'none' : 'pomodoro')} 
+                            onClick={() => handleToggleExpandTool('pomodoro')} 
                             className={`tools-expand-btn ${expandedTool === 'pomodoro' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -5740,7 +6002,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Deadline Clock</span>
                           <button 
-                            onClick={() => setExpandedTool(expandedTool === 'deadline' ? 'none' : 'deadline')} 
+                            onClick={() => handleToggleExpandTool('deadline')} 
                             className={`tools-expand-btn ${expandedTool === 'deadline' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -5768,7 +6030,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Loose Timer</span>
                           <button 
-                            onClick={() => setExpandedTool(expandedTool === 'loose' ? 'none' : 'loose')} 
+                            onClick={() => handleToggleExpandTool('loose')} 
                             className={`tools-expand-btn ${expandedTool === 'loose' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -5796,7 +6058,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Truth or Dare</span>
                           <button 
-                            onClick={() => setExpandedTool(expandedTool === 'truthordare' ? 'none' : 'truthordare')} 
+                            onClick={() => handleToggleExpandTool('truthordare')} 
                             className={`tools-expand-btn ${expandedTool === 'truthordare' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -5824,7 +6086,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Spin the Wheel</span>
                           <button 
-                            onClick={() => setExpandedTool(expandedTool === 'spin' ? 'none' : 'spin')} 
+                            onClick={() => handleToggleExpandTool('spin')} 
                             className={`tools-expand-btn ${expandedTool === 'spin' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -5945,6 +6207,8 @@ function AppContent() {
             )}
 
           </div>
+
+          {renderPipWindow()}
 
         </LiveKitRoom>
           </div>
@@ -6178,19 +6442,19 @@ function AppContent() {
                       type="number" 
                       id="maxParticipants" 
                       min="0" 
-                      max="100"
+                      max="10"
                       className="search-input"
                       style={{ textAlign: 'center', flex: 1, padding: '0' }}
                       value={newMaxParticipants}
                       onChange={(e) => {
                         const val = parseInt(e.target.value);
-                        setNewMaxParticipants(isNaN(val) ? 0 : val);
+                        setNewMaxParticipants(isNaN(val) ? 0 : Math.min(10, val));
                       }}
                       required
                     />
                     <button 
                       type="button"
-                      onClick={() => setNewMaxParticipants(Math.min(100, newMaxParticipants + 1))}
+                      onClick={() => setNewMaxParticipants(Math.min(10, newMaxParticipants + 1))}
                       style={{ width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
