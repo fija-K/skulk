@@ -1903,3 +1903,13 @@ html.theme-webslinger .pomodoro-timer-circle.active-focus { border-color: #e11d4
   border-color: rgba(59, 130, 246, 0.2);
 }
 
+
+/* Hide number input arrows */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}

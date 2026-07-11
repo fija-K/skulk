@@ -4869,20 +4869,42 @@ function AppContent() {
                 {/* Max Participants Input */}
                 <div className="form-group" style={{ marginBottom: '28px' }}>
                   <label htmlFor="maxParticipants" className="form-label">Max participants</label>
-                  <input 
-                    type="number" 
-                    id="maxParticipants" 
-                    min="0" 
-                    max="100"
-                    className="search-input"
-                    style={{ paddingLeft: '16px' }}
-                    value={newMaxParticipants}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      setNewMaxParticipants(isNaN(val) ? 0 : val);
-                    }}
-                    required
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button 
+                      type="button"
+                      onClick={() => setNewMaxParticipants(Math.max(0, newMaxParticipants - 1))}
+                      style={{ width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <input 
+                      type="number" 
+                      id="maxParticipants" 
+                      min="0" 
+                      max="100"
+                      className="search-input"
+                      style={{ textAlign: 'center', flex: 1, padding: '0' }}
+                      value={newMaxParticipants}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setNewMaxParticipants(isNaN(val) ? 0 : val);
+                      }}
+                      required
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setNewMaxParticipants(Math.min(100, newMaxParticipants + 1))}
+                      style={{ width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                  </div>
+                  {newMaxParticipants === 0 && (
+                    <div style={{ color: '#ef4444', fontSize: '13px', marginTop: '8px', fontWeight: 500 }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline', marginRight: '4px', verticalAlign: 'text-bottom' }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                      At least 1 participant is required.
+                    </div>
+                  )}
                 </div>
 
                 {/* Bottom Create Button */}
