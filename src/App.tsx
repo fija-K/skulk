@@ -890,6 +890,7 @@ function AppContent() {
 
   const leavePresence = async (roomIdToLeave: string, sessionIdToDelete?: string | null) => {
     const myId = getMyId();
+    console.log("leavePresence called:", { roomIdToLeave, sessionIdToDelete, myId });
     if (!myId || !roomIdToLeave) return;
 
     const performLeave = async () => {
@@ -900,11 +901,15 @@ function AppContent() {
           const snap = await transaction.get(presenceDocRef);
           if (snap.exists()) {
             const data = snap.data();
+            console.log("leavePresence transaction evaluate:", { storedSessionId: data.sessionId, sessionIdToDelete });
             if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
+              console.log("leavePresence transaction deleting presence:", myId);
               transaction.delete(presenceDocRef);
             } else {
               console.log('leavePresence bypassed: presence belongs to a newer session (transaction).');
             }
+          } else {
+            console.log("leavePresence transaction: presence doc does not exist.");
           }
         });
 
@@ -994,6 +999,7 @@ function AppContent() {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     const newSessionId = Math.random().toString(36).substring(2, 10);
+    console.log("enterCallRoom executing:", { roomId: normalizedRoom.id, myId, newSessionId });
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
@@ -1245,11 +1251,18 @@ function AppContent() {
 
       // Kick detection: Only trigger if we have seen ourselves in the active list first to prevent join race conditions
       const meStillInRoom = list.some(p => p.id === myId);
+      console.log("Kick check snapshot list:", {
+        myId,
+        meStillInRoom,
+        hasSeenSelf: hasSeenSelfInListRef.current,
+        listIds: list.map(p => p.id)
+      });
       if (myId && meStillInRoom) {
         hasSeenSelfInListRef.current = true;
       }
       
       if (myId && hasSeenSelfInListRef.current && !meStillInRoom) {
+        console.log("Kicking user out! meStillInRoom is false, hasSeenSelf is true.");
         showToast("❌ You have been removed from the room by a host.");
         handleLeaveCall();
         return;
