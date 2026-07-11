@@ -20,7 +20,8 @@ import {
   VideoTrack,
   useTracks,
   RoomAudioRenderer,
-  useLocalParticipant
+  useLocalParticipant,
+  useParticipants
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Track, ParticipantEvent } from 'livekit-client';
@@ -209,7 +210,7 @@ function DeviceRecoveryManager({
 
     checkTracks();
 
-    const onMediaError = (error: Error) => {
+    const onMediaError = async (error: Error) => {
       console.warn("Media devices error:", error);
       const errMsg = (error?.message || '').toLowerCase();
       const errName = (error?.name || '').toLowerCase();
@@ -232,12 +233,45 @@ function DeviceRecoveryManager({
 
       if (isAudio && !isVideo) {
         currentMicErr = true;
-      } else if (isVideo && !isAudio) {
+        reportErrors();
+        return;
+      } 
+      
+      if (isVideo && !isAudio) {
         currentCamErr = true;
-      } else {
-        // Fallback: only set if they are currently enabled/active
-        if (!isCamOff) currentCamErr = true;
-        if (!isMicMuted) currentMicErr = true;
+        reportErrors();
+        return;
+      }
+
+      // Fallback for generic/combined error events (e.g. NotAllowedError / Permission denied)
+      let micDenied = false;
+      let camDenied = false;
+      try {
+        const micPerm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (micPerm.state === 'denied') micDenied = true;
+      } catch (e) {}
+      try {
+        const camPerm = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        if (camPerm.state === 'denied') camDenied = true;
+      } catch (e) {}
+
+      if (camDenied) {
+        currentCamErr = true;
+      }
+      if (micDenied) {
+        currentMicErr = true;
+      }
+
+      // If neither is explicitly blocked, fallback only if the requested track is missing
+      if (!micDenied && !camDenied) {
+        const hasVideoTrack = !!localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+        if (!isCamOff && !hasVideoTrack) {
+          currentCamErr = true;
+        }
+        const hasAudioTrack = !!localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+        if (!isMicMuted && !hasAudioTrack) {
+          currentMicErr = true;
+        }
       }
       reportErrors();
     };
@@ -314,6 +348,567 @@ const dareQuestions = [
   "Act like a robot introducing themselves.",
   "Open your window (or door) and yell 'I love studying!' out loud."
 ];
+
+interface PipWindowContentProps {
+  myId: string;
+  isMicMuted: boolean;
+  isCamOff: boolean;
+  toggleMic: () => void;
+  toggleCamera: () => void;
+  toggleMiniMode: () => void;
+  handleLeaveCall: () => void;
+  miniModeTab: 'call' | 'tool';
+  setMiniModeTab: (tab: 'call' | 'tool') => void;
+  expandedTool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin';
+  setExpandedTool: (tool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin') => void;
+  callParticipants: Participant[];
+  pomodoroPhase: string;
+  pomodoroMinutes: number;
+  pomodoroSeconds: number;
+  pomodoroIsRunning: boolean;
+  togglePomodoro: () => void;
+  deadlineSteps: any[];
+  deadlineActiveIndex: number;
+  deadlineTimerMinutes: number;
+  deadlineTimerSeconds: number;
+  deadlineIsRunning: boolean;
+  setDeadlineIsRunning: (val: boolean) => void;
+  looseSteps: any[];
+  looseActiveIndex: number;
+  looseTimerSeconds: number;
+  looseIsRunning: boolean;
+  setLooseIsRunning: (val: boolean) => void;
+  spinResult: any;
+  handleSpinWheel: () => void;
+  todSelectedId: string;
+  todChoice: string | null;
+  todText: string;
+}
+
+function PipWindowContent({
+  myId,
+  isMicMuted,
+  isCamOff,
+  toggleMic,
+  toggleCamera,
+  toggleMiniMode,
+  handleLeaveCall,
+  miniModeTab,
+  setMiniModeTab,
+  expandedTool,
+  setExpandedTool,
+  callParticipants,
+  pomodoroPhase,
+  pomodoroMinutes,
+  pomodoroSeconds,
+  pomodoroIsRunning,
+  togglePomodoro,
+  deadlineSteps,
+  deadlineActiveIndex,
+  deadlineTimerMinutes,
+  deadlineTimerSeconds,
+  deadlineIsRunning,
+  setDeadlineIsRunning,
+  looseSteps,
+  looseActiveIndex,
+  looseTimerSeconds,
+  looseIsRunning,
+  setLooseIsRunning,
+  spinResult,
+  handleSpinWheel,
+  todSelectedId,
+  todChoice,
+  todText
+}: PipWindowContentProps) {
+  const remoteParticipants = useParticipants();
+  const { localParticipant } = useLocalParticipant();
+  const allLkParticipants = [localParticipant, ...remoteParticipants].filter(Boolean);
+
+  const lkActiveParticipants = allLkParticipants.map(lkPart => {
+    const meta = callParticipants.find(p => p.id === lkPart.identity);
+    return {
+      lkPart,
+      id: lkPart.identity,
+      name: meta?.name || lkPart.name || lkPart.identity,
+      initials: meta?.initials || 'U',
+      color: meta?.color || '#8b5cf6',
+      photoURL: meta?.photoURL,
+      role: meta?.role || 'member',
+      sharing: meta?.sharing || null,
+      isSpeaking: lkPart.isSpeaking,
+      isCamOn: lkPart.isCameraEnabled,
+      isMicMuted: !lkPart.isMicrophoneEnabled,
+    };
+  });
+
+  const hasOthers = lkActiveParticipants.length > 1;
+
+  const getParticipantScore = (p: any) => {
+    const isMe = p.id === myId;
+
+    if (isMe && hasOthers) {
+      return 0; // demote local user to bottom fallback
+    }
+
+    if (p.isSpeaking && !p.isMicMuted) {
+      return 100;
+    }
+    if (p.sharing && p.sharing !== 'none') {
+      return 90;
+    }
+    if (p.role === 'host') {
+      return 80;
+    }
+    if (p.role === 'cohost') {
+      return 70;
+    }
+    if (p.role === 'admin') {
+      return 60;
+    }
+    if (p.isCamOn) {
+      return 50;
+    }
+    return 20;
+  };
+
+  const sorted = [...lkActiveParticipants].sort((a, b) => {
+    const scoreA = getParticipantScore(a);
+    const scoreB = getParticipantScore(b);
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA;
+    }
+    return a.id.localeCompare(b.id);
+  });
+
+  const activeSpeaker = sorted[0];
+  const activeSpeakerCamOff = activeSpeaker ? !activeSpeaker.isCamOn : true;
+  const activeSpeakerMicMuted = activeSpeaker ? activeSpeaker.isMicMuted : true;
+
+  const showToolView = miniModeTab === 'tool' && expandedTool !== 'none';
+
+  return (
+    <div className="skulk-pip-window" style={{ 
+      width: '100vw', 
+      height: '100vh', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      backgroundColor: '#0f1013', 
+      color: '#ffffff', 
+      fontFamily: 'Inter, system-ui, sans-serif',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Top Switcher Bar */}
+      <div style={{
+        display: 'flex',
+        backgroundColor: '#16181d',
+        borderBottom: '1px solid #2d3139',
+        height: '32px',
+        alignItems: 'center',
+        padding: '0 8px',
+        gap: '4px',
+        flexShrink: 0
+      }}>
+        <button 
+          onClick={() => setMiniModeTab('call')}
+          style={{
+            flex: 1,
+            height: '24px',
+            backgroundColor: !showToolView ? '#2d3139' : 'transparent',
+            border: 'none',
+            borderRadius: '4px',
+            color: !showToolView ? '#f1c40f' : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px'
+          }}
+        >
+          <span>📞 Call</span>
+        </button>
+        <button 
+          onClick={() => {
+            if (expandedTool !== 'none') {
+              setMiniModeTab('tool');
+            }
+          }}
+          disabled={expandedTool === 'none'}
+          style={{
+            flex: 1,
+            height: '24px',
+            backgroundColor: showToolView ? '#2d3139' : 'transparent',
+            border: 'none',
+            borderRadius: '4px',
+            color: expandedTool === 'none' 
+              ? 'rgba(255, 255, 255, 0.15)' 
+              : showToolView 
+                ? '#f1c40f' 
+                : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: expandedTool === 'none' ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px'
+          }}
+        >
+          <span>⚙️ Tool</span>
+        </button>
+      </div>
+
+      {/* Main Viewport Content Area */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {!showToolView ? (
+          /* Call View */
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+            {activeSpeaker && !activeSpeakerCamOff ? (
+              <ParticipantVideo participantId={activeSpeaker.id} />
+            ) : (
+              <div style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                backgroundColor: activeSpeaker?.color || '#8b5cf6',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '24px',
+                fontWeight: 'bold',
+                color: '#ffffff'
+              }}>
+                {activeSpeaker?.photoURL ? (
+                  <img 
+                    src={activeSpeaker.photoURL} 
+                    alt={activeSpeaker.name} 
+                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  activeSpeaker?.initials || 'S'
+                )}
+              </div>
+            )}
+
+            {/* Overlay nametag */}
+            <div style={{
+              position: 'absolute',
+              bottom: '10px',
+              left: '10px',
+              backgroundColor: 'rgba(15, 16, 19, 0.75)',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              zIndex: 10
+            }}>
+              <span>{activeSpeaker?.name || 'User'}</span>
+              {activeSpeakerMicMuted && (
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                </svg>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Tool View */
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '10px', boxSizing: 'border-box' }}>
+            {expandedTool === 'pomodoro' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 800 }}>
+                  ⏱️ {pomodoroPhase === 'focus' ? 'Focus Phase' : 'Break Phase'}
+                </span>
+                <span style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                  {pomodoroMinutes.toString().padStart(2, '0')}:{pomodoroSeconds.toString().padStart(2, '0')}
+                </span>
+                <button 
+                  onClick={togglePomodoro} 
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '11px',
+                    backgroundColor: '#2d3139',
+                    border: '1px solid #475569',
+                    borderRadius: '4px',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  {pomodoroIsRunning ? 'Pause' : 'Start'}
+                </button>
+              </div>
+            )}
+
+            {expandedTool === 'deadline' && (() => {
+              const currentStep = deadlineSteps[deadlineActiveIndex];
+              const stepName = currentStep ? `${deadlineActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                  <span 
+                    style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
+                    title={stepName}
+                  >
+                    ⏳ {stepName}
+                  </span>
+                  <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                    {deadlineTimerMinutes.toString().padStart(2, '0')}:{deadlineTimerSeconds.toString().padStart(2, '0')}
+                  </span>
+                  <button 
+                    onClick={() => setDeadlineIsRunning(!deadlineIsRunning)} 
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '11px',
+                      backgroundColor: '#2d3139',
+                      border: '1px solid #475569',
+                      borderRadius: '4px',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    {deadlineIsRunning ? 'Pause' : 'Start'}
+                  </button>
+                </div>
+              );
+            })()}
+
+            {expandedTool === 'loose' && (() => {
+              const currentStep = looseSteps[looseActiveIndex];
+              const stepName = currentStep ? `${looseActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                  <span 
+                    style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
+                    title={stepName}
+                  >
+                    🔄 {stepName}
+                  </span>
+                  <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                    {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:{Math.floor(looseTimerSeconds % 60).toString().padStart(2, '0')}
+                  </span>
+                  <button 
+                    onClick={() => setLooseIsRunning(!looseIsRunning)} 
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '11px',
+                      backgroundColor: '#2d3139',
+                      border: '1px solid #475569',
+                      borderRadius: '4px',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    {looseIsRunning ? 'Pause' : 'Start'}
+                  </button>
+                </div>
+              );
+            })()}
+
+            {expandedTool === 'spin' && (() => {
+              const lastSelectedName = spinResult 
+                ? (callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant') 
+                : null;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>
+                    🎡 {lastSelectedName ? `Landed on: ${lastSelectedName}` : 'Ready to spin'}
+                  </span>
+                  <button 
+                    onClick={() => {
+                      toggleMiniMode();
+                      setExpandedTool('spin');
+                      handleSpinWheel();
+                    }} 
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '11px',
+                      backgroundColor: 'var(--primary-color, #f1c40f)',
+                      color: '#0f1013',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontWeight: 700
+                    }}
+                  >
+                    Spin Wheel (Full)
+                  </button>
+                </div>
+              );
+            })()}
+
+            {expandedTool === 'truthordare' && (() => {
+              const selectedUser = callParticipants.find(p => p.id === todSelectedId);
+              const titleText = selectedUser && todChoice ? `${selectedUser.name.replace(' (You)', '')} — ${todChoice}` : 'No turn active';
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--primary-color, #f1c40f)', fontWeight: 800 }}>
+                    🎲 {titleText}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#ffffff', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3, maxWidth: '240px' }}>
+                    {todText ? `"${todText}"` : 'No prompt active.'}
+                  </span>
+                  <button 
+                    onClick={() => {
+                      toggleMiniMode();
+                      setExpandedTool('truthordare');
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '10px',
+                      backgroundColor: '#2d3139',
+                      border: '1px solid #475569',
+                      borderRadius: '4px',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      marginTop: '4px'
+                    }}
+                  >
+                    Expand Game
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* Small bottom action controls bar */}
+      <div style={{
+        height: '40px',
+        backgroundColor: '#16181d',
+        borderTop: '1px solid #2d3139',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        flexShrink: 0,
+        zIndex: 20
+      }}>
+        {/* Mute Mic control */}
+        <button 
+          onClick={toggleMic}
+          style={{
+            background: isMicMuted ? '#ef4444' : '#2d3139',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#ffffff',
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {isMicMuted ? (
+              <>
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+              </>
+            ) : (
+              <>
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+              </>
+            )}
+          </svg>
+        </button>
+
+        {/* Camera toggle control */}
+        <button 
+          onClick={toggleCamera}
+          style={{
+            background: isCamOff ? '#ef4444' : '#2d3139',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#ffffff',
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {isCamOff ? (
+              <>
+                <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10l-2.18-1.63"></path>
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+              </>
+            ) : (
+              <>
+                <path d="M23 7l-7 5 7 5V7z"></path>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </>
+            )}
+          </svg>
+        </button>
+
+        {/* Restore / Expand to original size */}
+        <button 
+          onClick={toggleMiniMode}
+          style={{
+            background: '#2d3139',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#ffffff',
+            width: '28px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+          title="Return to full view"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <polyline points="9 21 3 21 3 15"></polyline>
+            <line x1="21" y1="3" x2="14" y2="10"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>
+          </svg>
+        </button>
+
+        {/* Leave the call entirely */}
+        <button 
+          onClick={() => {
+            handleLeaveCall();
+            toggleMiniMode();
+          }}
+          style={{
+            background: '#ef4444',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#ffffff',
+            padding: '0 8px',
+            height: '28px',
+            fontSize: '11px',
+            fontWeight: 'bold',
+            cursor: 'pointer'
+          }}
+          title="Leave room call"
+        >
+          Leave
+        </button>
+      </div>
+    </div>
+  );
+}
 
 let globalPendingLeavePromise: Promise<void> | null = null;
 function AppContent() {
@@ -443,7 +1038,7 @@ function AppContent() {
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomType, setNewRoomType] = useState<'private' | 'public-ask' | 'public'>('public-ask');
-  const [newMaxParticipants, setNewMaxParticipants] = useState(10);
+  const [newMaxParticipants, setNewMaxParticipants] = useState(18);
   
   // Scheduling State
   const [startOption, setStartOption] = useState<'now' | 'later'>('now');
@@ -1108,7 +1703,7 @@ function AppContent() {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     const newSessionId = Math.random().toString(36).substring(2, 10);
-    console.log("enterCallRoom executing:", { roomId: normalizedRoom.id, myId, newSessionId }, new Error().stack);
+    console.log(`[LOCAL JOIN ACTION] Initiated enterCallRoom: RoomID=${normalizedRoom.id}, MyID=${myId}, SessionID=${newSessionId}, EventTime=${new Date().toISOString()}`);
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
@@ -1405,6 +2000,20 @@ function AppContent() {
     const presenceRef = collection(db, 'rooms', rid, 'participants');
     const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
       const myId = getMyId();
+      
+      snapshot.docChanges().forEach((change) => {
+        const docId = change.doc.id;
+        const data = change.doc.data();
+        const timestamp = new Date().toISOString();
+        if (change.type === 'added') {
+          console.log(`[PRESENCE EVENT] Participant ADDED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, JoinTime=${data.joinedAt || 'none'}, EventTime=${timestamp}`);
+        } else if (change.type === 'modified') {
+          console.log(`[PRESENCE EVENT] Participant MODIFIED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, EventTime=${timestamp}`);
+        } else if (change.type === 'removed') {
+          console.log(`[PRESENCE EVENT] Participant REMOVED: ID=${docId}, Name=${data.name}, EventTime=${timestamp}`);
+        }
+      });
+
       const list = snapshot.docs.map(docSnap => {
         const data = docSnap.data();
         const isMe = docSnap.id === myId;
@@ -4188,439 +4797,42 @@ function AppContent() {
   const renderPipWindow = () => {
     if (!isMiniModeActive || !pipWindowInstance) return null;
 
-    const activeSpeakerId = (() => {
-      const remoteSpeaker = callParticipants.find(p => p.isSpeaking && !p.isMuted && p.id !== getMyId());
-      if (remoteSpeaker) return remoteSpeaker.id;
-      return getMyId();
-    })();
-
-    const activeSpeaker = callParticipants.find(p => p.id === activeSpeakerId);
-    const activeSpeakerCamOff = activeSpeaker ? (activeSpeaker.id === getMyId() ? isCamOff : activeSpeaker.isCamOff) : true;
-    const activeSpeakerMicMuted = activeSpeaker ? (activeSpeaker.id === getMyId() ? isMicMuted : activeSpeaker.isMuted) : true;
-
-    const showToolView = miniModeTab === 'tool' && expandedTool !== 'none';
-
     return createPortal(
-      <div className="skulk-pip-window" style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        backgroundColor: '#0f1013', 
-        color: '#ffffff', 
-        fontFamily: 'Inter, system-ui, sans-serif',
-        position: 'relative',
-        overflow: 'hidden'
-      }}>
-        {/* Top Switcher Bar */}
-        <div style={{
-          display: 'flex',
-          backgroundColor: '#16181d',
-          borderBottom: '1px solid #2d3139',
-          height: '32px',
-          alignItems: 'center',
-          padding: '0 8px',
-          gap: '4px',
-          flexShrink: 0
-        }}>
-          <button 
-            onClick={() => setMiniModeTab('call')}
-            style={{
-              flex: 1,
-              height: '24px',
-              backgroundColor: !showToolView ? '#2d3139' : 'transparent',
-              border: 'none',
-              borderRadius: '4px',
-              color: !showToolView ? '#f1c40f' : '#94a3b8',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px'
-            }}
-          >
-            <span>📞 Call</span>
-          </button>
-          <button 
-            onClick={() => {
-              if (expandedTool !== 'none') {
-                setMiniModeTab('tool');
-              }
-            }}
-            disabled={expandedTool === 'none'}
-            style={{
-              flex: 1,
-              height: '24px',
-              backgroundColor: showToolView ? '#2d3139' : 'transparent',
-              border: 'none',
-              borderRadius: '4px',
-              color: expandedTool === 'none' 
-                ? 'rgba(255, 255, 255, 0.15)' 
-                : showToolView 
-                  ? '#f1c40f' 
-                  : '#94a3b8',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: expandedTool === 'none' ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px'
-            }}
-          >
-            <span>⚙️ Tool</span>
-          </button>
-        </div>
-
-        {/* Main Viewport Content Area */}
-        <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          {!showToolView ? (
-            /* Call View */
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-              {!activeSpeakerCamOff ? (
-                <ParticipantVideo participantId={activeSpeakerId} />
-              ) : (
-                <div style={{
-                  width: '72px',
-                  height: '72px',
-                  borderRadius: '50%',
-                  backgroundColor: activeSpeaker?.color || '#8b5cf6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '24px',
-                  fontWeight: 'bold',
-                  color: '#ffffff'
-                }}>
-                  {activeSpeaker?.photoURL ? (
-                    <img 
-                      src={activeSpeaker.photoURL} 
-                      alt={activeSpeaker.name} 
-                      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                    />
-                  ) : (
-                    activeSpeaker?.initials || 'S'
-                  )}
-                </div>
-              )}
-
-              {/* Overlay nametag */}
-              <div style={{
-                position: 'absolute',
-                bottom: '10px',
-                left: '10px',
-                backgroundColor: 'rgba(15, 16, 19, 0.75)',
-                padding: '2px 8px',
-                borderRadius: '4px',
-                fontSize: '11px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                zIndex: 10
-              }}>
-                <span>{activeSpeaker?.name || 'User'}</span>
-                {activeSpeakerMicMuted && (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                  </svg>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Tool View */
-            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '10px', boxSizing: 'border-box' }}>
-              {expandedTool === 'pomodoro' && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 800 }}>
-                    ⏱️ {pomodoroPhase === 'focus' ? 'Focus Phase' : 'Break Phase'}
-                  </span>
-                  <span style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
-                    {pomodoroMinutes.toString().padStart(2, '0')}:{pomodoroSeconds.toString().padStart(2, '0')}
-                  </span>
-                  <button 
-                    onClick={togglePomodoro} 
-                    style={{
-                      padding: '4px 12px',
-                      fontSize: '11px',
-                      backgroundColor: '#2d3139',
-                      border: '1px solid #475569',
-                      borderRadius: '4px',
-                      color: '#ffffff',
-                      cursor: 'pointer',
-                      fontWeight: 600
-                    }}
-                  >
-                    {pomodoroIsRunning ? 'Pause' : 'Start'}
-                  </button>
-                </div>
-              )}
-
-              {expandedTool === 'deadline' && (() => {
-                const currentStep = deadlineSteps[deadlineActiveIndex];
-                const stepName = currentStep ? `${deadlineActiveIndex + 1}. ${currentStep.name}` : 'No steps';
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
-                    <span 
-                      style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
-                      title={stepName}
-                    >
-                      ⏳ {stepName}
-                    </span>
-                    <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
-                      {deadlineTimerMinutes.toString().padStart(2, '0')}:{deadlineTimerSeconds.toString().padStart(2, '0')}
-                    </span>
-                    <button 
-                      onClick={() => setDeadlineIsRunning(!deadlineIsRunning)} 
-                      style={{
-                        padding: '4px 12px',
-                        fontSize: '11px',
-                        backgroundColor: '#2d3139',
-                        border: '1px solid #475569',
-                        borderRadius: '4px',
-                        color: '#ffffff',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                    >
-                      {deadlineIsRunning ? 'Pause' : 'Start'}
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {expandedTool === 'loose' && (() => {
-                const currentStep = looseSteps[looseActiveIndex];
-                const stepName = currentStep ? `${looseActiveIndex + 1}. ${currentStep.name}` : 'No steps';
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
-                    <span 
-                      style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
-                      title={stepName}
-                    >
-                      🔄 {stepName}
-                    </span>
-                    <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
-                      {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:{Math.floor(looseTimerSeconds % 60).toString().padStart(2, '0')}
-                    </span>
-                    <button 
-                      onClick={() => setLooseIsRunning(!looseIsRunning)} 
-                      style={{
-                        padding: '4px 12px',
-                        fontSize: '11px',
-                        backgroundColor: '#2d3139',
-                        border: '1px solid #475569',
-                        borderRadius: '4px',
-                        color: '#ffffff',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                    >
-                      {looseIsRunning ? 'Pause' : 'Start'}
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {expandedTool === 'spin' && (() => {
-                const lastSelectedName = spinResult 
-                  ? (callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant') 
-                  : null;
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>
-                      🎡 {lastSelectedName ? `Landed on: ${lastSelectedName}` : 'Ready to spin'}
-                    </span>
-                    <button 
-                      onClick={() => {
-                        toggleMiniMode();
-                        setExpandedTool('spin');
-                        handleSpinWheel();
-                      }} 
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: '11px',
-                        backgroundColor: 'var(--primary-color, #f1c40f)',
-                        color: '#0f1013',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontWeight: 700
-                      }}
-                    >
-                      Spin Wheel (Full)
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {expandedTool === 'truthordare' && (() => {
-                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
-                const titleText = selectedUser && todChoice ? `${selectedUser.name.replace(' (You)', '')} — ${todChoice}` : 'No turn active';
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '10px', color: 'var(--primary-color, #f1c40f)', fontWeight: 800 }}>
-                      🎲 {titleText}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#ffffff', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3, maxWidth: '240px' }}>
-                      {todText ? `"${todText}"` : 'No prompt active.'}
-                    </span>
-                    <button 
-                      onClick={() => {
-                        toggleMiniMode();
-                        setExpandedTool('truthordare');
-                      }}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: '10px',
-                        backgroundColor: '#2d3139',
-                        border: '1px solid #475569',
-                        borderRadius: '4px',
-                        color: '#ffffff',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        marginTop: '4px'
-                      }}
-                    >
-                      Expand Game
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-        </div>
-
-        {/* Small bottom action controls bar */}
-        <div style={{
-          height: '40px',
-          backgroundColor: '#16181d',
-          borderTop: '1px solid #2d3139',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '12px',
-          flexShrink: 0,
-          zIndex: 20
-        }}>
-          {/* Mute Mic control */}
-          <button 
-            onClick={toggleMic}
-            style={{
-              background: isMicMuted ? '#ef4444' : '#2d3139',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#ffffff',
-              width: '28px',
-              height: '28px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-            title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {isMicMuted ? (
-                <>
-                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                </>
-              ) : (
-                <>
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                  <line x1="12" y1="19" x2="12" y2="23"></line>
-                </>
-              )}
-            </svg>
-          </button>
-
-          {/* Camera toggle control */}
-          <button 
-            onClick={toggleCamera}
-            style={{
-              background: isCamOff ? '#ef4444' : '#2d3139',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#ffffff',
-              width: '28px',
-              height: '28px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-            title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {isCamOff ? (
-                <>
-                  <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10l-2.18-1.63"></path>
-                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                </>
-              ) : (
-                <>
-                  <path d="M23 7l-7 5 7 5V7z"></path>
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-                </>
-              )}
-            </svg>
-          </button>
-
-          {/* Restore / Expand to original size */}
-          <button 
-            onClick={toggleMiniMode}
-            style={{
-              background: '#2d3139',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#ffffff',
-              width: '28px',
-              height: '28px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
-            title="Return to full view"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <polyline points="9 21 3 21 3 15"></polyline>
-              <line x1="21" y1="3" x2="14" y2="10"></line>
-              <line x1="3" y1="21" x2="10" y2="14"></line>
-            </svg>
-          </button>
-
-          {/* Leave the call entirely */}
-          <button 
-            onClick={() => {
-              handleLeaveCall();
-              toggleMiniMode();
-            }}
-            style={{
-              background: '#ef4444',
-              border: 'none',
-              borderRadius: '4px',
-              color: '#ffffff',
-              padding: '0 8px',
-              height: '28px',
-              fontSize: '11px',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-            title="Leave room call"
-          >
-            Leave
-          </button>
-        </div>
-      </div>,
+      <PipWindowContent
+        myId={getMyId()}
+        isMicMuted={isMicMuted}
+        isCamOff={isCamOff}
+        toggleMic={toggleMic}
+        toggleCamera={toggleCamera}
+        toggleMiniMode={toggleMiniMode}
+        handleLeaveCall={handleLeaveCall}
+        miniModeTab={miniModeTab}
+        setMiniModeTab={setMiniModeTab}
+        expandedTool={expandedTool}
+        setExpandedTool={setExpandedTool}
+        callParticipants={callParticipants}
+        pomodoroPhase={pomodoroPhase}
+        pomodoroMinutes={pomodoroMinutes}
+        pomodoroSeconds={pomodoroSeconds}
+        pomodoroIsRunning={pomodoroIsRunning}
+        togglePomodoro={togglePomodoro}
+        deadlineSteps={deadlineSteps}
+        deadlineActiveIndex={deadlineActiveIndex}
+        deadlineTimerMinutes={deadlineTimerMinutes}
+        deadlineTimerSeconds={deadlineTimerSeconds}
+        deadlineIsRunning={deadlineIsRunning}
+        setDeadlineIsRunning={setDeadlineIsRunning}
+        looseSteps={looseSteps}
+        looseActiveIndex={looseActiveIndex}
+        looseTimerSeconds={looseTimerSeconds}
+        looseIsRunning={looseIsRunning}
+        setLooseIsRunning={setLooseIsRunning}
+        spinResult={spinResult}
+        handleSpinWheel={handleSpinWheel}
+        todSelectedId={todSelectedId}
+        todChoice={todChoice}
+        todText={todText}
+      />,
       pipWindowInstance.document.body
     );
   };
@@ -6835,19 +7047,19 @@ function AppContent() {
                       type="number" 
                       id="maxParticipants" 
                       min="0" 
-                      max="10"
+                      max="18"
                       className="search-input"
                       style={{ textAlign: 'center', flex: 1, padding: '0' }}
                       value={newMaxParticipants}
                       onChange={(e) => {
                         const val = parseInt(e.target.value);
-                        setNewMaxParticipants(isNaN(val) ? 0 : Math.min(10, val));
+                        setNewMaxParticipants(isNaN(val) ? 0 : Math.min(18, val));
                       }}
                       required
                     />
                     <button 
                       type="button"
-                      onClick={() => setNewMaxParticipants(Math.min(10, newMaxParticipants + 1))}
+                      onClick={() => setNewMaxParticipants(Math.min(18, newMaxParticipants + 1))}
                       style={{ width: '44px', height: '44px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
