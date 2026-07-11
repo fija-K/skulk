@@ -10,7 +10,8 @@ import {
   getDoc,
   getDocs, 
   onSnapshot, 
-  updateDoc
+  updateDoc,
+  runTransaction
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import {
@@ -112,6 +113,18 @@ function DeviceRecoveryManager({
     let currentCamErr = false;
     let currentMicErr = false;
     const reportErrors = () => onErrorChange(currentCamErr, currentMicErr);
+
+    // Sync active enabled states dynamically with local participant tracks
+    localParticipant.setCameraEnabled(!isCamOff).catch((err) => {
+      console.warn("Failed to sync camera state", err);
+      currentCamErr = true;
+      reportErrors();
+    });
+    localParticipant.setMicrophoneEnabled(!isMicMuted).catch((err) => {
+      console.warn("Failed to sync mic state", err);
+      currentMicErr = true;
+      reportErrors();
+    });
 
     const handleCameraRecovery = async () => {
       if (isCamOff) {
@@ -471,9 +484,14 @@ function AppContent() {
   const [guestName, setGuestName] = useState('');
   const [guestColor, setGuestColor] = useState('');
   const [guestInitials, setGuestInitials] = useState('');
+  const [guestPhotoURL, setGuestPhotoURL] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileEditName, setProfileEditName] = useState('');
   const [profileEditColor, setProfileEditColor] = useState('');
+  const [profileEditPhotoURL, setProfileEditPhotoURL] = useState('');
+
+  // Spotlight view state
+  const [spotlightParticipantId, setSpotlightParticipantId] = useState<string | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
   const themePickerRef = useRef<HTMLDivElement>(null);
@@ -485,6 +503,7 @@ function AppContent() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const hasSeenSelfInListRef = useRef(false);
+  const currentSessionIdRef = useRef<string | null>(null);
 
   // Helper to determine role dynamically based on auth email and room creator
   const determineRole = (roomCreatorId?: string) => {
@@ -587,8 +606,10 @@ function AppContent() {
           setGuestName(data.name);
           setGuestColor(data.color);
           setGuestInitials(data.initials);
+          setGuestPhotoURL(data.photoURL || null);
           setProfileEditName(data.name);
           setProfileEditColor(data.color);
+          setProfileEditPhotoURL(data.photoURL || '');
           return;
         }
       } catch (e) {
@@ -610,10 +631,12 @@ function AppContent() {
     setGuestName(name);
     setGuestColor(randomColor);
     setGuestInitials(initials);
+    setGuestPhotoURL(null);
     setProfileEditName(name);
     setProfileEditColor(randomColor);
+    setProfileEditPhotoURL('');
     
-    localStorage.setItem('skulk_guest_identity', JSON.stringify({ name, color: randomColor, initials }));
+    localStorage.setItem('skulk_guest_identity', JSON.stringify({ name, color: randomColor, initials, photoURL: null }));
   }, []);
 
   // Sync guest identity edits into active call in real time
@@ -625,13 +648,14 @@ function AppContent() {
             ...p,
             name: `${guestName} (You)`,
             initials: guestInitials,
-            color: guestColor
+            color: guestColor,
+            photoURL: user ? user.photoURL : guestPhotoURL
           };
         }
         return p;
       }));
     }
-  }, [guestName, guestColor, guestInitials, currentRoom]);
+  }, [guestName, guestColor, guestInitials, guestPhotoURL, currentRoom, user]);
 
   // Cleanup old pre-existing default rooms from Firestore if they exist
   useEffect(() => {
@@ -688,7 +712,8 @@ function AppContent() {
               ...p,
               name: `${name} (You)`,
               initials: initials,
-              color: '#8b5cf6'
+              color: '#8b5cf6',
+              photoURL: currentUser.photoURL
             };
           }
           return p;
@@ -702,6 +727,7 @@ function AppContent() {
             setGuestName(data.name || '');
             setGuestColor(data.color || '#8b5cf6');
             setGuestInitials(data.initials || 'G');
+            setGuestPhotoURL(data.photoURL || null);
             
             // Sync into active call if in a room
             setCallParticipants(prev => prev.map(p => {
@@ -710,7 +736,8 @@ function AppContent() {
                   ...p,
                   name: `${data.name} (You)`,
                   initials: data.initials,
-                  color: data.color
+                  color: data.color,
+                  photoURL: data.photoURL || null
                 };
               }
               return p;
@@ -861,13 +888,26 @@ function AppContent() {
   //   );
   // };
 
-  const leavePresence = async (roomIdToLeave: string) => {
+  const leavePresence = async (roomIdToLeave: string, sessionIdToDelete?: string | null) => {
     const myId = getMyId();
     if (!myId || !roomIdToLeave) return;
 
     const performLeave = async () => {
       try {
-        await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
+        const presenceDocRef = doc(db, 'rooms', roomIdToLeave, 'participants', myId);
+        
+        await runTransaction(db, async (transaction) => {
+          const snap = await transaction.get(presenceDocRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
+              transaction.delete(presenceDocRef);
+            } else {
+              console.log('leavePresence bypassed: presence belongs to a newer session (transaction).');
+            }
+          }
+        });
+
         // Delete any signals associated with this user
         const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
         const snapshot = await getDocs(signalsRef);
@@ -891,9 +931,11 @@ function AppContent() {
       }
     };
 
-    globalPendingLeavePromise = performLeave();
+    globalPendingLeavePromise = (globalPendingLeavePromise || Promise.resolve())
+      .then(performLeave)
+      .catch(() => {});
+      
     await globalPendingLeavePromise;
-    globalPendingLeavePromise = null;
   };
 
   const canJoin = async (targetRoom: Room) => {
@@ -950,6 +992,8 @@ function AppContent() {
     }
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
+    const newSessionId = Math.random().toString(36).substring(2, 10);
+    currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
       const myRole = determineRole(normalizedRoom.creatorId);
@@ -958,14 +1002,15 @@ function AppContent() {
         await setDoc(presenceRef, {
           uid: myId,
           name: user ? user.displayName || 'Google User' : guestName,
-          photoURL: user ? user.photoURL : null,
+          photoURL: user ? user.photoURL : guestPhotoURL,
           initials: guestInitials,
           color: guestColor,
           joinedAt: new Date().toISOString(),
           sharing: null,
           role: myRole,
           mutedBy: myId,
-          camOffBy: myId
+          camOffBy: myId,
+          sessionId: newSessionId
         });
       } catch (err) {
         console.warn("Failed to set presence in Firestore, joining locally:", err);
@@ -1013,7 +1058,7 @@ function AppContent() {
     hasSeenSelfInListRef.current = false;
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
-      leavePresence(prevRoomId);
+      leavePresence(prevRoomId, currentSessionIdRef.current);
       clearMySharing();
       setCurrentRoom(null);
       setCallParticipants([]);
@@ -1084,9 +1129,8 @@ function AppContent() {
       }
     } else {
       if (currentRoom) {
-        // Leaving room cleanups
         const prevRoomId = roomDocId(currentRoom);
-        leavePresence(prevRoomId);
+        leavePresence(prevRoomId, currentSessionIdRef.current);
         clearMySharing();
         setCurrentRoom(null);
         setCallParticipants([]);
@@ -1095,14 +1139,14 @@ function AppContent() {
         setLiveKitToken(null);
       }
     }
-  }, [roomId, rooms, user, guestId, isAuthLoading]);
+  }, [roomId, rooms, user, guestId, isAuthLoading, currentRoom]);
 
   // Clean up presence when component unmounts or call ends
   useEffect(() => {
     return () => {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
-        leavePresence(prevRoomId);
+        leavePresence(prevRoomId, currentSessionIdRef.current);
       }
     };
   }, [currentRoom]);
@@ -1135,7 +1179,7 @@ function AppContent() {
       await setDoc(presenceRef, {
         uid: myId,
         name: user ? user.displayName || 'Google User' : guestName,
-        photoURL: user ? user.photoURL : null,
+        photoURL: user ? user.photoURL : guestPhotoURL,
         initials: guestInitials,
         color: guestColor,
         joinedAt: new Date().toISOString(),
@@ -1146,7 +1190,7 @@ function AppContent() {
     };
     
     syncAuthPresence();
-  }, [user, currentRoom, guestName, guestInitials, guestColor, guestId]);
+  }, [user, currentRoom, guestName, guestInitials, guestColor, guestPhotoURL, guestId]);
 
   // Clean up presence immediately on tab/browser close using fetch keepalive
   useEffect(() => {
@@ -2169,14 +2213,18 @@ function AppContent() {
       initials = words[0][0].toUpperCase();
     }
 
+    const photoURLVal = profileEditPhotoURL.trim() || null;
+
     setGuestName(profileEditName);
     setGuestColor(profileEditColor);
     setGuestInitials(initials);
+    setGuestPhotoURL(photoURLVal);
 
     localStorage.setItem('skulk_guest_identity', JSON.stringify({ 
       name: profileEditName, 
       color: profileEditColor, 
-      initials 
+      initials,
+      photoURL: photoURLVal
     }));
     setIsProfileModalOpen(false);
     showToast('Profile updated!');
@@ -2332,6 +2380,413 @@ function AppContent() {
   };
 
 
+  const getGalleryColumns = (count: number) => {
+    if (count === 1) return '1fr';
+    if (count === 2) return 'repeat(2, 1fr)';
+    if (count <= 4) return 'repeat(2, 1fr)';
+    if (count <= 6) return 'repeat(3, 1fr)';
+    return 'repeat(auto-fit, minmax(280px, 1fr))';
+  };
+
+  const getGalleryMaxWidth = (count: number) => {
+    if (count === 1) return '800px';
+    if (count === 2) return '1000px';
+    if (count <= 4) return '1000px';
+    return '100%';
+  };
+
+  const renderParticipantTile = (p: Participant, isThumbnail: boolean = false) => {
+    const isUser = p.id === getMyId();
+    const showMuted = isUser ? isMicMuted : p.isMuted;
+    const showCamOff = isUser ? isCamOff : p.isCamOff;
+    const isSpeaking = p.isSpeaking && !showMuted;
+    
+    return (
+      <div 
+        key={p.id} 
+        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''}`}
+        onClick={() => {
+          if (isThumbnail) {
+            setSpotlightParticipantId(p.id);
+          } else if (!spotlightParticipantId) {
+            setSpotlightParticipantId(p.id);
+          }
+        }}
+        style={{ cursor: 'pointer' }}
+      >
+        {isGalleryView && !isThumbnail ? (
+          // Gallery Layout: Full Card Video/Avatar
+          !showCamOff ? (
+            <>
+              {isUser && cameraError ? (
+                // Refined camera error display: show PFP/initials background + a small centered retry box!
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {p.photoURL ? (
+                    <img 
+                      src={p.photoURL} 
+                      alt={p.name} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                  )}
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                    }}
+                    style={{
+                      position: 'absolute',
+                      padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
+                      border: '1px solid var(--border-color)', borderRadius: '6px',
+                      cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
+                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+                  </div>
+                </div>
+              ) : (
+                <ParticipantVideo participantId={p.id} />
+              )}
+              
+              {p.sharing && (
+                <div className="sharing-badge-overlay" style={{
+                  position: 'absolute',
+                  bottom: '12px',
+                  right: '12px',
+                  backgroundColor: 'var(--primary-color)',
+                  color: '#0f1013',
+                  borderRadius: '50%',
+                  width: '22px',
+                  height: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  border: '2px solid var(--card-bg, #1a1c23)',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                  zIndex: 10
+                }} title={`Sharing ${p.sharing} - click to view`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewParticipantShare(p);
+                  }}
+                >
+                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                </div>
+              )}
+            </>
+          ) : (
+            /* Avatar Square (Gallery Mode) */
+            <div 
+              className="participant-avatar-large" 
+              style={{ 
+                backgroundColor: p.color, 
+                cursor: p.sharing ? 'pointer' : 'default',
+                position: 'relative',
+                boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                overflow: 'hidden',
+                width: '96px',
+                height: '96px',
+                borderRadius: '50%',
+                fontSize: '32px',
+                marginBottom: '0'
+              }}
+              onClick={() => {
+                if (p.sharing) {
+                  handleViewParticipantShare(p);
+                }
+              }}
+            >
+              {p.photoURL ? (
+                <img 
+                  src={p.photoURL} 
+                  alt={p.name} 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                p.initials
+              )}
+              {p.sharing && (
+                <div className="sharing-badge-overlay" style={{
+                  position: 'absolute',
+                  bottom: '-6px',
+                  right: '-6px',
+                  backgroundColor: 'var(--primary-color)',
+                  color: '#0f1013',
+                  borderRadius: '50%',
+                  width: '22px',
+                  height: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  border: '2px solid var(--card-bg, #1a1c23)',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                  zIndex: 10
+                }} title={`Sharing ${p.sharing} - click to view`}>
+                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                </div>
+              )}
+            </div>
+          )
+        ) : (
+          // Compact Grid Layout OR Thumbnail view: Floating Avatar
+          <div 
+            className="participant-avatar-large" 
+            style={{ 
+              backgroundColor: p.color, 
+              cursor: p.sharing ? 'pointer' : 'default',
+              position: 'relative',
+              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+              overflow: 'hidden',
+              // Shrink for thumbnail strip
+              ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
+            }}
+            onClick={() => {
+              if (p.sharing) {
+                handleViewParticipantShare(p);
+              }
+            }}
+          >
+            {!showCamOff && !(isUser && cameraError) ? (
+              <ParticipantVideo participantId={p.id} />
+            ) : p.photoURL ? (
+              <img 
+                src={p.photoURL} 
+                alt={p.name} 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              p.initials
+            )}
+            
+            {/* Clickable Retry warning indicator in compact view */}
+            {isUser && !showCamOff && cameraError && (
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                }}
+                style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center', zIndex: 15,
+                  cursor: 'pointer'
+                }} 
+                title="Camera error - check hardware switch and click to retry"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
+                  <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
+                  <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
+                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
+                </svg>
+                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
+              </div>
+            )}
+  
+            {p.sharing && (
+              <div className="sharing-badge-overlay" style={{
+                position: 'absolute',
+                bottom: '-6px',
+                right: '-6px',
+                backgroundColor: 'var(--primary-color)',
+                color: '#0f1013',
+                borderRadius: '50%',
+                width: '22px',
+                height: '22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                border: '2px solid var(--card-bg, #1a1c23)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                zIndex: 10
+              }} title={`Sharing ${p.sharing} - click to view`}>
+                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Name Tag + Muted Status */}
+        {!isThumbnail && (
+          <div className="participant-name-tag" style={{ gap: '6px' }}>
+            <span>{p.name}</span>
+            {p.role && p.role !== 'member' && (
+              <span className={`role-tag-${p.role}`} style={{
+                fontSize: '9px',
+                fontWeight: 'bold',
+                padding: '1px 5px',
+                borderRadius: '4px',
+                textTransform: 'uppercase',
+                border: '1px solid',
+                lineHeight: '1.2',
+                ...p.role === 'admin' ? {
+                  backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                  borderColor: 'var(--primary-color, #f1c40f)',
+                  color: 'var(--primary-color, #f1c40f)'
+                } : p.role === 'host' ? {
+                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                  borderColor: '#3b82f6',
+                  color: '#3b82f6'
+                } : {
+                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                  borderColor: '#10b981',
+                  color: '#10b981'
+                }
+              }}>
+                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+              </span>
+            )}
+            {showMuted && (
+              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            )}
+            {p.isPinned && (
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-.44-1.24l-2.33-2.91a2 2 0 0 1-.43-1.23V4a1 1 0 0 0-1-1h-5.6a1 1 0 0 0-1 1v5.86c0 .44-.16.86-.43 1.23l-2.33 2.91a2 2 0 0 0-.44 1.24V17Z"></path>
+              </svg>
+            )}
+          </div>
+        )}
+  
+        {/* Host Actions Hover Trigger Menu */}
+        {!isThumbnail && !isUser && (callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
+                                     callParticipants.find(part => part.id === getMyId())?.role === 'host' || 
+                                     callParticipants.find(part => part.id === getMyId())?.role === 'cohost') && (
+          <div ref={sidebarMenuRef}>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveMenuParticipantId(activeMenuParticipantId === p.id ? null : p.id);
+              }}
+              className="tile-actions-trigger" 
+              aria-label="Participant options"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="12" cy="5" r="1"></circle>
+                <circle cx="12" cy="19" r="1"></circle>
+              </svg>
+            </button>
+            
+            {/* Option Dropdown List */}
+            {activeMenuParticipantId === p.id && (
+              <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }} onClick={e => e.stopPropagation()}>
+                {/* Mute action */}
+                {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
+                  <button 
+                    onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
+                    className="tile-menu-item"
+                  >
+                    {p.isMuted ? 'Unmute' : 'Mute'}
+                  </button>
+                )}
+                
+                {/* Camera off action */}
+                {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
+                  <button 
+                    onClick={() => handleParticipantCameraToggle(p.id, p.name)} 
+                    className="tile-menu-item"
+                  >
+                    {p.isCamOff ? 'Turn camera on' : 'Turn camera off'}
+                  </button>
+                )}
+                
+                {/* Pin action */}
+                <button 
+                  onClick={() => handleParticipantPinToggle(p.id, p.name)} 
+                  className="tile-menu-item"
+                >
+                  {p.isPinned ? 'Unpin' : 'Pin'}
+                </button>
+                
+                {/* Role Promotion/Demotion Actions */}
+                {callParticipants.find(part => part.id === getMyId())?.role === 'admin' && (
+                  <>
+                    {p.role !== 'host' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'host')} 
+                        className="tile-menu-item"
+                      >
+                        Make Host
+                      </button>
+                    )}
+                    {p.role !== 'cohost' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
+                        className="tile-menu-item"
+                      >
+                        Make Co-host
+                      </button>
+                    )}
+                    {p.role !== 'member' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'member')} 
+                        className="tile-menu-item"
+                      >
+                        Demote to Member
+                      </button>
+                    )}
+                  </>
+                )}
+  
+                {callParticipants.find(part => part.id === getMyId())?.role === 'host' && (
+                  <>
+                    {p.role === 'member' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
+                        className="tile-menu-item"
+                      >
+                        Make Co-host
+                      </button>
+                    )}
+                    {p.role === 'cohost' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'member')} 
+                        className="tile-menu-item"
+                      >
+                        Demote to Member
+                      </button>
+                    )}
+                  </>
+                )}
+  
+                {/* Kick action */}
+                {checkCanKick(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
+                  <button 
+                    onClick={() => handleParticipantRemove(p.id, p.name)} 
+                    className="tile-menu-item" 
+                    style={{ color: '#ef4444' }}
+                  >
+                    Kick out
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Filtered rooms based on name search
   const filteredRooms = rooms.filter(room => {
     if (room.type === 'private') {
@@ -2473,6 +2928,7 @@ function AppContent() {
                   onClick={() => {
                     setProfileEditName(guestName);
                     setProfileEditColor(guestColor);
+                    setProfileEditPhotoURL(guestPhotoURL || '');
                     setIsProfileModalOpen(true);
                   }}
                   className="guest-profile-badge"
@@ -2864,6 +3320,7 @@ function AppContent() {
                   onClick={() => {
                     setProfileEditName(guestName);
                     setProfileEditColor(guestColor);
+                    setProfileEditPhotoURL(guestPhotoURL || '');
                     setIsProfileModalOpen(true);
                   }}
                   className="guest-profile-badge"
@@ -3146,378 +3603,49 @@ function AppContent() {
                               </button>
                               <button onClick={() => handleDenyRequest(req)} className="btn-signin" style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
                                 Deny
-                              </button>
-                            </div>
+                            </button>
                           </div>
-                        ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                  {spotlightParticipantId ? (
+                    <div className="spotlight-stage-layout animate-fade-in">
+                      <div className="spotlight-strip">
+                        {callParticipants.map((p) => renderParticipantTile(p, true))}
+                      </div>
+                      <div className="spotlight-main">
+                        {(() => {
+                          const spotlightedPart = callParticipants.find(p => p.id === spotlightParticipantId);
+                          return spotlightedPart ? (
+                            <>
+                              {renderParticipantTile(spotlightedPart, false)}
+                              <button 
+                                className="btn-exit-spotlight" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSpotlightParticipantId(null);
+                                }}
+                              >
+                                Exit Spotlight
+                              </button>
+                            </>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
+                  ) : (
+                    <div 
+                      className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
+                      style={isGalleryView ? {
+                        gridTemplateColumns: getGalleryColumns(callParticipants.length),
+                        maxWidth: getGalleryMaxWidth(callParticipants.length)
+                      } : {}}
+                    >
+                      {callParticipants.map((p) => renderParticipantTile(p, false))}
+                    </div>
                   )}
-                  <div className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}>
-                    {callParticipants.map((p) => {
-                      const isUser = p.id === getMyId();
-                      const showMuted = isUser ? isMicMuted : p.isMuted;
-                      
-                      return (
-                        <div 
-                          key={p.id} 
-                          className={`participant-tile ${isUser ? 'user-tile' : ''} ${p.isSpeaking && !showMuted ? 'speaker-active' : ''}`}
-                        >
-                          {isGalleryView ? (
-                            // Gallery Layout: Full Card Video/Avatar
-                            !p.isCamOff ? (
-                              <>
-                                <ParticipantVideo participantId={p.id} />
-                                {isUser && cameraError && (
-                                  <div className="camera-error-overlay" style={{
-                                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                                    backgroundColor: 'rgba(0,0,0,0.8)', color: 'white',
-                                    display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center',
-                                    zIndex: 10, padding: '16px', textAlign: 'center'
-                                  }}>
-                                    <span style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                      Camera unavailable — check permissions or hardware switch
-                                    </span>
-                                    <button 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                                      }}
-                                      style={{
-                                        padding: '6px 12px', background: 'var(--primary-color)',
-                                        color: '#000', border: 'none', borderRadius: '4px',
-                                        cursor: 'pointer', fontSize: '13px', fontWeight: 'bold'
-                                      }}
-                                    >
-                                      Retry
-                                    </button>
-                                  </div>
-                                )}
-                                {p.sharing && (
-                                  <div className="sharing-badge-overlay" style={{
-                                    position: 'absolute',
-                                    bottom: '12px',
-                                    right: '12px',
-                                    backgroundColor: 'var(--primary-color)',
-                                    color: '#0f1013',
-                                    borderRadius: '50%',
-                                    width: '22px',
-                                    height: '22px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '11px',
-                                    fontWeight: 'bold',
-                                    border: '2px solid var(--card-bg, #1a1c23)',
-                                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                                    zIndex: 10
-                                  }} title={`Sharing ${p.sharing} - click to view`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleViewParticipantShare(p);
-                                    }}
-                                  >
-                                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              /* Avatar Square (Gallery Mode) */
-                              <div 
-                                className="participant-avatar-large" 
-                                style={{ 
-                                  backgroundColor: p.color, 
-                                  cursor: p.sharing ? 'pointer' : 'default',
-                                  position: 'relative',
-                                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                                  overflow: 'hidden'
-                                }}
-                                onClick={() => {
-                                  if (p.sharing) {
-                                    handleViewParticipantShare(p);
-                                  }
-                                }}
-                              >
-                                {p.photoURL ? (
-                                  <img 
-                                    src={p.photoURL} 
-                                    alt={p.name} 
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  p.initials
-                                )}
-                                {p.sharing && (
-                                  <div className="sharing-badge-overlay" style={{
-                                    position: 'absolute',
-                                    bottom: '-6px',
-                                    right: '-6px',
-                                    backgroundColor: 'var(--primary-color)',
-                                    color: '#0f1013',
-                                    borderRadius: '50%',
-                                    width: '22px',
-                                    height: '22px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '11px',
-                                    fontWeight: 'bold',
-                                    border: '2px solid var(--card-bg, #1a1c23)',
-                                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                                    zIndex: 10
-                                  }} title={`Sharing ${p.sharing} - click to view`}>
-                                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          ) : (
-                            // Compact Grid Layout: Floating Avatar
-                            <div 
-                              className="participant-avatar-large" 
-                              style={{ 
-                                backgroundColor: p.color, 
-                                cursor: p.sharing ? 'pointer' : 'default',
-                                position: 'relative',
-                                boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                                border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                                overflow: 'hidden'
-                              }}
-                              onClick={() => {
-                                if (p.sharing) {
-                                  handleViewParticipantShare(p);
-                                }
-                              }}
-                            >
-                              {!p.isCamOff && !(isUser && cameraError) ? (
-                                <ParticipantVideo participantId={p.id} />
-                              ) : p.photoURL ? (
-                                <img 
-                                  src={p.photoURL} 
-                                  alt={p.name} 
-                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                p.initials
-                              )}
-                              
-                              {/* Clickable Retry warning indicator in compact view */}
-                              {isUser && !p.isCamOff && cameraError && (
-                                <div 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                                  }}
-                                  style={{
-                                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                                    backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', zIndex: 15,
-                                    cursor: 'pointer'
-                                  }} 
-                                  title="Camera error - check hardware switch and click to retry"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
-                                    <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
-                                    <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
-                                    <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
-                                  </svg>
-                                  <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
-                                </div>
-                              )}
-
-                              {p.sharing && (
-                                <div className="sharing-badge-overlay" style={{
-                                  position: 'absolute',
-                                  bottom: '-6px',
-                                  right: '-6px',
-                                  backgroundColor: 'var(--primary-color)',
-                                  color: '#0f1013',
-                                  borderRadius: '50%',
-                                  width: '22px',
-                                  height: '22px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '11px',
-                                  fontWeight: 'bold',
-                                  border: '2px solid var(--card-bg, #1a1c23)',
-                                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                                  zIndex: 10
-                                }} title={`Sharing ${p.sharing} - click to view`}>
-                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          
-                          {/* Name Tag + Muted Status */}
-                          <div className="participant-name-tag" style={{ gap: '6px' }}>
-                            <span>{p.name}</span>
-                            {p.role && p.role !== 'member' && (
-                              <span className={`role-tag-${p.role}`} style={{
-                                fontSize: '9px',
-                                fontWeight: 'bold',
-                                padding: '1px 5px',
-                                borderRadius: '4px',
-                                textTransform: 'uppercase',
-                                border: '1px solid',
-                                lineHeight: '1.2',
-                                ...p.role === 'admin' ? {
-                                  backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                                  borderColor: 'var(--primary-color, #f1c40f)',
-                                  color: 'var(--primary-color, #f1c40f)'
-                                } : p.role === 'host' ? {
-                                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                  borderColor: '#3b82f6',
-                                  color: '#3b82f6'
-                                } : {
-                                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                  borderColor: '#10b981',
-                                  color: '#10b981'
-                                }
-                              }}>
-                                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-                              </span>
-                            )}
-                            {showMuted && (
-                              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                                <line x1="12" y1="19" x2="12" y2="23"></line>
-                                <line x1="8" y1="23" x2="16" y2="23"></line>
-                              </svg>
-                            )}
-                            {p.isPinned && (
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
-                                <line x1="12" y1="17" x2="12" y2="22"></line>
-                                <path d="M5 17h14v-1.76a2 2 0 0 0-.44-1.24l-2.33-2.91a2 2 0 0 1-.43-1.23V4a1 1 0 0 0-1-1h-5.6a1 1 0 0 0-1 1v5.86c0 .44-.16.86-.43 1.23l-2.33 2.91a2 2 0 0 0-.44 1.24V17Z"></path>
-                              </svg>
-                            )}
-                          </div>
-
-                          {/* Host Actions Hover Trigger Menu (Only visible for admin, host, co-host) */}
-                          {!isUser && (callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
-                                       callParticipants.find(part => part.id === getMyId())?.role === 'host' || 
-                                       callParticipants.find(part => part.id === getMyId())?.role === 'cohost') && (
-                            <div ref={sidebarMenuRef}>
-                              <button 
-                                onClick={() => setActiveMenuParticipantId(activeMenuParticipantId === p.id ? null : p.id)}
-                                className="tile-actions-trigger" 
-                                aria-label="Participant options"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <circle cx="12" cy="12" r="1"></circle>
-                                  <circle cx="12" cy="5" r="1"></circle>
-                                  <circle cx="12" cy="19" r="1"></circle>
-                                </svg>
-                              </button>
-                              
-                              {/* Option Dropdown List */}
-                              {activeMenuParticipantId === p.id && (
-                                <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }}>
-                                  {/* Mute action */}
-                                  {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                                    <button 
-                                      onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
-                                      className="tile-menu-item"
-                                    >
-                                      {p.isMuted ? 'Unmute' : 'Mute'}
-                                    </button>
-                                  )}
-                                  
-                                  {/* Camera off action */}
-                                  {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                                    <button 
-                                      onClick={() => handleParticipantCameraToggle(p.id, p.name)} 
-                                      className="tile-menu-item"
-                                    >
-                                      {p.isCamOff ? 'Turn camera on' : 'Turn camera off'}
-                                    </button>
-                                  )}
-                                  
-                                  {/* Pin action */}
-                                  <button 
-                                    onClick={() => handleParticipantPinToggle(p.id, p.name)} 
-                                    className="tile-menu-item"
-                                  >
-                                    {p.isPinned ? 'Unpin' : 'Pin'}
-                                  </button>
-                                  
-                                  {/* Role Promotion/Demotion Actions (Admin only can do anything. Host can promote to co-host/demote co-host) */}
-                                  {callParticipants.find(part => part.id === getMyId())?.role === 'admin' && (
-                                    <>
-                                      {p.role !== 'host' && (
-                                        <button 
-                                          onClick={() => handleParticipantRoleChange(p.id, 'host')} 
-                                          className="tile-menu-item"
-                                        >
-                                          Make Host
-                                        </button>
-                                      )}
-                                      {p.role !== 'cohost' && (
-                                        <button 
-                                          onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
-                                          className="tile-menu-item"
-                                        >
-                                          Make Co-host
-                                        </button>
-                                      )}
-                                      {p.role !== 'member' && (
-                                        <button 
-                                          onClick={() => handleParticipantRoleChange(p.id, 'member')} 
-                                          className="tile-menu-item"
-                                        >
-                                          Demote to Member
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-
-                                  {callParticipants.find(part => part.id === getMyId())?.role === 'host' && (
-                                    <>
-                                      {p.role === 'member' && (
-                                        <button 
-                                          onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
-                                          className="tile-menu-item"
-                                        >
-                                          Make Co-host
-                                        </button>
-                                      )}
-                                      {p.role === 'cohost' && (
-                                        <button 
-                                          onClick={() => handleParticipantRoleChange(p.id, 'member')} 
-                                          className="tile-menu-item"
-                                        >
-                                          Demote to Member
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-
-                                  {/* Kick action */}
-                                  {checkCanKick(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                                    <button 
-                                      onClick={() => handleParticipantRemove(p.id, p.name)} 
-                                      className="tile-menu-item" 
-                                      style={{ color: '#ef4444' }}
-                                    >
-                                      Kick out
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
 
                   {/* Layout Caption toggle */}
                   <p className="stage-caption" onClick={() => setIsGalleryView(!isGalleryView)}>
@@ -5190,6 +5318,19 @@ function AppContent() {
                   onChange={(e) => setProfileEditName(e.target.value)}
                   required
                   maxLength={25}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label htmlFor="profilePhotoURL" className="form-label">Avatar Image URL (optional)</label>
+                <input 
+                  type="url" 
+                  id="profilePhotoURL"
+                  className="search-input"
+                  style={{ paddingLeft: '16px' }}
+                  value={profileEditPhotoURL}
+                  onChange={(e) => setProfileEditPhotoURL(e.target.value)}
+                  placeholder="https://example.com/avatar.png"
                 />
               </div>
 

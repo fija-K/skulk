@@ -542,7 +542,9 @@ body {
   gap: 16px;
   transition: border-color var(--transition-speed) ease, transform var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1), background-color var(--transition-speed) ease;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+  height: auto;
+  min-height: fit-content;
 }
 
 .room-card:hover {
@@ -583,7 +585,8 @@ body {
 /* Avatar Row */
 .avatar-row {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 12px 8px;
   margin: 4px 0 12px 0;
   padding-left: 18px;
 }
@@ -591,6 +594,11 @@ body {
 .avatar-slot {
   width: 64px;
   height: 64px;
+  min-width: 64px;
+  max-width: 64px;
+  min-height: 64px;
+  max-height: 64px;
+  aspect-ratio: 1;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -598,6 +606,7 @@ body {
   font-size: 16px;
   font-weight: 700;
   transition: all var(--transition-speed) ease;
+  flex-shrink: 0;
 }
 
 .avatar-filled {
@@ -969,6 +978,104 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 .participants-container.gallery-layout {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   max-width: 100%;
+}
+
+/* Spotlight Stage View */
+.spotlight-stage-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.spotlight-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border-color);
+  max-height: 120px;
+  align-items: center;
+  scrollbar-width: thin;
+}
+
+.spotlight-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.spotlight-strip::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.spotlight-thumbnail-tile {
+  background-color: var(--panel-bg);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--border-radius);
+  width: 100px;
+  height: 62px;
+  min-width: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  transition: all var(--transition-speed) ease;
+  cursor: pointer;
+}
+
+.spotlight-thumbnail-tile:hover {
+  border-color: var(--primary-color);
+}
+
+.spotlight-thumbnail-tile.active {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 10px var(--primary-color);
+}
+
+.spotlight-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.spotlight-main .participant-tile {
+  max-width: 850px;
+  max-height: 100%;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16/10;
+}
+
+.btn-exit-spotlight {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
+  background-color: rgba(15, 16, 19, 0.85);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+.btn-exit-spotlight:hover {
+  background-color: var(--primary-color);
+  color: #000;
+  border-color: var(--primary-color);
 }
 
 /* Stage Participant Tiles */
@@ -1515,8 +1622,8 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 }
 
 .dock-btn {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background-color: var(--button-secondary-bg);
   border: 1px solid var(--border-color);
@@ -1526,6 +1633,11 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   justify-content: center;
   cursor: pointer;
   transition: all var(--transition-speed) ease;
+}
+
+.dock-btn svg {
+  width: 22px;
+  height: 22px;
 }
 
 .dock-btn:hover {
@@ -1547,8 +1659,8 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   background-color: #ef4444;
   border-color: #ef4444;
   color: #ffffff;
-  width: 90px;
-  height: 48px;
+  width: 104px;
+  height: 52px;
   border-radius: var(--btn-radius);
   font-size: 14px;
   font-weight: 700;
