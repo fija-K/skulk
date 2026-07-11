@@ -13,6 +13,14 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
+import {
+  LiveKitRoom,
+  VideoTrack,
+  useTracks,
+  RoomAudioRenderer
+} from '@livekit/components-react';
+import '@livekit/components-styles';
+import { Track } from 'livekit-client';
 
 interface Room {
   id: string;
@@ -62,29 +70,15 @@ interface ChatMessage {
   createdAt?: string;
 }
 
-interface LocalVideoProps {
-  stream: MediaStream | null;
-  muted?: boolean;
-}
+function ParticipantVideo({ participantId }: { participantId: string }) {
+  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
+  const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
 
-function LocalVideo({ stream, muted = true }: LocalVideoProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.play().catch(err => {
-        console.warn("Failed to autoplay video stream:", err);
-      });
-    }
-  }, [stream]);
+  if (!trackRef) return null;
 
-  if (!stream) return null;
   return (
-    <video 
-      ref={videoRef} 
-      autoPlay 
-      playsInline 
-      muted={muted} 
+    <VideoTrack 
+      trackRef={trackRef} 
       style={{ 
         width: '100%', 
         height: '100%', 
@@ -249,6 +243,7 @@ export default function App() {
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(false);
+  const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   
   // Sidebar tabs in-call panel
   const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools'>('chat');
@@ -347,15 +342,9 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const hasSeenSelfInListRef = useRef(false);
-  const [iceServersConfig, setIceServersConfig] = useState<RTCIceServer[]>([
-    { urls: 'stun:stun.l.google.com:19302' }
-  ]);
 
   // Helper to determine role dynamically based on auth email and room creator
   const determineRole = (roomCreatorId?: string) => {
@@ -503,24 +492,6 @@ export default function App() {
       }));
     }
   }, [guestName, guestColor, guestInitials, currentRoom]);
-
-  // Fetch TURN credentials from serverless api on mount
-  useEffect(() => {
-    const fetchIceServers = async () => {
-      try {
-        const response = await fetch('/api/turn-credentials');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.iceServers) {
-            setIceServersConfig(data.iceServers);
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to fetch dynamic TURN credentials, using default STUN fallback:", err);
-      }
-    };
-    fetchIceServers();
-  }, []);
 
   // Cleanup old pre-existing default rooms from Firestore if they exist
   useEffect(() => {
@@ -857,67 +828,32 @@ export default function App() {
     setViewingShare(null);
     setChatMessages([]);
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showToast("⚠️ Microphone & Camera are only available on HTTPS or localhost secure connections.");
-      return;
-    }
-
+    // Fetch LiveKit Token
     try {
-      // 1. Try to get both video and audio
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      setLocalStream(stream);
-      if (myId) {
-        try {
-          await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-            isMuted: false,
-            isCamOff: false,
-            mutedBy: myId,
-            camOffBy: myId
-          });
-        } catch (e) {}
+      const myId = getMyId();
+      const myName = user ? user.displayName || 'Google User' : guestName;
+      const res = await fetch(`/api/get-livekit-token?room=${normalizedRoom.id}&identity=${myId}&name=${encodeURIComponent(myName)}`);
+      const data = await res.json();
+      if (data.token) {
+        setLiveKitToken(data.token);
+      } else {
+        showToast("⚠️ Failed to connect to LiveKit server");
       }
     } catch (e) {
-      console.warn("Failed to get both video and audio, trying audio only:", e);
+      console.warn("Failed to fetch token:", e);
+      showToast("⚠️ Failed to fetch LiveKit token");
+    }
+
+    // Set initial presence (both true or false depending on your preference, we default to unmuted/on)
+    if (myId) {
       try {
-        // 2. Try audio only
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setLocalStream(stream);
-        setIsCamOff(true);
-        if (myId) {
-          try {
-            await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-              isMuted: false,
-              isCamOff: true,
-              mutedBy: myId,
-              camOffBy: myId
-            });
-          } catch (e) {}
-        }
-      } catch (e2) {
-        console.warn("Failed to get audio, trying video only:", e2);
-        try {
-          // 3. Try video only
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          setLocalStream(stream);
-          setIsMicMuted(true);
-          if (myId) {
-            try {
-              await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-                isMuted: true,
-                isCamOff: false,
-                mutedBy: myId,
-                camOffBy: myId
-              });
-            } catch (e) {}
-          }
-        } catch (e3) {
-          console.warn("All media requests failed:", e3);
-          showToast("Mic & Camera blocked. Please click the site settings lock icon in your browser address bar to allow permissions.");
-        }
-      }
+        await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
+          isMuted: false,
+          isCamOff: false,
+          mutedBy: myId,
+          camOffBy: myId
+        });
+      } catch (e) {}
     }
   };
 
@@ -931,10 +867,7 @@ export default function App() {
       setCallParticipants([]);
       setChatMessages([]);
       setViewingShare(null);
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        setLocalStream(null);
-      }
+      setLiveKitToken(null);
     }
     navigate('/');
   };
@@ -942,22 +875,12 @@ export default function App() {
   const toggleMic = async () => {
     const nextVal = !isMicMuted;
     setIsMicMuted(nextVal);
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !nextVal;
-      });
-    }
     await updateMySharing({ isMuted: nextVal, mutedBy: getMyId() });
   };
 
   const toggleCamera = async () => {
     const nextVal = !isCamOff;
     setIsCamOff(nextVal);
-    if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = !nextVal;
-      });
-    }
     await updateMySharing({ isCamOff: nextVal, camOffBy: getMyId() });
   };
 
@@ -1017,10 +940,7 @@ export default function App() {
         setCallParticipants([]);
         setChatMessages([]);
         setViewingShare(null);
-        if (localStream) {
-          localStream.getTracks().forEach(track => track.stop());
-          setLocalStream(null);
-        }
+        setLiveKitToken(null);
       }
     }
   }, [roomId, rooms, user, guestId, isAuthLoading]);
@@ -1035,250 +955,7 @@ export default function App() {
     };
   }, [currentRoom]);
 
-  // Clean up local media tracks when stream changes or unmounts
-  useEffect(() => {
-    return () => {
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [localStream]);
 
-  // Clean up all WebRTC peer connections on unmount/leave
-  useEffect(() => {
-    return () => {
-      Object.keys(pcsRef.current).forEach(peerId => {
-        pcsRef.current[peerId].close();
-        delete pcsRef.current[peerId];
-      });
-      setRemoteStreams({});
-    };
-  }, [currentRoom]);
-
-  const signalUnsubsRef = useRef<Record<string, (() => void)[]>>({});
-
-  // Real-time WebRTC Mesh signaling over Firestore for participant video/audio
-  useEffect(() => {
-    if (!currentRoom || !localStream) {
-      Object.keys(pcsRef.current).forEach(peerId => {
-        try { pcsRef.current[peerId].close(); } catch (e) {}
-        delete pcsRef.current[peerId];
-        if (signalUnsubsRef.current[peerId]) {
-          signalUnsubsRef.current[peerId].forEach(u => u());
-          delete signalUnsubsRef.current[peerId];
-        }
-      });
-      setRemoteStreams({});
-      return;
-    }
-    const myId = getMyId();
-    const rid = roomDocId(currentRoom);
-    
-    const currentPeerIds = callParticipants.map(p => p.id).filter(id => id !== myId);
-    
-    // Cleanup dropped peers
-    Object.keys(pcsRef.current).forEach(peerId => {
-      if (!currentPeerIds.includes(peerId)) {
-        try { pcsRef.current[peerId].close(); } catch (e) {}
-        delete pcsRef.current[peerId];
-        if (signalUnsubsRef.current[peerId]) {
-          signalUnsubsRef.current[peerId].forEach(u => u());
-          delete signalUnsubsRef.current[peerId];
-        }
-        setRemoteStreams(prev => {
-          const next = { ...prev };
-          delete next[peerId];
-          return next;
-        });
-      }
-    });
-
-    currentPeerIds.forEach(peerId => {
-      if (pcsRef.current[peerId]) return; // Already connected or connecting
-      
-      const pc = new RTCPeerConnection({
-        iceServers: iceServersConfig
-      });
-      pcsRef.current[peerId] = pc;
-      signalUnsubsRef.current[peerId] = [];
-      
-      // Candidate queue to ensure we only add ICE candidates AFTER remoteDescription is set
-      let remoteDescriptionSet = false;
-      const candidateQueue: RTCIceCandidateInit[] = [];
-
-      const addCandidate = async (cand: RTCIceCandidateInit) => {
-        if (remoteDescriptionSet) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(cand));
-            console.log(`[WebRTC] Successfully added ICE candidate from ${peerId}`);
-          } catch (e) {
-            console.warn("Failed to add ICE candidate:", e);
-          }
-        } else {
-          candidateQueue.push(cand);
-          console.log(`[WebRTC] Queued ICE candidate from ${peerId} (remote description not set yet)`);
-        }
-      };
-
-      const processQueue = async () => {
-        remoteDescriptionSet = true;
-        for (const cand of candidateQueue) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(cand));
-          } catch (e) {
-            console.warn("Failed to add queued candidate:", e);
-          }
-        }
-        candidateQueue.length = 0;
-      };
-
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-      
-      pc.ontrack = (event) => {
-        console.log(`[WebRTC] pc.ontrack fired for peerId: ${peerId}. Track count: ${event.streams[0]?.getTracks().length}, tracks:`, event.streams[0]?.getTracks().map(t => t.kind));
-        if (event.streams && event.streams[0]) {
-          setRemoteStreams(prev => ({
-            ...prev,
-            [peerId]: event.streams[0]
-          }));
-        }
-      };
-      pc.onconnectionstatechange = () => {
-        console.log(`[WebRTC] Connection state with ${peerId}: ${pc.connectionState}`);
-      };
-      pc.oniceconnectionstatechange = () => {
-        console.log(`[WebRTC] ICE Connection state with ${peerId}: ${pc.iceConnectionState}`);
-      };
-      
-      const signalId = myId < peerId ? `${myId}_to_${peerId}` : `${peerId}_to_${myId}`;
-      const signalDoc = doc(db, 'rooms', rid, 'signals', signalId);
-      const candidatesRef = collection(db, 'rooms', rid, 'signals', signalId, 'candidates');
-      
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          console.log(`[WebRTC] Generated ICE candidate for ${peerId}`);
-          try {
-            const candidateData = event.candidate.toJSON();
-            const candId = `cand_${Math.random().toString(36).substring(2, 9)}`;
-            await setDoc(doc(candidatesRef, candId), {
-              candidate: candidateData,
-              senderId: myId
-            });
-            console.log(`[WebRTC] Wrote ICE candidate to Firestore for ${peerId}`);
-          } catch (e) {
-            console.warn("Failed to write ICE candidate:", e);
-          }
-        }
-      };
-      
-      if (myId < peerId) {
-        // Direct offer creation for Initiator to avoid negotiationneeded timing issues
-        const makeOffer = async () => {
-          if (pc.signalingState !== 'stable') return;
-          try {
-            // Delete any stale signals and candidates from a previous session first
-            await deleteDoc(signalDoc);
-            const candidatesSnap = await getDocs(candidatesRef);
-            for (const d of candidatesSnap.docs) {
-              try { await deleteDoc(d.ref); } catch (e) {}
-            }
-            candidateQueue.length = 0; // Wipe queued stale candidates
-
-            console.log(`[WebRTC] Initiator creating offer for ${peerId}`);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            console.log(`[WebRTC] Initiator set local description (offer) for ${peerId}`);
-            
-            await setDoc(signalDoc, {
-              offer: { sdp: offer.sdp, type: offer.type },
-              initiatorId: myId,
-              receiverId: peerId
-            });
-            console.log(`[WebRTC] Initiator wrote offer to Firestore for ${peerId}`);
-          } catch (e) {
-            console.warn("Failed to create WebRTC offer:", e);
-          }
-        };
-        makeOffer();
-        
-        const unsub = onSnapshot(signalDoc, async (snap) => {
-          if (!snap.exists()) return;
-          const data = snap.data();
-          
-          if (data.answer && !pc.remoteDescription) {
-            console.log(`[WebRTC] Initiator read answer from Firestore from ${peerId}`);
-            try {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-              console.log(`[WebRTC] Initiator set remote description (answer) from ${peerId}`);
-              await processQueue();
-            } catch (e) {
-              console.warn("Failed to set remote answer:", e);
-            }
-          }
-        });
-        signalUnsubsRef.current[peerId].push(unsub);
-      } else {
-        let processedOffer = false;
-        const unsub = onSnapshot(signalDoc, async (snap) => {
-          if (!snap.exists()) {
-            if (processedOffer) {
-              console.log(`[WebRTC] Signal doc deleted by Initiator. Restarting connection for ${peerId}`);
-              try { pcsRef.current[peerId].close(); } catch (e) {}
-              delete pcsRef.current[peerId];
-              if (signalUnsubsRef.current[peerId]) {
-                signalUnsubsRef.current[peerId].forEach(u => u());
-                delete signalUnsubsRef.current[peerId];
-              }
-              setCallParticipants(prev => [...prev]);
-            }
-            return;
-          }
-          const data = snap.data();
-          
-          if (data.offer && !pc.remoteDescription) {
-            processedOffer = true;
-            console.log(`[WebRTC] Receiver read offer from Firestore from ${peerId}`);
-            try {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-              console.log(`[WebRTC] Receiver set remote description (offer) from ${peerId}`);
-              
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              console.log(`[WebRTC] Receiver created and set local description (answer) for ${peerId}`);
-              
-              await setDoc(signalDoc, {
-                answer: { sdp: answer.sdp, type: answer.type }
-              }, { merge: true });
-              console.log(`[WebRTC] Receiver wrote answer to Firestore for ${peerId}`);
-              
-              await processQueue();
-            } catch (e) {
-              console.warn("Failed to set remote offer and answer:", e);
-            }
-          }
-        });
-        signalUnsubsRef.current[peerId].push(unsub);
-      }
-
-      const unsubCandidates = onSnapshot(candidatesRef, (snap) => {
-        snap.docChanges().forEach(change => {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            if (data.senderId !== myId && data.candidate) {
-              console.log(`[WebRTC] Read remote ICE candidate from Firestore from ${peerId}`);
-              addCandidate(data.candidate);
-            }
-          }
-        });
-      });
-      signalUnsubsRef.current[peerId].push(unsubCandidates);
-    });
-
-    // Cleanup is now handled inside the effect when dependencies change in a way that should drop peers.
-    // We intentionally omit the returned cleanup function so listeners stay alive across re-renders for active peers.
-  }, [currentRoom, localStream, callParticipants, iceServersConfig]);
 
   // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
@@ -1409,15 +1086,10 @@ export default function App() {
       // ONLY apply remote changes if they were initiated by another user (moderator)
       if (myPresence.mutedBy && myPresence.mutedBy !== myId) {
         setIsMicMuted(myPresence.isMuted);
-        if (localStream) {
-          localStream.getAudioTracks().forEach(track => {
-            track.enabled = !myPresence.isMuted;
-          });
-        }
         showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
       }
     }
-  }, [callParticipants, currentRoom, isMicMuted, localStream]);
+  }, [callParticipants, currentRoom, isMicMuted]);
 
   // Synchronize remote camera actions with local camera state
   useEffect(() => {
@@ -1428,15 +1100,10 @@ export default function App() {
       // ONLY apply remote changes if they were initiated by another user (moderator)
       if (myPresence.camOffBy && myPresence.camOffBy !== myId) {
         setIsCamOff(myPresence.isCamOff);
-        if (localStream) {
-          localStream.getVideoTracks().forEach(track => {
-            track.enabled = !myPresence.isCamOff;
-          });
-        }
         showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
       }
     }
-  }, [callParticipants, currentRoom, isCamOff, localStream]);
+  }, [callParticipants, currentRoom, isCamOff]);
 
   // Listen to pending join requests (for Admin, Host, Co-host)
   useEffect(() => {
@@ -2921,9 +2588,25 @@ export default function App() {
 
       <Route path="/room/:roomId" element={
         currentRoom ? (
+          !liveKitToken ? (
+            <div className="call-layout animate-fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div className="loading-spinner" style={{ margin: '0 auto 16px', borderTopColor: 'var(--primary-color)', width: '32px', height: '32px', border: '3px solid var(--border-color)', borderRadius: '50%', borderTop: '3px solid var(--primary-color)', animation: 'spin 1s linear infinite' }}></div>
+                <p style={{ color: 'var(--text-secondary)' }}>Connecting to secure media server...</p>
+              </div>
+              <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            </div>
+          ) : (
           /* 2. In-Call Room Stage View (rendered if currentRoom is NOT null) */
-          <div className="call-layout animate-fade-in">
-          
+          <LiveKitRoom
+            token={liveKitToken}
+            serverUrl={import.meta.env.VITE_LIVEKIT_URL}
+            audio={!isMicMuted}
+            video={!isCamOff}
+            className="call-layout animate-fade-in"
+          >
+            <RoomAudioRenderer />
+            
           {/* Call Header */}
           <div className="call-top-bar">
             <div className="call-room-info">
@@ -3316,42 +2999,11 @@ export default function App() {
                               }
                             }}
                           >
-                            {isUser && !isCamOff && localStream ? (
-                              <LocalVideo stream={localStream} />
-                            ) : !isUser && !p.isCamOff && remoteStreams[p.id] ? (
-                              <LocalVideo stream={remoteStreams[p.id]} muted={true} />
-                            ) : !isUser && !p.isCamOff ? (
-                              <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {p.initials}
-                                <div style={{
-                                  position: 'absolute',
-                                  top: '6px',
-                                  right: '6px',
-                                  backgroundColor: '#10b981',
-                                  width: '8px',
-                                  height: '8px',
-                                  borderRadius: '50%',
-                                  boxShadow: '0 0 8px #10b981'
-                                }} title="Camera active" />
-                              </div>
+                            {!p.isCamOff ? (
+                              <ParticipantVideo participantId={p.id} />
                             ) : (
                               p.initials
                             )}
-                            
-                            {/* Hidden remote audio element to ensure audio is always playing in background even if camera is off */}
-                            {!isUser && remoteStreams[p.id] && (
-                              <audio 
-                                ref={(el) => {
-                                  if (el) {
-                                    el.srcObject = remoteStreams[p.id];
-                                    el.play().catch(e => console.warn("Autoplay remote audio blocked:", e));
-                                  }
-                                }}
-                                autoPlay
-                                style={{ display: 'none' }}
-                              />
-                            )}
-
                             {p.sharing && (
                               <div className="sharing-badge-overlay" style={{
                                 position: 'absolute',
@@ -4800,7 +4452,8 @@ export default function App() {
 
           </div>
 
-        </div>
+        </LiveKitRoom>
+          )
         ) : (
           <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
             <div 
