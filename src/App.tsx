@@ -163,6 +163,190 @@ function ScreenShareVideo({ participantId }: { participantId: string }) {
   );
 }
 
+// Load the YouTube Iframe API script dynamically if not already loaded
+let ytApiPromise: Promise<void> | null = null;
+function loadYoutubeApi(): Promise<void> {
+  if (ytApiPromise) return ytApiPromise;
+  
+  ytApiPromise = new Promise((resolve) => {
+    if ((window as any).YT && (window as any).YT.Player) {
+      resolve();
+      return;
+    }
+    
+    // Define global callback that YouTube API calls when loaded
+    const prevCallback = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      if (prevCallback) prevCallback();
+      resolve();
+    };
+    
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+  });
+  
+  return ytApiPromise;
+}
+
+function YouTubePlayer({ 
+  videoId, 
+  isPresenter, 
+  presenterId,
+  roomId
+}: { 
+  videoId: string; 
+  isPresenter: boolean; 
+  presenterId: string;
+  roomId: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<any>(null);
+  const isLocalChangeRef = useRef(false);
+
+  // Load API and instantiate player
+  useEffect(() => {
+    let active = true;
+    
+    loadYoutubeApi().then(() => {
+      if (!active || !containerRef.current) return;
+      
+      // Create a unique element ID for YouTube player to target
+      const divId = `yt-player-${Math.random().toString(36).substring(2, 9)}`;
+      const targetDiv = document.createElement('div');
+      targetDiv.id = divId;
+      targetDiv.style.width = '100%';
+      targetDiv.style.height = '100%';
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(targetDiv);
+
+      playerRef.current = new (window as any).YT.Player(divId, {
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          controls: isPresenter ? 1 : 0, // Presenter has controls, viewers have 0 controls!
+          disablekb: isPresenter ? 0 : 1, // Disable keyboard controls for viewers
+          rel: 0,
+          modestbranding: 1
+        },
+        events: {
+          onStateChange: (event: any) => {
+            if (!isPresenter) return;
+            // State: 1 = playing, 2 = paused
+            const state = event.data;
+            const time = playerRef.current?.getCurrentTime() || 0;
+            
+            // If it's a local user action, update Firestore!
+            if (!isLocalChangeRef.current) {
+              updateFirestorePlaybackState(state === 1, time);
+            }
+          }
+        }
+      });
+    });
+
+    return () => {
+      active = false;
+      if (playerRef.current && typeof playerRef.current.destroy === 'function') {
+        playerRef.current.destroy();
+      }
+    };
+  }, [videoId, isPresenter]);
+
+  // Firestore update helper
+  const updateFirestorePlaybackState = async (playing: boolean, time: number) => {
+    try {
+      const myId = getMyId();
+      await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
+        ytPlaying: playing,
+        ytTime: time,
+        ytUpdateTimestamp: Date.now()
+      });
+    } catch (e) {
+      console.warn("Failed to update YouTube playback in Firestore:", e);
+    }
+  };
+
+  // Sync loop for presenter to broadcast seek/current time periodically
+  useEffect(() => {
+    if (!isPresenter) return;
+
+    const interval = setInterval(() => {
+      if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
+        const state = playerRef.current.getPlayerState();
+        const time = playerRef.current.getCurrentTime();
+        // Periodically sync time if video is playing
+        if (state === 1) {
+          updateFirestorePlaybackState(true, time);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isPresenter]);
+
+  // Sync listener for viewers
+  useEffect(() => {
+    if (isPresenter) return;
+
+    const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
+    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+      if (!snapshot.exists() || !playerRef.current) return;
+      
+      const data = snapshot.data();
+      const targetPlaying = data.ytPlaying ?? false;
+      const targetTime = data.ytTime ?? 0;
+      const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
+      
+      // Calculate latency correction: if video was playing, adjust target time by time elapsed since update
+      let correctedTime = targetTime;
+      if (targetPlaying && targetTimestamp) {
+        const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
+        correctedTime += elapsedSeconds;
+      }
+
+      isLocalChangeRef.current = true;
+
+      // Sync play/pause
+      if (typeof playerRef.current.getPlayerState === 'function') {
+        const currentState = playerRef.current.getPlayerState();
+        if (targetPlaying && currentState !== 1) {
+          playerRef.current.playVideo();
+        } else if (!targetPlaying && currentState === 1) {
+          playerRef.current.pauseVideo();
+        }
+      }
+
+      // Sync seek (if drift is > 2 seconds)
+      if (typeof playerRef.current.getCurrentTime === 'function') {
+        const currentTime = playerRef.current.getCurrentTime();
+        if (Math.abs(currentTime - correctedTime) > 2) {
+          playerRef.current.seekTo(correctedTime, true);
+        }
+      }
+
+      isLocalChangeRef.current = false;
+    });
+
+    return () => unsubscribe();
+  }, [isPresenter, presenterId, roomId]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        position: 'relative', 
+        borderRadius: 'var(--border-radius)', 
+        overflow: 'hidden',
+        backgroundColor: '#000'
+      }} 
+    />
+  );
+}
+
 function DeviceRecoveryManager({ 
   isCamOff, 
   isMicMuted,
@@ -1389,19 +1573,63 @@ function AppContent() {
 
   // Session Target States
   const [targetInputText, setTargetInputText] = useState('');
-  const [targetsList, setTargetsList] = useState([
-    { id: 't1', text: 'Finish arrays sheet', completed: true },
-    { id: 't2', text: 'Two pointers practice', completed: true },
-    { id: 't3', text: 'Sliding window notes', completed: true },
-    { id: 't4', text: 'GATE mock test 1', completed: false },
-    { id: 't5', text: 'Review binary search', completed: false }
-  ]);
-  const [targetsHistory, setTargetsHistory] = useState([
-    { date: 'Jun 29', completedCount: 5, totalCount: 5 },
-    { date: 'Jun 22', completedCount: 4, totalCount: 4 },
-    { date: 'Jun 15', completedCount: 2, totalCount: 5 },
-    { date: 'Jun 8', completedCount: 6, totalCount: 6 }
-  ]);
+  const [targetsList, setTargetsList] = useState<any[]>([]);
+  const [targetsHistory, setTargetsHistory] = useState<any[]>([]);
+
+  // Listen to Firestore for user's targets list and history
+  useEffect(() => {
+    if (!user) {
+      // Guest fallback: load from local storage
+      const localList = localStorage.getItem('skulk_guest_targets_list');
+      const localHistory = localStorage.getItem('skulk_guest_targets_history');
+      setTargetsList(localList ? JSON.parse(localList) : [
+        { id: 't1', text: 'Finish arrays sheet', completed: true },
+        { id: 't2', text: 'Two pointers practice', completed: true },
+        { id: 't3', text: 'Sliding window notes', completed: true },
+        { id: 't4', text: 'GATE mock test 1', completed: false },
+        { id: 't5', text: 'Review binary search', completed: false }
+      ]);
+      setTargetsHistory(localHistory ? JSON.parse(localHistory) : [
+        { date: 'Jun 29', completedCount: 5, totalCount: 5 },
+        { date: 'Jun 22', completedCount: 4, totalCount: 4 },
+        { date: 'Jun 15', completedCount: 2, totalCount: 5 },
+        { date: 'Jun 8', completedCount: 6, totalCount: 6 }
+      ]);
+      return;
+    }
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setTargetsList(data.targetsList || []);
+        setTargetsHistory(data.targetsHistory || []);
+      } else {
+        // Initialize new user document with default templates
+        const initialList = [
+          { id: 't1', text: 'Finish arrays sheet', completed: true },
+          { id: 't2', text: 'Two pointers practice', completed: true },
+          { id: 't3', text: 'Sliding window notes', completed: true },
+          { id: 't4', text: 'GATE mock test 1', completed: false },
+          { id: 't5', text: 'Review binary search', completed: false }
+        ];
+        const initialHistory = [
+          { date: 'Jun 29', completedCount: 5, totalCount: 5 },
+          { date: 'Jun 22', completedCount: 4, totalCount: 4 },
+          { date: 'Jun 15', completedCount: 2, totalCount: 5 },
+          { date: 'Jun 8', completedCount: 6, totalCount: 6 }
+        ];
+        setDoc(userDocRef, {
+          targetsList: initialList,
+          targetsHistory: initialHistory
+        }, { merge: true }).catch(err => {
+          console.warn("Error initializing user targets in Firestore:", err);
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Mini Deadline Clock States
   const [deadlineNewStepName, setDeadlineNewStepName] = useState('');
@@ -3305,29 +3533,74 @@ function AppContent() {
   };
 
   // Session Target Handlers
-  const handleAddTarget = (e: React.FormEvent) => {
+  const handleAddTarget = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetInputText.trim()) return;
-    setTargetsList(prev => [...prev, { id: Date.now().toString(), text: targetInputText.trim(), completed: false }]);
+    
+    const nextItem = { id: Date.now().toString(), text: targetInputText.trim(), completed: false };
+    const nextList = [...targetsList, nextItem];
+    
+    if (user) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await setDoc(userDocRef, { targetsList: nextList }, { merge: true });
+      } catch (err) {
+        console.error("Failed to add target to Firestore:", err);
+      }
+    } else {
+      setTargetsList(nextList);
+      localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
+    }
+    
     setTargetInputText('');
     showToast('Weekly target added!');
   };
 
-  const handleToggleTarget = (id: string) => {
-    setTargetsList(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  const handleToggleTarget = async (id: string) => {
+    const nextList = targetsList.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
+    
+    if (user) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await setDoc(userDocRef, { targetsList: nextList }, { merge: true });
+      } catch (err) {
+        console.error("Failed to toggle target in Firestore:", err);
+      }
+    } else {
+      setTargetsList(nextList);
+      localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
+    }
   };
 
-  const handleStartNewWeek = () => {
+  const handleStartNewWeek = async () => {
     const totalCount = targetsList.length;
     const completedCount = targetsList.filter(t => t.completed).length;
     const startOfWeek = new Date();
     const formattedDate = startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     
-    setTargetsHistory(prev => [
+    const nextHistory = [
       { date: formattedDate, completedCount, totalCount },
-      ...prev
-    ]);
-    setTargetsList([]);
+      ...targetsHistory
+    ];
+    const nextList: any[] = [];
+    
+    if (user) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await setDoc(userDocRef, {
+          targetsList: nextList,
+          targetsHistory: nextHistory
+        }, { merge: true });
+      } catch (err) {
+        console.error("Failed to archive week in Firestore:", err);
+      }
+    } else {
+      setTargetsList(nextList);
+      setTargetsHistory(nextHistory);
+      localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
+      localStorage.setItem('skulk_guest_targets_history', JSON.stringify(nextHistory));
+    }
+    
     showToast('Started new week! Archived progress to history.');
   };
 
@@ -6022,15 +6295,11 @@ function AppContent() {
                     {viewingShare.type === 'screen' ? (
                       <ScreenShareVideo participantId={viewingShare.participantId} />
                     ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
-                      <iframe 
-                        width="100%" 
-                        height="100%" 
-                        src={`https://www.youtube.com/embed/${viewingShare.youtubeVideoId}?autoplay=1`}
-                        title="YouTube video player" 
-                        frameBorder="0" 
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                        allowFullScreen
-                        style={{ border: 'none', borderRadius: 'var(--border-radius)' }}
+                      <YouTubePlayer
+                        videoId={viewingShare.youtubeVideoId}
+                        isPresenter={viewingShare.participantId === getMyId()}
+                        presenterId={viewingShare.participantId}
+                        roomId={roomDocId(currentRoom!)}
                       />
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
@@ -6796,6 +7065,11 @@ function AppContent() {
 
                         {/* Checklist Container */}
                         <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '16px', marginBottom: '16px' }}>
+                          {!user && (
+                            <div style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '4px', padding: '8px', marginBottom: '12px', lineHeight: '1.4' }}>
+                              ⚠️ You are a guest. <strong>Sign in</strong> to save your targets permanently across devices, otherwise progress will be lost on page reload.
+                            </div>
+                          )}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                             <div>
                               <h5 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>This week's targets</h5>
