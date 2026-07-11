@@ -1072,6 +1072,7 @@ function AppContent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [systemMessages, setSystemMessages] = useState<any[]>([]);
   const isInitialLoadRef = useRef(true);
+  const localJoinTimeRef = useRef<number | null>(null);
   
   // In-call participants state
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
@@ -1753,6 +1754,18 @@ function AppContent() {
     const myId = getMyId();
     const newSessionId = Math.random().toString(36).substring(2, 10);
     console.log(`[LOCAL JOIN ACTION] Initiated enterCallRoom: RoomID=${normalizedRoom.id}, MyID=${myId}, SessionID=${newSessionId}, EventTime=${new Date().toISOString()}`);
+    
+    // Set local join time and push the initial system message immediately
+    localJoinTimeRef.current = Date.now();
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setSystemMessages([
+      {
+        id: `system_join_self_${Date.now()}`,
+        text: `You joined · ${timeStr}`,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
@@ -2070,11 +2083,12 @@ function AppContent() {
           console.log(`[PRESENCE EVENT] Participant ADDED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, JoinTime=${data.joinedAt || 'none'}, EventTime=${timestamp}`);
           if (!isInitialLoadRef.current) {
             const timeStr = getFormattedTime();
+            const displayName = docId === myId ? 'You' : cleanName;
             setSystemMessages(prev => [
               ...prev,
               {
                 id: `system_join_${docId}_${Date.now()}`,
-                text: `${cleanName} joined · ${timeStr}`,
+                text: `${displayName} joined · ${timeStr}`,
                 createdAt: timestamp
               }
             ]);
@@ -2085,11 +2099,12 @@ function AppContent() {
           console.log(`[PRESENCE EVENT] Participant REMOVED: ID=${docId}, Name=${data.name}, EventTime=${timestamp}`);
           if (!isInitialLoadRef.current) {
             const timeStr = getFormattedTime();
+            const displayName = docId === myId ? 'You' : cleanName;
             setSystemMessages(prev => [
               ...prev,
               {
                 id: `system_leave_${docId}_${Date.now()}`,
-                text: `${cleanName} left · ${timeStr}`,
+                text: `${displayName} left · ${timeStr}`,
                 createdAt: timestamp
               }
             ]);
@@ -2425,13 +2440,21 @@ function AppContent() {
     
     const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
       const list = snapshot.docs.map(docSnap => docSnap.data() as ChatMessage);
+      
+      // Filter out messages sent before the local user joined or refreshed this session
+      const joinTime = localJoinTimeRef.current || Date.now();
+      const filtered = list.filter(msg => {
+        if (!msg.createdAt) return true;
+        return new Date(msg.createdAt).getTime() >= joinTime;
+      });
+
       // Sort client-side by createdAt to prevent query index requirements
-      list.sort((a, b) => {
+      filtered.sort((a, b) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return timeA - timeB;
       });
-      setChatMessages(list);
+      setChatMessages(filtered);
     }, (error) => {
       console.warn("Firestore chat subscription failed:", error);
     });
