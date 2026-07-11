@@ -1070,6 +1070,8 @@ function AppContent() {
   const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools'>('chat');
   const [chatMessageText, setChatMessageText] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [systemMessages, setSystemMessages] = useState<any[]>([]);
+  const isInitialLoadRef = useRef(true);
   
   // In-call participants state
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
@@ -1455,17 +1457,64 @@ function AppContent() {
   }, [currentRoom]);
 
   const handleSignIn = async () => {
+    const gid = getMyId();
+    const rid = currentRoom ? roomDocId(currentRoom) : null;
+    let deletedGid = false;
+
     try {
+      if (rid && gid && gid.startsWith('guest_')) {
+        console.log("[AUTH TRANSITION] Deleting guest presence before sign-in:", gid);
+        try {
+          await deleteDoc(doc(db, 'rooms', rid, 'participants', gid));
+          deletedGid = true;
+        } catch (e) {
+          console.warn("Failed to delete guest presence before sign-in:", e);
+        }
+      }
+
       await signInWithPopup(auth, googleProvider);
       showToast('Signed in successfully!');
     } catch (error: any) {
       console.error('Sign-in error:', error);
       showToast(`Sign-in failed: ${error.message}`);
+      
+      // Re-create guest presence if it was deleted but sign-in was cancelled or failed
+      if (deletedGid && rid && gid) {
+        console.log("[AUTH TRANSITION] Re-creating guest presence after sign-in failed:", gid);
+        try {
+          const presenceRef = doc(db, 'rooms', rid, 'participants', gid);
+          const myRole = determineRole(currentRoom?.creatorId);
+          await setDoc(presenceRef, {
+            uid: gid,
+            name: guestName,
+            photoURL: guestPhotoURL,
+            initials: guestInitials,
+            color: guestColor,
+            joinedAt: new Date().toISOString(),
+            role: myRole,
+            mutedBy: gid,
+            camOffBy: gid,
+            sessionId: currentSessionIdRef.current
+          });
+        } catch (e) {
+          console.error("Failed to restore guest presence:", e);
+        }
+      }
     }
   };
 
   const handleSignOut = async () => {
     try {
+      const myId = getMyId();
+      if (currentRoom && myId && !myId.startsWith('guest_')) {
+        const rid = roomDocId(currentRoom);
+        console.log("[AUTH TRANSITION] Deleting logged-in presence before sign-out:", myId);
+        try {
+          await deleteDoc(doc(db, 'rooms', rid, 'participants', myId));
+        } catch (e) {
+          console.warn("Failed to delete user presence before sign-out:", e);
+        }
+      }
       await signOut(auth);
       setIsUserDropdownOpen(false);
       showToast('Signed out.');
@@ -1781,6 +1830,8 @@ function AppContent() {
       setCurrentRoom(null);
       setCallParticipants([]);
       setChatMessages([]);
+      setSystemMessages([]);
+      isInitialLoadRef.current = true;
       setViewingShare(null);
       setLiveKitToken(null);
     }
@@ -1873,6 +1924,8 @@ function AppContent() {
         setCurrentRoom(null);
         setCallParticipants([]);
         setChatMessages([]);
+        setSystemMessages([]);
+        isInitialLoadRef.current = true;
         setViewingShare(null);
         setLiveKitToken(null);
       }
@@ -1926,7 +1979,8 @@ function AppContent() {
         joinedAt: new Date().toISOString(),
         role: myRole,
         mutedBy: myId,
-        camOffBy: myId
+        camOffBy: myId,
+        sessionId: currentSessionIdRef.current
       }, { merge: true });
     };
     
@@ -2005,12 +2059,41 @@ function AppContent() {
         const docId = change.doc.id;
         const data = change.doc.data();
         const timestamp = new Date().toISOString();
+        const cleanName = data.name ? data.name.replace(' (You)', '') : 'Someone';
+        
+        // Helper to format local time as e.g. "3:42 PM"
+        const getFormattedTime = () => {
+          return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+
         if (change.type === 'added') {
           console.log(`[PRESENCE EVENT] Participant ADDED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, JoinTime=${data.joinedAt || 'none'}, EventTime=${timestamp}`);
+          if (!isInitialLoadRef.current) {
+            const timeStr = getFormattedTime();
+            setSystemMessages(prev => [
+              ...prev,
+              {
+                id: `system_join_${docId}_${Date.now()}`,
+                text: `${cleanName} joined · ${timeStr}`,
+                createdAt: timestamp
+              }
+            ]);
+          }
         } else if (change.type === 'modified') {
           console.log(`[PRESENCE EVENT] Participant MODIFIED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, EventTime=${timestamp}`);
         } else if (change.type === 'removed') {
           console.log(`[PRESENCE EVENT] Participant REMOVED: ID=${docId}, Name=${data.name}, EventTime=${timestamp}`);
+          if (!isInitialLoadRef.current) {
+            const timeStr = getFormattedTime();
+            setSystemMessages(prev => [
+              ...prev,
+              {
+                id: `system_leave_${docId}_${Date.now()}`,
+                text: `${cleanName} left · ${timeStr}`,
+                createdAt: timestamp
+              }
+            ]);
+          }
         }
       });
 
@@ -2057,6 +2140,7 @@ function AppContent() {
       }
       
       setCallParticipants(list);
+      isInitialLoadRef.current = false;
     }, (error) => {
       console.warn("Firestore call presence subscription failed, falling back to local user presence:", error);
       const myId = getMyId();
@@ -5898,43 +5982,74 @@ function AppContent() {
                 {callTab === 'chat' && (
                   <>
                     <div className="chat-messages-list">
-                      {chatMessages.map((msg) => {
-                        const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
-                        return (
-                          <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span className="chat-sender" style={{ fontWeight: 700, fontSize: '13px' }}>{msg.sender}</span>
-                              {role && role !== 'member' && (
-                                <span className={`role-badge-${role}`} style={{
-                                  fontSize: '8px',
-                                  fontWeight: 'bold',
-                                  padding: '1px 4px',
-                                  borderRadius: '3px',
-                                  border: '1px solid',
-                                  textTransform: 'uppercase',
-                                  lineHeight: '1.2',
-                                  ...role === 'admin' ? {
-                                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                                    borderColor: 'var(--primary-color, #f1c40f)',
-                                    color: 'var(--primary-color, #f1c40f)'
-                                  } : role === 'host' ? {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                    borderColor: '#3b82f6',
-                                    color: '#3b82f6'
-                                  } : {
-                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                    borderColor: '#10b981',
-                                    color: '#10b981'
-                                  }
-                                }}>
-                                  {role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-                                </span>
-                              )}
+                      {(() => {
+                        const combined = [
+                          ...chatMessages.map(m => ({ ...m, type: 'chat' as const })),
+                          ...systemMessages.map(m => ({ ...m, type: 'system' as const }))
+                        ].sort((a, b) => {
+                          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                          return timeA - timeB;
+                        });
+
+                        return combined.map((msg) => {
+                          if (msg.type === 'system') {
+                            return (
+                              <div 
+                                key={msg.id} 
+                                className="chat-message-item chat-system-message animate-fade-in" 
+                                style={{ 
+                                  textAlign: 'center', 
+                                  padding: '8px 12px', 
+                                  color: 'var(--text-secondary, #94a3b8)', 
+                                  fontSize: '11px',
+                                  fontStyle: 'italic',
+                                  opacity: 0.8,
+                                  borderBottom: '1px solid rgba(255,255,255,0.02)'
+                                }}
+                              >
+                                {msg.text}
+                              </div>
+                            );
+                          }
+
+                          const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
+                          return (
+                            <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span className="chat-sender" style={{ fontWeight: 700, fontSize: '13px' }}>{msg.sender}</span>
+                                {role && role !== 'member' && (
+                                  <span className={`role-badge-${role}`} style={{
+                                    fontSize: '8px',
+                                    fontWeight: 'bold',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    border: '1px solid',
+                                    textTransform: 'uppercase',
+                                    lineHeight: '1.2',
+                                    ...role === 'admin' ? {
+                                      backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                                      borderColor: 'var(--primary-color, #f1c40f)',
+                                      color: 'var(--primary-color, #f1c40f)'
+                                    } : role === 'host' ? {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                      borderColor: '#3b82f6',
+                                      color: '#3b82f6'
+                                    } : {
+                                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                      borderColor: '#10b981',
+                                      color: '#10b981'
+                                    }
+                                  }}>
+                                    {role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
                             </div>
-                            <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
-                          </div>
-                        );
-                      })}
+                          );
+                        });
+                      })()}
                       <div ref={chatEndRef} />
                     </div>
                     
