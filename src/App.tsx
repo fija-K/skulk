@@ -485,6 +485,7 @@ function AppContent() {
   // Header popover states
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
   const roomSettingsRef = useRef<HTMLDivElement>(null);
+  const isEvictedRef = useRef(false);
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -1066,6 +1067,7 @@ function AppContent() {
 
   // Setup conference shell room data
   const enterCallRoom = async (room: Room) => {
+    isEvictedRef.current = false;
     if (globalPendingLeavePromise) {
       try {
         await globalPendingLeavePromise;
@@ -1142,6 +1144,7 @@ function AppContent() {
   };
 
   const handleLeaveCall = () => {
+    isEvictedRef.current = true;
     hasSeenSelfInListRef.current = false;
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
@@ -1172,6 +1175,15 @@ function AppContent() {
   // Synchronize route changes with active room state (handles back/forward buttons)
   useEffect(() => {
     if (isAuthLoading) return;
+    
+    if (!roomId) {
+      // If we navigated away from the room route, reset the evicted flag so we can join other rooms normally in the future!
+      isEvictedRef.current = false;
+    }
+
+    if (isEvictedRef.current) {
+      return;
+    }
     
     if (roomId) {
       const currentRoomId = currentRoom ? getRoomIdFromLink(currentRoom.link) : null;
@@ -1325,6 +1337,9 @@ function AppContent() {
               console.log("New session detected in another tab via localStorage:", activeSession);
               showToast("🔄 Joined from another tab/window. Redirecting to dashboard...");
               
+              // Set evicted flag to block route-sync auto-rejoining
+              isEvictedRef.current = true;
+
               // Clean up our presence in the room we are leaving
               leavePresence(currentRoomId, mySessionId);
               
@@ -3896,6 +3911,10 @@ function AppContent() {
   };
 
   const renderSpinWheelUI = (isExpanded: boolean) => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+
     const activeIds = spinCheckedIds.length > 0 
       ? spinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
       : callParticipants.map(p => p.id);
@@ -5410,7 +5429,7 @@ function AppContent() {
                                   </div>
                                 </div>
 
-                                {/* Truth or Dare Card */}
+                                {/* T/D Wheel Card */}
                                 <div 
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
@@ -5421,14 +5440,14 @@ function AppContent() {
                                     setActiveToolDetail('truthordare');
                                     setActiveGameId(null);
                                   }}
-                                  title="Play Truth or Dare icebreakers"
+                                  title="Play Truth or Dare spinner wheel"
                                 >
                                   <div className="tool-card-icon-wrapper">
                                     🎲
                                   </div>
                                   <div className="tool-card-info">
-                                    <span className="tool-card-title">Truth or Dare</span>
-                                    <span className="tool-card-desc">Random study-themed icebreaker cards.</span>
+                                    <span className="tool-card-title">T/D Wheel</span>
+                                    <span className="tool-card-desc">Spin the wheel to play Truth or Dare.</span>
                                   </div>
                                 </div>
                               </div>
