@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import type { User } from 'firebase/auth';
@@ -210,8 +211,34 @@ function DeviceRecoveryManager({
 
     const onMediaError = (error: Error) => {
       console.warn("Media devices error:", error);
-      if (!isCamOff) currentCamErr = true;
-      if (!isMicMuted) currentMicErr = true;
+      const errMsg = (error?.message || '').toLowerCase();
+      const errName = (error?.name || '').toLowerCase();
+      const errKind = (error as any).kind || '';
+
+      const isAudio = errKind === 'audio' || 
+                      errMsg.includes('audio') || 
+                      errMsg.includes('mic') || 
+                      errMsg.includes('microphone') || 
+                      errName.includes('audio') || 
+                      errName.includes('mic') ||
+                      errName.includes('input');
+                      
+      const isVideo = errKind === 'video' || 
+                      errMsg.includes('video') || 
+                      errMsg.includes('camera') || 
+                      errMsg.includes('cam') || 
+                      errName.includes('video') || 
+                      errName.includes('camera');
+
+      if (isAudio && !isVideo) {
+        currentMicErr = true;
+      } else if (isVideo && !isAudio) {
+        currentCamErr = true;
+      } else {
+        // Fallback: only set if they are currently enabled/active
+        if (!isCamOff) currentCamErr = true;
+        if (!isMicMuted) currentMicErr = true;
+      }
       reportErrors();
     };
     
@@ -487,9 +514,9 @@ function AppContent() {
   const roomSettingsRef = useRef<HTMLDivElement>(null);
   const isEvictedRef = useRef(false);
 
-  // Picture-in-Picture floating mini-mode state
-  const [pipTool, setPipTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'spin' | 'truthordare'>('none');
-  const [pipPosition, setPipPosition] = useState<{ x: number; y: number } | null>(null);
+  // Whole-call Mini Mode (Zoom-like Call PiP) states
+  const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
+  const [isMiniModeActive, setIsMiniModeActive] = useState(false);
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -1161,20 +1188,7 @@ function AppContent() {
       setViewingShare(null);
       setLiveKitToken(null);
     }
-    setPipTool('none'); // Clear PiP on leave
     navigate('/');
-  };
-
-  const handleToggleExpandTool = (tool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin') => {
-    if (expandedTool === tool) {
-      setExpandedTool('none');
-      if (tool !== 'none') {
-        setPipTool(tool);
-      }
-    } else {
-      setExpandedTool(tool);
-      setPipTool('none');
-    }
   };
 
   const toggleMic = async () => {
@@ -4091,248 +4105,292 @@ function AppContent() {
     );
   };
 
-  const renderPipWindow = () => {
-    if (pipTool === 'none') return null;
+  const isDocumentPipSupported = 'documentPictureInPicture' in window;
+  const isVideoPipSupported = 'pictureInPictureEnabled' in document;
 
-    const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-      // Don't drag if they clicked buttons
-      if ((e.target as HTMLElement).closest('button')) return;
-      e.preventDefault();
+  const copyStyles = (targetDoc: Document) => {
+    // Copy CSS stylesheets to floating window document
+    const allStyleSheets = Array.from(document.styleSheets);
+    allStyleSheets.forEach((styleSheet) => {
+      try {
+        if (styleSheet.cssRules) {
+          const newStyle = targetDoc.createElement('style');
+          Array.from(styleSheet.cssRules).forEach((rule) => {
+            newStyle.appendChild(targetDoc.createTextNode(rule.cssText));
+          });
+          targetDoc.head.appendChild(newStyle);
+        } else if (styleSheet.href) {
+          const newLink = targetDoc.createElement('link');
+          newLink.rel = 'stylesheet';
+          newLink.href = styleSheet.href;
+          targetDoc.head.appendChild(newLink);
+        }
+      } catch (e) {
+        // Cross-origin styles safety catch
+      }
+    });
+  };
 
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const pipEl = e.currentTarget.parentElement;
-      if (!pipEl) return;
+  const toggleMiniMode = async () => {
+    if (isMiniModeActive) {
+      if (pipWindowInstance) {
+        pipWindowInstance.close();
+      }
+      setIsMiniModeActive(false);
+      setPipWindowInstance(null);
+    } else {
+      if (isDocumentPipSupported) {
+        try {
+          const pipWindow = await (window as any).documentPictureInPicture.requestWindow({
+            width: 320,
+            height: 240,
+          });
 
-      const rect = pipEl.getBoundingClientRect();
-      const initialLeft = rect.left;
-      const initialTop = rect.top;
+          // Copy current active app styles
+          copyStyles(pipWindow.document);
 
-      const parentEl = pipEl.offsetParent as HTMLElement;
-      if (!parentEl) return;
-      const parentRect = parentEl.getBoundingClientRect();
+          // Standard body/window margin resets
+          pipWindow.document.body.style.margin = '0';
+          pipWindow.document.body.style.padding = '0';
+          pipWindow.document.body.style.overflow = 'hidden';
 
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        const dx = moveEvent.clientX - startX;
-        const dy = moveEvent.clientY - startY;
-        let newLeft = initialLeft - parentRect.left + dx;
-        let newTop = initialTop - parentRect.top + dy;
+          // Listen for browser UI close action
+          pipWindow.addEventListener('pagehide', () => {
+            setIsMiniModeActive(false);
+            setPipWindowInstance(null);
+          });
 
-        // Clamping to parent container bounds
-        const maxLeft = parentRect.width - rect.width;
-        const maxTop = parentRect.height - rect.height;
-        newLeft = Math.max(0, Math.min(maxLeft, newLeft));
-        newTop = Math.max(0, Math.min(maxTop, newTop));
-
-        setPipPosition({ x: newLeft, y: newTop });
-      };
-
-      const handleMouseUp = () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    };
-
-    const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-      if ((e.target as HTMLElement).closest('button')) return;
-      const touch = e.touches[0];
-      const startX = touch.clientX;
-      const startY = touch.clientY;
-      const pipEl = e.currentTarget.parentElement;
-      if (!pipEl) return;
-
-      const rect = pipEl.getBoundingClientRect();
-      const initialLeft = rect.left;
-      const initialTop = rect.top;
-
-      const parentEl = pipEl.offsetParent as HTMLElement;
-      if (!parentEl) return;
-      const parentRect = parentEl.getBoundingClientRect();
-
-      const handleTouchMove = (moveEvent: TouchEvent) => {
-        const t = moveEvent.touches[0];
-        const dx = t.clientX - startX;
-        const dy = t.clientY - startY;
-        let newLeft = initialLeft - parentRect.left + dx;
-        let newTop = initialTop - parentRect.top + dy;
-
-        const maxLeft = parentRect.width - rect.width;
-        const maxTop = parentRect.height - rect.height;
-        newLeft = Math.max(0, Math.min(maxLeft, newLeft));
-        newTop = Math.max(0, Math.min(maxTop, newTop));
-
-        setPipPosition({ x: newLeft, y: newTop });
-      };
-
-      const handleTouchEnd = () => {
-        window.removeEventListener('touchmove', handleTouchMove);
-        window.removeEventListener('touchend', handleTouchEnd);
-      };
-
-      window.addEventListener('touchmove', handleTouchMove, { passive: true });
-      window.addEventListener('touchend', handleTouchEnd);
-    };
-
-    const handleRestore = () => {
-      setExpandedTool(pipTool);
-      setPipTool('none');
-    };
-
-    const handleClose = () => {
-      setPipTool('none');
-    };
-
-    // Compact views based on tool type
-    let content = null;
-    let toolIcon = '⏱️';
-    if (pipTool === 'pomodoro') {
-      toolIcon = '⏱️';
-      content = (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '8px' }}>
-          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 800 }}>
-            {pomodoroPhase === 'focus' ? 'Focus Phase' : 'Break Phase'}
-          </span>
-          <span style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
-            {pomodoroMinutes.toString().padStart(2, '0')}:{pomodoroSeconds.toString().padStart(2, '0')}
-          </span>
-          <button 
-            onClick={togglePomodoro} 
-            className="btn-signin"
-            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
-          >
-            {pomodoroIsRunning ? 'Pause' : 'Start'}
-          </button>
-        </div>
-      );
-    } else if (pipTool === 'deadline') {
-      toolIcon = '⏳';
-      const currentStep = deadlineSteps[deadlineActiveIndex];
-      const stepName = currentStep ? `${deadlineActiveIndex + 1}. ${currentStep.name}` : 'No steps';
-      content = (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px' }}>
-          <span 
-            style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}
-            title={stepName}
-          >
-            {stepName}
-          </span>
-          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
-            {deadlineTimerMinutes.toString().padStart(2, '0')}:{deadlineTimerSeconds.toString().padStart(2, '0')}
-          </span>
-          <button 
-            onClick={() => setDeadlineIsRunning(!deadlineIsRunning)} 
-            className="btn-signin"
-            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
-          >
-            {deadlineIsRunning ? 'Pause' : 'Start'}
-          </button>
-        </div>
-      );
-    } else if (pipTool === 'loose') {
-      toolIcon = '🔄';
-      const currentStep = looseSteps[looseActiveIndex];
-      const stepName = currentStep ? `${looseActiveIndex + 1}. ${currentStep.name}` : 'No steps';
-      content = (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px' }}>
-          <span 
-            style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}
-            title={stepName}
-          >
-            {stepName}
-          </span>
-          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
-            {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:{Math.floor(looseTimerSeconds % 60).toString().padStart(2, '0')}
-          </span>
-          <button 
-            onClick={() => setLooseIsRunning(!looseIsRunning)} 
-            className="btn-signin"
-            style={{ padding: '2px 8px', fontSize: '9px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)', height: '20px' }}
-          >
-            {looseIsRunning ? 'Pause' : 'Start'}
-          </button>
-        </div>
-      );
-    } else if (pipTool === 'spin') {
-      toolIcon = '🎡';
-      const lastSelectedName = spinResult ? (callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant') : null;
-      content = (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px' }}>
-          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800 }}>
-            {lastSelectedName ? `Landed on: ${lastSelectedName}` : 'Ready to spin'}
-          </span>
-          <button 
-            onClick={handleRestore} 
-            className="btn-signin"
-            style={{ width: '100px', height: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, backgroundColor: 'var(--primary-color)', color: '#0f1013', border: 'none', fontSize: '10px' }}
-          >
-            Spin Wheel
-          </button>
-        </div>
-      );
-    } else if (pipTool === 'truthordare') {
-      toolIcon = '🎲';
-      const selectedUser = callParticipants.find(p => p.id === todSelectedId);
-      const titleText = selectedUser && todChoice ? `${selectedUser.name.replace(' (You)', '')} — ${todChoice}` : 'No turn active';
-      content = (
-        <div 
-          onClick={handleRestore}
-          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '4px', cursor: 'pointer', padding: '0 8px' }}
-          title="Click to view full prompt"
-        >
-          <span style={{ fontSize: '10px', color: 'var(--primary-color)', fontWeight: 800 }}>
-            {titleText}
-          </span>
-          <span style={{ fontSize: '10px', color: 'var(--text-primary)', fontStyle: 'italic', textAlign: 'center', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3 }}>
-            {todText ? `"${todText}"` : 'No prompt selected yet. Click to expand.'}
-          </span>
-        </div>
-      );
+          setPipWindowInstance(pipWindow);
+          setIsMiniModeActive(true);
+        } catch (err) {
+          console.warn("Document PiP request failed, falling back to video PiP:", err);
+          handleVideoPipFallback();
+        }
+      } else {
+        handleVideoPipFallback();
+      }
     }
+  };
 
-    const positionStyle = pipPosition 
-      ? { left: `${pipPosition.x}px`, top: `${pipPosition.y}px` }
-      : { right: '24px', bottom: '96px' };
+  const handleVideoPipFallback = () => {
+    const activeVideoEl = document.querySelector('.speaker-active video') || document.querySelector('.user-tile video') || document.querySelector('video');
+    if (activeVideoEl) {
+      (activeVideoEl as HTMLVideoElement).requestPictureInPicture().catch(err => {
+        console.error("Failed to request standard PiP:", err);
+        showToast("Picture-in-Picture failed to launch.");
+      });
+    } else {
+      showToast("No active participant video found to launch standard PiP.");
+    }
+  };
 
-    return (
-      <div 
-        className="pip-window-container animate-fade-in"
-        style={{ ...positionStyle }}
-      >
-        <div 
-          className="pip-header"
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>{toolIcon}</span>
-            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Mini View
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <button onClick={handleRestore} className="pip-btn" title="Restore to Stage">
-              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <polyline points="9 21 3 21 3 15"></polyline>
-                <line x1="21" y1="3" x2="14" y2="10"></line>
-                <line x1="3" y1="21" x2="10" y2="14"></line>
+  const renderPipWindow = () => {
+    if (!isMiniModeActive || !pipWindowInstance) return null;
+
+    const activeSpeakerId = (() => {
+      const remoteSpeaker = callParticipants.find(p => p.isSpeaking && !p.isMuted && p.id !== getMyId());
+      if (remoteSpeaker) return remoteSpeaker.id;
+      return getMyId();
+    })();
+
+    const activeSpeaker = callParticipants.find(p => p.id === activeSpeakerId);
+    const activeSpeakerCamOff = activeSpeaker ? (activeSpeaker.id === getMyId() ? isCamOff : activeSpeaker.isCamOff) : true;
+    const activeSpeakerMicMuted = activeSpeaker ? (activeSpeaker.id === getMyId() ? isMicMuted : activeSpeaker.isMuted) : true;
+
+    return createPortal(
+      <div className="skulk-pip-window" style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        backgroundColor: '#0f1013', 
+        color: '#ffffff', 
+        fontFamily: 'Inter, system-ui, sans-serif',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Main Video viewport */}
+        <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {!activeSpeakerCamOff ? (
+            <ParticipantVideo participantId={activeSpeakerId} />
+          ) : (
+            <div style={{
+              width: '72px',
+              height: '72px',
+              borderRadius: '50%',
+              backgroundColor: activeSpeaker?.color || '#8b5cf6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '24px',
+              fontWeight: 'bold',
+              color: '#ffffff'
+            }}>
+              {activeSpeaker?.photoURL ? (
+                <img 
+                  src={activeSpeaker.photoURL} 
+                  alt={activeSpeaker.name} 
+                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                />
+              ) : (
+                activeSpeaker?.initials || 'S'
+              )}
+            </div>
+          )}
+
+          {/* Overlay nametag */}
+          <div style={{
+            position: 'absolute',
+            bottom: '10px',
+            left: '10px',
+            backgroundColor: 'rgba(15, 16, 19, 0.75)',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            fontSize: '11px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 10
+          }}>
+            <span>{activeSpeaker?.name || 'User'}</span>
+            {activeSpeakerMicMuted && (
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
               </svg>
-            </button>
-            <button onClick={handleClose} className="pip-btn close" title="Close Mini View">
-              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
+            )}
           </div>
         </div>
-        <div className="pip-content">
-          {content}
+
+        {/* Small bottom action controls bar */}
+        <div style={{
+          height: '40px',
+          backgroundColor: '#16181d',
+          borderTop: '1px solid #2d3139',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          flexShrink: 0,
+          zIndex: 20
+        }}>
+          {/* Mute Mic control */}
+          <button 
+            onClick={toggleMic}
+            style={{
+              background: isMicMuted ? '#ef4444' : '#2d3139',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#ffffff',
+              width: '28px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+            title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {isMicMuted ? (
+                <>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                </>
+              ) : (
+                <>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                </>
+              )}
+            </svg>
+          </button>
+
+          {/* Camera toggle control */}
+          <button 
+            onClick={toggleCamera}
+            style={{
+              background: isCamOff ? '#ef4444' : '#2d3139',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#ffffff',
+              width: '28px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+            title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {isCamOff ? (
+                <>
+                  <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10l-2.18-1.63"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </>
+              ) : (
+                <>
+                  <path d="M23 7l-7 5 7 5V7z"></path>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </>
+              )}
+            </svg>
+          </button>
+
+          {/* Restore / Expand to original size */}
+          <button 
+            onClick={toggleMiniMode}
+            style={{
+              background: '#2d3139',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#ffffff',
+              width: '28px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+            title="Return to full view"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </button>
+
+          {/* Leave the call entirely */}
+          <button 
+            onClick={() => {
+              handleLeaveCall();
+              toggleMiniMode();
+            }}
+            style={{
+              background: '#ef4444',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#ffffff',
+              padding: '0 8px',
+              height: '28px',
+              fontSize: '11px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+            title="Leave room call"
+          >
+            Leave
+          </button>
         </div>
-      </div>
+      </div>,
+      pipWindowInstance.document.body
     );
   };
 
@@ -4633,39 +4691,84 @@ function AppContent() {
                       </p>
                       
                       {/* Participant Avatars Row */}
-                      <div className="avatar-row">
-                        {Array.from({ length: room.maxParticipants || 10 }).map((_, index) => {
-                          const participant = currentRoomParticipants[index];
-                          if (participant) {
-                            return participant.photoURL ? (
-                              <img 
-                                key={index}
-                                src={participant.photoURL}
-                                alt={participant.name}
-                                className="avatar-slot avatar-filled"
-                                style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
+                      {(() => {
+                        const totalParticipants = currentRoomParticipants.length;
+                        if (totalParticipants > 8) {
+                          return (
+                            <div className="avatar-row has-overflow">
+                              {currentRoomParticipants.slice(0, 8).map((participant, index) => {
+                                return participant.photoURL ? (
+                                  <img 
+                                    key={index}
+                                    src={participant.photoURL}
+                                    alt={participant.name}
+                                    className="avatar-slot avatar-filled"
+                                    style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div 
+                                    key={index} 
+                                    className="avatar-slot avatar-filled"
+                                    style={{ backgroundColor: participant.color || '#8b5cf6' }}
+                                  >
+                                    {participant.initials}
+                                  </div>
+                                );
+                              })}
                               <div 
-                                key={index} 
                                 className="avatar-slot avatar-filled"
-                                style={{ backgroundColor: participant.color || '#8b5cf6' }}
+                                style={{ 
+                                  backgroundColor: 'var(--button-secondary-bg)',
+                                  border: '1px solid var(--border-color)',
+                                  color: 'var(--text-secondary)',
+                                  fontSize: '14px',
+                                  fontWeight: 'bold'
+                                }}
                               >
-                                {participant.initials}
+                                +{totalParticipants - 8}
                               </div>
-                            );
-                          } else {
-                            return (
-                              <div 
-                                key={index} 
-                                className="avatar-slot avatar-empty" 
-                                style={{ borderStyle: 'dashed' }}
-                              />
-                            );
-                          }
-                        })}
-                      </div>
+                            </div>
+                          );
+                        } else {
+                          const maxSlots = Math.min(room.maxParticipants || 10, 8);
+                          return (
+                            <div className="avatar-row">
+                              {Array.from({ length: maxSlots }).map((_, index) => {
+                                const participant = currentRoomParticipants[index];
+                                if (participant) {
+                                  return participant.photoURL ? (
+                                    <img 
+                                      key={index}
+                                      src={participant.photoURL}
+                                      alt={participant.name}
+                                      className="avatar-slot avatar-filled"
+                                      style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div 
+                                      key={index} 
+                                      className="avatar-slot avatar-filled"
+                                      style={{ backgroundColor: participant.color || '#8b5cf6' }}
+                                    >
+                                      {participant.initials}
+                                    </div>
+                                  );
+                                } else {
+                                  return (
+                                    <div 
+                                      key={index} 
+                                      className="avatar-slot avatar-empty" 
+                                      style={{ borderStyle: 'dashed' }}
+                                    />
+                                  );
+                                }
+                              })}
+                            </div>
+                          );
+                        }
+                      })()}
                       
                       {/* Room Footer */}
                       <div className="room-footer">
@@ -4767,8 +4870,50 @@ function AppContent() {
             />
             <RoomAudioRenderer />
             
-          {/* Call Header */}
-          <div className="call-top-bar">
+            {isMiniModeActive ? (
+              <div className="mini-mode-placeholder animate-fade-in" style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'var(--bg-color)',
+                color: 'var(--text-primary)',
+                padding: '24px',
+                textAlign: 'center',
+                gap: '16px'
+              }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(241, 196, 15, 0.1)',
+                  color: 'var(--primary-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '28px'
+                }}>
+                  🗗
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>Skulk is in Mini Mode</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '320px', lineHeight: 1.5, margin: '0 auto' }}>
+                    The call is running in a floating Picture-in-Picture window. You can return here by expanding or closing the floating window.
+                  </p>
+                </div>
+                <button 
+                  onClick={toggleMiniMode} 
+                  className="btn-signin"
+                  style={{ padding: '8px 20px', fontSize: '13px' }}
+                >
+                  Return to Full View
+                </button>
+              </div>
+            ) : (
+              <>
+              {/* Call Header */}
+              <div className="call-top-bar">
             <div className="call-room-info">
               <a href="/" onClick={(e) => { e.preventDefault(); handleLeaveCall(); }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
               <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
@@ -4837,6 +4982,21 @@ function AppContent() {
                   </div>
                 )}
               </div>
+              {/* Mini Mode Button */}
+              {(isDocumentPipSupported || isVideoPipSupported) && (
+                <button 
+                  onClick={toggleMiniMode} 
+                  className="theme-picker-btn"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Enter Mini Mode"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <rect x="12" y="12" width="9" height="9" rx="1" ry="1"></rect>
+                  </svg>
+                </button>
+              )}
+
               {/* Room Settings Popover inside Call */}
               <div className="theme-picker-container" ref={roomSettingsRef}>
                 <button 
@@ -4965,7 +5125,7 @@ function AppContent() {
                       </span>
                     </div>
                     <button 
-                      onClick={() => handleToggleExpandTool(expandedTool)} 
+                      onClick={() => setExpandedTool('none')} 
                       className="btn-signin" 
                       style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
                       title="Collapse to sidebar"
@@ -5851,7 +6011,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Pomodoro Timer</span>
                           <button 
-                            onClick={() => handleToggleExpandTool('pomodoro')} 
+                            onClick={() => setExpandedTool(expandedTool === 'pomodoro' ? 'none' : 'pomodoro')} 
                             className={`tools-expand-btn ${expandedTool === 'pomodoro' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -6002,7 +6162,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Deadline Clock</span>
                           <button 
-                            onClick={() => handleToggleExpandTool('deadline')} 
+                            onClick={() => setExpandedTool(expandedTool === 'deadline' ? 'none' : 'deadline')} 
                             className={`tools-expand-btn ${expandedTool === 'deadline' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -6030,7 +6190,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Loose Timer</span>
                           <button 
-                            onClick={() => handleToggleExpandTool('loose')} 
+                            onClick={() => setExpandedTool(expandedTool === 'loose' ? 'none' : 'loose')} 
                             className={`tools-expand-btn ${expandedTool === 'loose' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -6058,7 +6218,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Truth or Dare</span>
                           <button 
-                            onClick={() => handleToggleExpandTool('truthordare')} 
+                            onClick={() => setExpandedTool(expandedTool === 'truthordare' ? 'none' : 'truthordare')} 
                             className={`tools-expand-btn ${expandedTool === 'truthordare' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -6086,7 +6246,7 @@ function AppContent() {
                           </button>
                           <span className="tools-sub-panel-title">Spin the Wheel</span>
                           <button 
-                            onClick={() => handleToggleExpandTool('spin')} 
+                            onClick={() => setExpandedTool(expandedTool === 'spin' ? 'none' : 'spin')} 
                             className={`tools-expand-btn ${expandedTool === 'spin' ? 'active' : ''}`}
                             title="Expand to Stage"
                           >
@@ -6207,6 +6367,8 @@ function AppContent() {
             )}
 
           </div>
+          </>
+          )}
 
           {renderPipWindow()}
 
