@@ -874,10 +874,11 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 .call-layout {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100vh !important;
+  max-height: 100vh !important;
   background-color: var(--bg-color);
-  overflow: hidden;
-  position: fixed;
+  overflow: hidden !important;
+  position: fixed !important;
   top: 0;
   left: 0;
   right: 0;
@@ -931,6 +932,7 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 .call-main-content {
   display: flex;
   flex: 1;
+  min-height: 0;
   height: calc(100vh - 144px);
   overflow: hidden;
 }
@@ -1351,6 +1353,7 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .call-sidebar-header {
@@ -1386,7 +1389,8 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
   padding: 16px;
   background-color: rgba(0, 0, 0, 0.02);
 }
@@ -1394,6 +1398,7 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 /* Chat Tab Content */
 .chat-messages-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
