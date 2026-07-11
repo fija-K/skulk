@@ -1184,6 +1184,7 @@ export default function App() {
             for (const d of candidatesSnap.docs) {
               try { await deleteDoc(d.ref); } catch (e) {}
             }
+            candidateQueue.length = 0; // Wipe queued stale candidates
 
             console.log(`[WebRTC] Initiator creating offer for ${peerId}`);
             const offer = await pc.createOffer();
@@ -1194,7 +1195,7 @@ export default function App() {
               offer: { sdp: offer.sdp, type: offer.type },
               initiatorId: myId,
               receiverId: peerId
-            }, { merge: true });
+            });
             console.log(`[WebRTC] Initiator wrote offer to Firestore for ${peerId}`);
           } catch (e) {
             console.warn("Failed to create WebRTC offer:", e);
@@ -1219,11 +1220,25 @@ export default function App() {
         });
         signalUnsubsRef.current[peerId].push(unsub);
       } else {
+        let processedOffer = false;
         const unsub = onSnapshot(signalDoc, async (snap) => {
-          if (!snap.exists()) return;
+          if (!snap.exists()) {
+            if (processedOffer) {
+              console.log(`[WebRTC] Signal doc deleted by Initiator. Restarting connection for ${peerId}`);
+              try { pcsRef.current[peerId].close(); } catch (e) {}
+              delete pcsRef.current[peerId];
+              if (signalUnsubsRef.current[peerId]) {
+                signalUnsubsRef.current[peerId].forEach(u => u());
+                delete signalUnsubsRef.current[peerId];
+              }
+              setCallParticipants(prev => [...prev]);
+            }
+            return;
+          }
           const data = snap.data();
           
           if (data.offer && !pc.remoteDescription) {
+            processedOffer = true;
             console.log(`[WebRTC] Receiver read offer from Firestore from ${peerId}`);
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
