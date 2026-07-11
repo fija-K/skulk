@@ -43,6 +43,7 @@ interface Participant {
   name: string;
   initials: string;
   color: string;
+  photoURL?: string | null;
   isMuted: boolean;
   isCamOff: boolean;
   isSpeaking: boolean;
@@ -1217,6 +1218,7 @@ function AppContent() {
           name: `${user ? user.displayName || 'Google User' : guestName} (You)`,
           initials: guestInitials,
           color: guestColor,
+          photoURL: user ? user.photoURL : null,
           isMuted: isMicMuted,
           isCamOff: isCamOff,
           isSpeaking: false,
@@ -3161,26 +3163,10 @@ function AppContent() {
                           key={p.id} 
                           className={`participant-tile ${isUser ? 'user-tile' : ''} ${p.isSpeaking && !showMuted ? 'speaker-active' : ''}`}
                         >
-                          {/* Avatar Square */}
-                          <div 
-                            className="participant-avatar-large" 
-                            style={{ 
-                              backgroundColor: p.color, 
-                              cursor: p.sharing ? 'pointer' : 'default',
-                              position: 'relative',
-                              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                              overflow: 'hidden'
-                            }}
-                            onClick={() => {
-                              if (p.sharing) {
-                                handleViewParticipantShare(p);
-                              }
-                            }}
-                          >
+                          {!p.isCamOff ? (
                             <>
-                              {!p.isCamOff ? <ParticipantVideo participantId={p.id} /> : p.initials}
-                              {isUser && (cameraError || micError) && (
+                              <ParticipantVideo participantId={p.id} />
+                              {isUser && cameraError && (
                                 <div className="camera-error-overlay" style={{
                                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                                   backgroundColor: 'rgba(0,0,0,0.8)', color: 'white',
@@ -3189,15 +3175,12 @@ function AppContent() {
                                   zIndex: 10, padding: '16px', textAlign: 'center'
                                 }}>
                                   <span style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                    {cameraError && micError ? 'Camera & Mic unavailable — check permissions or hardware switch' : 
-                                     cameraError ? 'Camera unavailable — check permissions or hardware switch' : 
-                                     'Microphone unavailable — check permissions or hardware switch'}
+                                    Camera unavailable — check permissions or hardware switch
                                   </span>
                                   <button 
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (cameraError) window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                                      if (micError) window.dispatchEvent(new CustomEvent('retry-device', { detail: 'mic' }));
+                                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
                                     }}
                                     style={{
                                       padding: '6px 12px', background: 'var(--primary-color)',
@@ -3209,30 +3192,86 @@ function AppContent() {
                                   </button>
                                 </div>
                               )}
+                              {p.sharing && (
+                                <div className="sharing-badge-overlay" style={{
+                                  position: 'absolute',
+                                  bottom: '12px',
+                                  right: '12px',
+                                  backgroundColor: 'var(--primary-color)',
+                                  color: '#0f1013',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  border: '2px solid var(--card-bg, #1a1c23)',
+                                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                  zIndex: 10
+                                }} title={`Sharing ${p.sharing} - click to view`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewParticipantShare(p);
+                                  }}
+                                >
+                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                </div>
+                              )}
                             </>
-                            {p.sharing && (
-                              <div className="sharing-badge-overlay" style={{
-                                position: 'absolute',
-                                bottom: '-6px',
-                                right: '-6px',
-                                backgroundColor: 'var(--primary-color)',
-                                color: '#0f1013',
-                                borderRadius: '50%',
-                                width: '22px',
-                                height: '22px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '11px',
-                                fontWeight: 'bold',
-                                border: '2px solid var(--card-bg, #1a1c23)',
-                                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                                zIndex: 10
-                              }} title={`Sharing ${p.sharing} - click to view`}>
-                                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                              </div>
-                            )}
-                          </div>
+                          ) : (
+                            /* Avatar Square */
+                            <div 
+                              className="participant-avatar-large" 
+                              style={{ 
+                                backgroundColor: p.color, 
+                                cursor: p.sharing ? 'pointer' : 'default',
+                                position: 'relative',
+                                boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                                border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                                overflow: 'hidden'
+                              }}
+                              onClick={() => {
+                                if (p.sharing) {
+                                  handleViewParticipantShare(p);
+                                }
+                              }}
+                            >
+                              {p.photoURL ? (
+                                <img 
+                                  src={p.photoURL} 
+                                  alt={p.name} 
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                p.initials
+                              )}
+                              {p.sharing && (
+                                <div className="sharing-badge-overlay" style={{
+                                  position: 'absolute',
+                                  bottom: '-6px',
+                                  right: '-6px',
+                                  backgroundColor: 'var(--primary-color)',
+                                  color: '#0f1013',
+                                  borderRadius: '50%',
+                                  width: '22px',
+                                  height: '22px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  border: '2px solid var(--card-bg, #1a1c23)',
+                                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                  zIndex: 10
+                                }} title={`Sharing ${p.sharing} - click to view`}>
+                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           
                           {/* Name Tag + Muted Status */}
                           <div className="participant-name-tag" style={{ gap: '6px' }}>
