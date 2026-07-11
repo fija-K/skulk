@@ -225,11 +225,7 @@ function DeviceRecoveryManager({
 
 // Export the global app wrapper
 export default function App() {
-  return (
-    <Router>
-      <AppContent />
-    </Router>
-  );
+  return <AppContent />;
 }
 
 let globalPendingLeavePromise: Promise<void> | null = null;
@@ -898,8 +894,6 @@ function AppContent() {
     await globalPendingLeavePromise;
     globalPendingLeavePromise = null;
   };
-    }
-  };
 
   const canJoin = async (targetRoom: Room) => {
     const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
@@ -1363,6 +1357,20 @@ function AppContent() {
       }
       const data = docSnap.data();
       
+      // Update room metadata in state to sync Firestore room name
+      setCurrentRoom(prev => {
+        if (!prev) return null;
+        if (prev.name === data.name && prev.creatorName === data.creatorName && prev.type === data.type) {
+          return prev;
+        }
+        return {
+          ...prev,
+          name: data.name || prev.name,
+          creatorName: data.creatorName || prev.creatorName,
+          type: data.type || prev.type
+        };
+      });
+
       // Sync Pomodoro (shared room tool — still room-level)
       if (data.pomodoroIsRunning !== undefined) {
         setPomodoroIsRunning(data.pomodoroIsRunning);
@@ -2760,14 +2768,14 @@ function AppContent() {
             </div>
           ) : (
           /* 2. In-Call Room Stage View (rendered if currentRoom is NOT null) */
-          <LiveKitRoom
-            token={liveKitToken}
-            serverUrl={import.meta.env.VITE_LIVEKIT_URL}
-            audio={!isMicMuted}
-            video={!isCamOff}
-            className="call-layout animate-fade-in"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: 'var(--bg-color)', overflow: 'hidden' }}
-          >
+          <div className="call-layout animate-fade-in" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: 'var(--bg-color)', overflow: 'hidden', height: '100vh', maxHeight: '100vh', width: '100vw', display: 'flex', flexDirection: 'column' }}>
+            <LiveKitRoom
+              token={liveKitToken}
+              serverUrl={import.meta.env.VITE_LIVEKIT_URL}
+              audio={!isMicMuted}
+              video={!isCamOff}
+              style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', width: '100%', overflow: 'hidden' }}
+            >
             <DeviceRecoveryManager 
               isCamOff={isCamOff} 
               isMicMuted={isMicMuted} 
@@ -4651,6 +4659,7 @@ function AppContent() {
           </div>
 
         </LiveKitRoom>
+          </div>
           )
         ) : (
           <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
@@ -4706,7 +4715,7 @@ function AppContent() {
               <button type="button" className="btn-secondary" onClick={() => setShowSignInPrompt(false)} style={{ padding: '8px 16px' }}>Cancel</button>
               <button type="button" className="btn-signin" onClick={() => {
                 setShowSignInPrompt(false);
-                handleGoogleSignIn().then(() => {
+                handleSignIn().then(() => {
                   // After successful sign in, open the modal
                   setTimeout(() => setIsModalOpen(true), 500);
                 });
