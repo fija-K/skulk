@@ -99,6 +99,70 @@ function ParticipantVideo({ participantId }: { participantId: string }) {
 }
 
 
+function LocalScreenShareLinker({ screenShareStream }: { screenShareStream: MediaStream | null }) {
+  const { localParticipant } = useLocalParticipant();
+
+  useEffect(() => {
+    if (!localParticipant) return;
+
+    if (screenShareStream) {
+      const videoTrack = screenShareStream.getVideoTracks()[0];
+      if (videoTrack) {
+        console.log("Publishing local screen share track to LiveKit:", videoTrack);
+        localParticipant.publishTrack(videoTrack, { source: Track.Source.ScreenShare }).then((publication) => {
+          console.log("Successfully published screen share track:", publication);
+        }).catch((err) => {
+          console.error("Failed to publish screen share track:", err);
+        });
+      }
+    } else {
+      const publications = localParticipant.getTrackPublications();
+      publications.forEach(pub => {
+        if (pub.source === Track.Source.ScreenShare && pub.track) {
+          console.log("Unpublishing local screen share track from LiveKit:", pub.track);
+          localParticipant.unpublishTrack(pub.track as any);
+        }
+      });
+    }
+  }, [screenShareStream, localParticipant]);
+
+  return null;
+}
+
+function ScreenShareVideo({ participantId }: { participantId: string }) {
+  const tracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
+  const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
+
+  if (!trackRef) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        height: '100%', 
+        color: 'var(--text-secondary)',
+        gap: '12px'
+      }}>
+        <span>Connecting to screen presentation...</span>
+      </div>
+    );
+  }
+
+  return (
+    <VideoTrack 
+      trackRef={trackRef} 
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        objectFit: 'contain',
+        borderRadius: 'var(--border-radius)',
+        backgroundColor: '#050505'
+      }} 
+    />
+  );
+}
+
 function DeviceRecoveryManager({ 
   isCamOff, 
   isMicMuted,
@@ -1386,7 +1450,6 @@ function AppContent() {
   const sidebarMenuRef = useRef<HTMLDivElement>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
@@ -1801,11 +1864,6 @@ function AppContent() {
 
   const handleViewParticipantShare = (p: Participant) => {
     if (!p.sharing) return;
-    const myId = getMyId();
-    if (p.sharing === 'screen' && p.id !== myId) {
-      showToast(`${p.name.replace(' (You)', '')} is sharing their screen — only they can see it live.`);
-      return;
-    }
     setViewingShare({
       participantId: p.id,
       type: p.sharing,
@@ -2679,12 +2737,6 @@ function AppContent() {
     }
   }, [currentRoom, screenShareStream]);
 
-  // Bind screen presenter stream to video element
-  useEffect(() => {
-    if (videoRef.current && screenShareStream) {
-      videoRef.current.srcObject = screenShareStream;
-    }
-  }, [screenShareStream]);
 
   // Resize canvas when whiteboard view opens or draw color changes
   useEffect(() => {
@@ -5627,6 +5679,7 @@ function AppContent() {
               }} 
             />
              <RoomAudioRenderer />
+             <LocalScreenShareLinker screenShareStream={screenShareStream} />
             
             {isMiniModeActive ? (
               <div className="mini-mode-placeholder animate-fade-in" style={{
@@ -5967,95 +6020,7 @@ function AppContent() {
                 <div className="screenshare-stage-layout animate-fade-in">
                   <div className="screenshare-video-wrapper">
                     {viewingShare.type === 'screen' ? (
-                      viewingShare.participantId === getMyId() && screenShareStream ? (
-                        <video ref={videoRef} autoPlay playsInline muted className="screenshare-video"></video>
-                      ) : (
-                        <div style={{ 
-                          display: 'flex', 
-                          flexDirection: 'column',
-                          alignItems: 'center', 
-                          justifyContent: 'center', 
-                          height: '100%', 
-                          color: 'var(--text-primary)',
-                          background: 'linear-gradient(135deg, rgba(15, 16, 19, 0.95) 0%, rgba(26, 28, 35, 0.95) 100%)',
-                          borderRadius: 'var(--border-radius)',
-                          border: '1px dashed var(--border-color)',
-                          position: 'relative',
-                          overflow: 'hidden',
-                          padding: '24px',
-                          textAlign: 'center'
-                        }}>
-                          {/* Animated browser mockup */}
-                          <div style={{
-                            width: '90%',
-                            maxWidth: '560px',
-                            height: '240px',
-                            backgroundColor: '#1e222b',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            overflow: 'hidden',
-                            marginBottom: '16px'
-                          }}>
-                            {/* Browser bar */}
-                            <div style={{
-                              height: '28px',
-                              backgroundColor: '#14171e',
-                              display: 'flex',
-                              alignItems: 'center',
-                              padding: '0 12px',
-                              gap: '6px',
-                              borderBottom: '1px solid rgba(255,255,255,0.05)'
-                            }}>
-                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />
-                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
-                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-                              <div style={{ 
-                                height: '16px', 
-                                backgroundColor: 'rgba(255,255,255,0.05)', 
-                                borderRadius: '4px', 
-                                flex: 1, 
-                                marginLeft: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                paddingLeft: '8px',
-                                fontSize: '9px',
-                                color: 'rgba(255,255,255,0.4)',
-                                fontFamily: 'monospace'
-                              }}>
-                                skulk.app/workspace/dsa-arrays
-                              </div>
-                            </div>
-                            {/* Browser content: Simulated IDE */}
-                            <div style={{
-                              flex: 1,
-                              padding: '16px',
-                              fontFamily: 'monospace',
-                              fontSize: '11px',
-                              color: '#a9b2c3',
-                              textAlign: 'left',
-                              lineHeight: '1.6',
-                              backgroundColor: '#1b1d24'
-                            }}>
-                              <span style={{ color: '#e06c75' }}>const</span> <span style={{ color: '#61afef' }}>findDuplicate</span> = (<span style={{ color: '#abb2bf' }}>nums</span>) =&gt; &#123;<br />
-                              &nbsp;&nbsp;<span style={{ color: '#e5c07b' }}>let</span> <span style={{ color: '#abb2bf' }}>seen = </span><span style={{ color: '#c678dd' }}>new</span> <span style={{ color: '#e5c07b' }}>Set</span>();<br />
-                              &nbsp;&nbsp;<span style={{ color: '#c678dd' }}>for</span> (<span style={{ color: '#e06c75' }}>let</span> <span style={{ color: '#abb2bf' }}>num of nums</span>) &#123;<br />
-                              &nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#c678dd' }}>if</span> (seen.<span style={{ color: '#61afef' }}>has</span>(num)) <span style={{ color: '#c678dd' }}>return</span> num;<br />
-                              &nbsp;&nbsp;&nbsp;&nbsp;seen.<span style={{ color: '#61afef' }}>add</span>(num);<br />
-                              &nbsp;&nbsp;&#125;<br />
-                              &#125;;
-                            </div>
-                          </div>
-                          <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--primary-color)' }}>
-                            Viewing {callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'Participant'}'s Screen
-                          </span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                            Live screen presentation stream is active
-                          </span>
-                        </div>
-                      )
+                      <ScreenShareVideo participantId={viewingShare.participantId} />
                     ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
                       <iframe 
                         width="100%" 
