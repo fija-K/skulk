@@ -504,6 +504,7 @@ function AppContent() {
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const hasSeenSelfInListRef = useRef(false);
   const currentSessionIdRef = useRef<string | null>(null);
+  const isEnteringRoomRef = useRef<string | null>(null);
 
   // Helper to determine role dynamically based on auth email and room creator
   const determineRole = (roomCreatorId?: string) => {
@@ -1095,6 +1096,9 @@ function AppContent() {
     if (roomId) {
       const currentRoomId = currentRoom ? getRoomIdFromLink(currentRoom.link) : null;
       if (!currentRoom || currentRoomId !== roomId) {
+        if (isEnteringRoomRef.current === roomId) return;
+        isEnteringRoomRef.current = roomId;
+
         const match = rooms.find(r => getRoomIdFromLink(r.link) === roomId);
         const roomObj = match || {
           id: roomId,
@@ -1109,6 +1113,7 @@ function AppContent() {
         canJoin(roomObj).then(async (allowed) => {
           if (!allowed) {
             showToast(`This room is full (${roomObj.maxParticipants}/${roomObj.maxParticipants})`);
+            isEnteringRoomRef.current = null;
             navigate('/');
             return;
           }
@@ -1124,6 +1129,7 @@ function AppContent() {
               const reqDocSnap = await getDoc(reqDocRef);
               const isAlreadyApproved = reqDocSnap.exists() && reqDocSnap.data()?.status === 'approved';
               if (!isAlreadyApproved) {
+                isEnteringRoomRef.current = null;
                 setPendingJoinRoom(roomObj);
                 return;
               }
@@ -1132,10 +1138,14 @@ function AppContent() {
             }
           }
           
-          enterCallRoom(roomObj);
+          await enterCallRoom(roomObj);
+          isEnteringRoomRef.current = null;
+        }).catch(() => {
+          isEnteringRoomRef.current = null;
         });
       }
     } else {
+      isEnteringRoomRef.current = null;
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         leavePresence(prevRoomId, currentSessionIdRef.current);
