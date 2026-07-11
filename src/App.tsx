@@ -17,10 +17,11 @@ import {
   LiveKitRoom,
   VideoTrack,
   useTracks,
-  RoomAudioRenderer
+  RoomAudioRenderer,
+  useLocalParticipant
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track } from 'livekit-client';
+import { Track, ParticipantEvent } from 'livekit-client';
 
 interface Room {
   id: string;
@@ -91,6 +92,130 @@ function ParticipantVideo({ participantId }: { participantId: string }) {
       }} 
     />
   );
+}
+
+function DeviceRecoveryManager({ 
+  isCamOff, 
+  isMicMuted,
+  onErrorChange 
+}: { 
+  isCamOff: boolean; 
+  isMicMuted: boolean;
+  onErrorChange: (camErr: boolean, micErr: boolean) => void;
+}) {
+  const { localParticipant } = useLocalParticipant();
+
+  useEffect(() => {
+    if (!localParticipant) return;
+
+    let currentCamErr = false;
+    let currentMicErr = false;
+    const reportErrors = () => onErrorChange(currentCamErr, currentMicErr);
+
+    const handleCameraRecovery = async () => {
+      if (isCamOff) {
+        currentCamErr = false;
+        reportErrors();
+        return;
+      }
+      try {
+        await localParticipant.setCameraEnabled(true);
+        currentCamErr = false;
+        reportErrors();
+      } catch (err) {
+        console.warn("Camera auto-recovery failed", err);
+        currentCamErr = true;
+        reportErrors();
+      }
+    };
+
+    const handleMicRecovery = async () => {
+      if (isMicMuted) {
+        currentMicErr = false;
+        reportErrors();
+        return;
+      }
+      try {
+        await localParticipant.setMicrophoneEnabled(true);
+        currentMicErr = false;
+        reportErrors();
+      } catch (err) {
+        console.warn("Mic auto-recovery failed", err);
+        currentMicErr = true;
+        reportErrors();
+      }
+    };
+
+    // 1. Permissions API listener
+    const setupPermissions = async () => {
+      try {
+        const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        camStatus.onchange = () => {
+          if (camStatus.state === 'granted') handleCameraRecovery();
+        };
+      } catch (e) { /* ignore */ }
+
+      try {
+        const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        micStatus.onchange = () => {
+          if (micStatus.state === 'granted') handleMicRecovery();
+        };
+      } catch (e) { /* ignore */ }
+    };
+
+    setupPermissions();
+
+    // 2. Track onended listener
+    const checkTracks = () => {
+      const camTrack = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack?.mediaStreamTrack;
+      if (camTrack) {
+        camTrack.onended = () => {
+          console.warn("Camera track unexpectedly ended (hardware switch?)");
+          handleCameraRecovery();
+        };
+        currentCamErr = false;
+      } else if (!isCamOff) {
+        currentCamErr = true;
+      } else {
+        currentCamErr = false;
+      }
+
+      const micTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack;
+      if (micTrack) {
+        micTrack.onended = () => {
+          console.warn("Mic track unexpectedly ended");
+          handleMicRecovery();
+        };
+        currentMicErr = false;
+      } else if (!isMicMuted) {
+        currentMicErr = true;
+      } else {
+        currentMicErr = false;
+      }
+      
+      reportErrors();
+    };
+
+    checkTracks();
+    
+    localParticipant.on(ParticipantEvent.LocalTrackPublished, checkTracks);
+    localParticipant.on(ParticipantEvent.LocalTrackUnpublished, checkTracks);
+
+    const onRetryDevice = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail === 'camera') handleCameraRecovery();
+      if (customEvent.detail === 'mic') handleMicRecovery();
+    };
+    window.addEventListener('retry-device', onRetryDevice);
+    
+    return () => {
+      localParticipant.off(ParticipantEvent.LocalTrackPublished, checkTracks);
+      localParticipant.off(ParticipantEvent.LocalTrackUnpublished, checkTracks);
+      window.removeEventListener('retry-device', onRetryDevice);
+    };
+  }, [localParticipant, isCamOff, isMicMuted, onErrorChange]);
+
+  return null;
 }
 
 export default function App() {
@@ -242,6 +367,8 @@ export default function App() {
   // Call hardware controls state
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
+  const [micError, setMicError] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(false);
   const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   
@@ -2605,6 +2732,14 @@ export default function App() {
             video={!isCamOff}
             className="call-layout animate-fade-in"
           >
+            <DeviceRecoveryManager 
+              isCamOff={isCamOff} 
+              isMicMuted={isMicMuted} 
+              onErrorChange={(cam, mic) => {
+                if (cameraError !== cam) setCameraError(cam);
+                if (micError !== mic) setMicError(mic);
+              }} 
+            />
             <RoomAudioRenderer />
             
           {/* Call Header */}
@@ -2999,11 +3134,38 @@ export default function App() {
                               }
                             }}
                           >
-                            {!p.isCamOff ? (
-                              <ParticipantVideo participantId={p.id} />
-                            ) : (
-                              p.initials
-                            )}
+                            <>
+                              {!p.isCamOff ? <ParticipantVideo participantId={p.id} /> : p.initials}
+                              {isUser && (cameraError || micError) && (
+                                <div className="camera-error-overlay" style={{
+                                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                  backgroundColor: 'rgba(0,0,0,0.8)', color: 'white',
+                                  display: 'flex', flexDirection: 'column',
+                                  alignItems: 'center', justifyContent: 'center',
+                                  zIndex: 10, padding: '16px', textAlign: 'center'
+                                }}>
+                                  <span style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                    {cameraError && micError ? 'Camera & Mic unavailable — check permissions or hardware switch' : 
+                                     cameraError ? 'Camera unavailable — check permissions or hardware switch' : 
+                                     'Microphone unavailable — check permissions or hardware switch'}
+                                  </span>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (cameraError) window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                                      if (micError) window.dispatchEvent(new CustomEvent('retry-device', { detail: 'mic' }));
+                                    }}
+                                    style={{
+                                      padding: '6px 12px', background: 'var(--primary-color)',
+                                      color: '#000', border: 'none', borderRadius: '4px',
+                                      cursor: 'pointer', fontSize: '13px', fontWeight: 'bold'
+                                    }}
+                                  >
+                                    Retry
+                                  </button>
+                                </div>
+                              )}
+                            </>
                             {p.sharing && (
                               <div className="sharing-badge-overlay" style={{
                                 position: 'absolute',
