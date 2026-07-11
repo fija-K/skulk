@@ -242,6 +242,52 @@ export default function App() {
   return <AppContent />;
 }
 
+const truthQuestions = [
+  "What is your biggest fear when it comes to exams?",
+  "Have you ever cheated on a test? If so, did you get caught?",
+  "What is the most embarrassing thing that happened to you in class?",
+  "What subject do you secretly enjoy but pretend to dislike?",
+  "What is your worst study habit that you want to break?",
+  "Who was your favorite teacher and why?",
+  "Have you ever fallen asleep in a class? Tell us the story.",
+  "What is the longest time you've spent studying without sleeping?",
+  "What is the most useless piece of trivia you know?",
+  "If you could delete one academic subject from existence, what would it be?",
+  "What is your dream job that you are too afraid to pursue?",
+  "What was your worst grade ever, and what was the subject?",
+  "Have you ever lied about your grades to your parents?",
+  "What is the weirdest study snack you have ever eaten?",
+  "If you could swap lives with any classmate for a day, who would it be and why?",
+  "What is the most productive thing you did while procrastinating?",
+  "What is your secret talent that nobody in this call knows about?",
+  "Have you ever pretended to be sick to skip school/college?",
+  "If you could have any superpower to help you study, what would it be?",
+  "What is the most awkward text you sent to a study group by mistake?"
+];
+
+const dareQuestions = [
+  "Sing a line of your favorite song out loud right now.",
+  "Do 10 jumping jacks while keeping your microphone unmuted.",
+  "Show the group the last photo you took on your phone.",
+  "Draw a quick portrait of someone in the call and show it to the camera.",
+  "Speak in a dramatic whisper for the next three turns.",
+  "Balance a book on your head for the next 5 minutes without dropping it.",
+  "Tell a really bad dad joke to the group.",
+  "Show the group your most recently used emojis.",
+  "Read the last text message you received out loud.",
+  "Imitate your favorite teacher or professor for 15 seconds.",
+  "Make a funny face and hold it for 10 seconds.",
+  "Give a 30-second passionate speech about why pineapple belongs (or doesn't belong) on pizza.",
+  "Do a quick 15-second dance move on camera.",
+  "Speak in a different accent (e.g. British, Australian, etc.) for the next 2 minutes.",
+  "Try to touch your nose with your tongue.",
+  "Let the host/co-host choose a word that you must use in every sentence you speak for the next 3 minutes.",
+  "Keep your hands on your head for the next 3 minutes.",
+  "Spell your full name backwards as fast as you can.",
+  "Act like a robot introducing themselves.",
+  "Open your window (or door) and yell 'I love studying!' out loud."
+];
+
 let globalPendingLeavePromise: Promise<void> | null = null;
 function AppContent() {
   const navigate = useNavigate();
@@ -417,7 +463,19 @@ function AppContent() {
   const [drawColor, setDrawColor] = useState('#f1c40f'); // Neon gold as default
 
   // Tools sub-panel toggle
-  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose'>('none');
+  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin' | 'settings'>('none');
+
+  // Fun Tools toggle & Truth or Dare synced state
+  const [allowFunTools, setAllowFunTools] = useState(true);
+  const [truthOrDareResult, setTruthOrDareResult] = useState<{ type: 'Truth' | 'Dare', text: string, rolledBy: string, timestamp: number } | null>(null);
+
+  // Spin the Wheel synced state
+  const [spinResult, setSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
+  const [spinCheckedIds, setSpinCheckedIds] = useState<string[]>([]);
+  const [spinPool, setSpinPool] = useState<string[]>([]);
+
+  // Local Full-size tool expand state
+  const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
 
   // Watch Together (YouTube) States
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
@@ -1504,6 +1562,23 @@ function AppContent() {
       if (data.pomodoroPhase !== undefined) {
         setPomodoroPhase(data.pomodoroPhase);
       }
+
+      // Sync new tools tab fields
+      if (data.allowFunTools !== undefined) {
+        setAllowFunTools(data.allowFunTools);
+      }
+      if (data.truthOrDareResult !== undefined) {
+        setTruthOrDareResult(data.truthOrDareResult);
+      }
+      if (data.spinResult !== undefined) {
+        setSpinResult(data.spinResult);
+      }
+      if (data.spinCheckedIds !== undefined) {
+        setSpinCheckedIds(data.spinCheckedIds);
+      }
+      if (data.spinPool !== undefined) {
+        setSpinPool(data.spinPool);
+      }
     }, (error) => {
       console.warn("Room document subscription failed:", error);
     });
@@ -1963,6 +2038,128 @@ function AppContent() {
       } catch (e) {
         // ignore
       }
+    }
+  };
+
+  // Room settings handlers (Privacy and topic changes)
+  const handleChangeRoomType = async (type: 'public' | 'public-ask') => {
+    if (!currentRoom) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), { type });
+      showToast(`Privacy changed to: ${type === 'public' ? 'Public' : 'Ask to Join'}`);
+    } catch (e) {
+      console.warn("Failed to change room privacy:", e);
+    }
+  };
+
+  const handleChangeRoomName = async (newName: string) => {
+    if (!currentRoom || !newName.trim()) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), { name: newName.trim() });
+      showToast(`Room topic updated to: ${newName.trim()}`);
+    } catch (e) {
+      console.warn("Failed to change room topic:", e);
+    }
+  };
+
+  // Fun Tools & Settings Handlers
+  const handleToggleFunTools = async (val: boolean) => {
+    if (!currentRoom) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        allowFunTools: val
+      });
+      showToast(val ? "🔓 Fun tools enabled by host" : "🔒 Fun tools disabled by host");
+    } catch (e) {
+      console.warn("Failed to toggle fun tools:", e);
+    }
+  };
+
+  const handleRollTruthOrDare = async (type: 'Truth' | 'Dare') => {
+    if (!currentRoom) return;
+    const questions = type === 'Truth' ? truthQuestions : dareQuestions;
+    const text = questions[Math.floor(Math.random() * questions.length)];
+    const rolledBy = user ? user.displayName || 'Google User' : guestName;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        truthOrDareResult: {
+          type,
+          text,
+          rolledBy,
+          timestamp: Date.now()
+        }
+      });
+    } catch (e) {
+      console.warn("Failed to roll Truth or Dare:", e);
+    }
+  };
+
+  // Spin the Wheel Handlers (Fairness Cycle Algorithm)
+  const handleSpinWheel = async () => {
+    if (!currentRoom || callParticipants.length === 0) return;
+    
+    // By default, if spinCheckedIds is empty, check all active participants
+    const activeIds = spinCheckedIds.length > 0 
+      ? spinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
+      : callParticipants.map(p => p.id);
+      
+    if (activeIds.length === 0) return;
+
+    // Filter spinPool to only contain currently checked and present participants
+    let candidates = spinPool.filter(id => activeIds.includes(id));
+    
+    // Fairness reset: If everyone has been picked or the pool is out-of-sync, refill it
+    if (candidates.length === 0) {
+      candidates = [...activeIds];
+    }
+
+    // Pick a random participant from the fairness candidates pool
+    const selectedId = candidates[Math.floor(Math.random() * candidates.length)];
+    const newPool = candidates.filter(id => id !== selectedId);
+
+    // Calculate rotation angle targeting selected participant segment
+    const idx = activeIds.indexOf(selectedId);
+    const segmentAngle = 360 / activeIds.length;
+    const targetAngle = 360 - (idx * segmentAngle + segmentAngle / 2);
+    
+    const prevAngle = spinResult ? spinResult.angle : 0;
+    const prevFullSpins = Math.floor(prevAngle / 360);
+    const newAngle = (prevFullSpins + 5) * 360 + targetAngle;
+
+    const spunBy = user ? user.displayName || 'Google User' : guestName;
+
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        spinResult: {
+          selectedId,
+          angle: newAngle,
+          spunBy,
+          timestamp: Date.now()
+        },
+        spinPool: newPool,
+        spinCheckedIds: activeIds
+      });
+    } catch (e) {
+      console.warn("Failed to spin wheel:", e);
+    }
+  };
+
+  const handleToggleSpinCheckedParticipant = async (id: string) => {
+    if (!currentRoom) return;
+    const defaultIds = callParticipants.map(p => p.id);
+    const activeIds = spinCheckedIds.length > 0 ? spinCheckedIds : defaultIds;
+    
+    const nextChecked = activeIds.includes(id)
+      ? activeIds.filter(x => x !== id)
+      : [...activeIds, id];
+      
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        spinCheckedIds: nextChecked,
+        spinPool: spinPool.filter(x => nextChecked.includes(x))
+      });
+    } catch (e) {
+      console.warn("Failed to toggle spin participant:", e);
     }
   };
 
@@ -2887,6 +3084,657 @@ function AppContent() {
     );
   }
 
+  const renderPomodoroUI = (isExpanded: boolean) => {
+    return (
+      <div className={`pomodoro-panel-container ${isExpanded ? 'expanded' : ''}`}>
+        {/* Timer circle display */}
+        <div className={`pomodoro-timer-circle ${pomodoroPhase === 'focus' ? 'active-focus' : 'active-break'} ${isExpanded ? 'expanded' : ''}`}>
+          <span className="pomodoro-time-digits">
+            {pomodoroMinutes.toString().padStart(2, '0')}:
+            {pomodoroSeconds.toString().padStart(2, '0')}
+          </span>
+          <span className={`pomodoro-phase-label ${pomodoroPhase}`}>
+            {pomodoroPhase === 'focus' ? 'Focus Session' : 'Short Break'}
+          </span>
+        </div>
+
+        {/* Host Controls */}
+        <div className="pomodoro-button-row">
+          <button 
+            onClick={togglePomodoro} 
+            className="btn-create" 
+            style={{ 
+              padding: '8px 16px', 
+              fontSize: '13px', 
+              backgroundColor: pomodoroIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
+              color: pomodoroIsRunning ? 'var(--text-primary)' : 'var(--primary-text)',
+              border: '1px solid var(--border-color)' 
+            }}
+          >
+            {pomodoroIsRunning ? 'Pause' : 'Start'}
+          </button>
+          
+          <button 
+            onClick={skipPomodoroPhase} 
+            className="btn-signin" 
+            style={{ padding: '8px 16px', fontSize: '13px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+          >
+            Skip
+          </button>
+        </div>
+
+        {/* Adjust Lengths Row controls */}
+        <div className="pomodoro-adjusters-container">
+          {/* Focus adjust */}
+          <div className="pomodoro-adjust-row">
+            <span className="pomodoro-adjust-label">Focus Length</span>
+            <div className="pomodoro-adjust-controls">
+              <button type="button" onClick={() => adjustPomodoroLength('focus', -1)} className="pomodoro-adjust-btn">-</button>
+              <span className="pomodoro-adjust-val">{pomodoroFocusLength}m</span>
+              <button type="button" onClick={() => adjustPomodoroLength('focus', 1)} className="pomodoro-adjust-btn">+</button>
+            </div>
+          </div>
+
+          {/* Break adjust */}
+          <div className="pomodoro-adjust-row">
+            <span className="pomodoro-adjust-label">Break Length</span>
+            <div className="pomodoro-adjust-controls">
+              <button type="button" onClick={() => adjustPomodoroLength('break', -1)} className="pomodoro-adjust-btn">-</button>
+              <span className="pomodoro-adjust-val">{pomodoroBreakLength}m</span>
+              <button type="button" onClick={() => adjustPomodoroLength('break', 1)} className="pomodoro-adjust-btn">+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDeadlineUI = (isExpanded: boolean) => {
+    return (
+      <div className={`deadline-panel-container ${isExpanded ? 'expanded' : ''}`} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+        {/* Top Area: Current Step + Countdown */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '16px' }}>
+          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>CURRENT STEP</span>
+          <span style={{ fontSize: isExpanded ? '18px' : '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+            {deadlineActiveIndex + 1}. {deadlineSteps[deadlineActiveIndex]?.name || 'No steps'}
+          </span>
+          <span style={{ fontSize: isExpanded ? '56px' : '32px', fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-primary)', margin: '8px 0' }}>
+            {deadlineTimerMinutes.toString().padStart(2, '0')}:
+            {deadlineTimerSeconds.toString().padStart(2, '0')}
+          </span>
+
+          {/* Control Row */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <button 
+              onClick={deadlineIsRunning ? () => setDeadlineIsRunning(false) : startDeadlineTimer} 
+              className="btn-create" 
+              style={{ 
+                padding: '6px 12px', 
+                fontSize: '12px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '4px',
+                backgroundColor: deadlineIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
+                color: deadlineIsRunning ? 'var(--text-primary)' : 'var(--primary-text)'
+              }}
+            >
+              {deadlineIsRunning ? 'Pause' : 'Start'}
+            </button>
+            <button 
+              onClick={finishDeadlineStep} 
+              className="btn-signin" 
+              style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+            >
+              Finish step
+            </button>
+            <button 
+              onClick={resetDeadlineTimer} 
+              className="btn-signin" 
+              style={{ padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Reset step timer"
+            >
+              🔄
+            </button>
+          </div>
+        </div>
+
+        {/* Middle Area: Scrollable Step List */}
+        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '12px 0', height: isExpanded ? '320px' : '220px', overflowY: 'auto' }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+            STEPS · SCROLL FOR MORE
+          </span>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {deadlineSteps.map((step, idx) => {
+              const isActive = idx === deadlineActiveIndex;
+              return (
+                <div 
+                  key={step.id} 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    backgroundColor: isActive ? 'rgba(241, 196, 15, 0.08)' : 'rgba(255, 255, 255, 0.01)',
+                    border: isActive ? '1px solid var(--primary-color)' : '1px solid var(--border-color)',
+                    borderRadius: 'var(--btn-radius)',
+                    padding: '8px 10px',
+                    transition: 'all var(--transition-speed) ease'
+                  }}
+                >
+                  {/* Dot + Step Title */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                    <div 
+                      style={{ 
+                        width: '8px', 
+                        height: '8px', 
+                        borderRadius: '50%', 
+                        border: '1px solid var(--text-secondary)',
+                        backgroundColor: isActive ? 'var(--primary-color)' : 'transparent',
+                        flexShrink: 0
+                      }}
+                    />
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {idx + 1}. {step.name}
+                    </span>
+                  </div>
+
+                  {/* Budget Controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', flexShrink: 0 }}>
+                    <button 
+                      type="button" 
+                      onClick={() => adjustDeadlineMinutes(step.id, -1)} 
+                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-color)', borderRadius: '3px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                    >-</button>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '32px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{step.minutes}</span>
+                      <span style={{ fontSize: '8px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>min</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => adjustDeadlineMinutes(step.id, 1)} 
+                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-color)', borderRadius: '3px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                    >+</button>
+                    <button 
+                      type="button" 
+                      onClick={() => deleteDeadlineStep(step.id)} 
+                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '3px', backgroundColor: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginLeft: '4px' }}
+                      title="Delete step"
+                    >×</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Bottom Area: Add step and Reset controls */}
+        <div style={{ paddingTop: '12px' }}>
+          {isAddingDeadlineStep ? (
+            <form 
+              onSubmit={handleAddDeadlineStep} 
+              style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}
+            >
+              <input 
+                type="text"
+                placeholder="Step name..."
+                className="search-input"
+                style={{ paddingLeft: '8px', fontSize: '12px', height: '32px' }}
+                value={deadlineNewStepName}
+                onChange={(e) => setDeadlineNewStepName(e.target.value)}
+                autoFocus
+                required
+              />
+              <button type="submit" className="btn-signin" style={{ padding: '0 12px', height: '32px', fontSize: '12px' }}>
+                Add
+              </button>
+              <button type="button" onClick={() => setIsAddingDeadlineStep(false)} className="btn-signin" style={{ padding: '0 8px', height: '32px', fontSize: '12px', backgroundColor: 'transparent', border: 'none' }}>
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => setIsAddingDeadlineStep(true)} 
+                className="btn-signin" 
+                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+              >
+                + Add step
+              </button>
+              <button 
+                onClick={resetDeadlineClockDefault} 
+                className="btn-signin" 
+                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+              >
+                Reset to default
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderLooseTimerUI = (isExpanded: boolean) => {
+    return (
+      <div className={`loose-panel-container ${isExpanded ? 'expanded' : ''}`} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+        {/* Top Area: Current Step + Countup */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '16px' }}>
+          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>CURRENT FOCUS STEP</span>
+          <span style={{ fontSize: isExpanded ? '18px' : '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+            {looseActiveIndex + 1}. {looseSteps[looseActiveIndex]?.name || 'No steps'}
+          </span>
+          <span style={{ fontSize: isExpanded ? '56px' : '32px', fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-primary)', margin: '8px 0' }}>
+            {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:
+            {(looseTimerSeconds % 60).toString().padStart(2, '0')}
+          </span>
+
+          {/* Control Row */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <button 
+              onClick={() => setLooseIsRunning(!looseIsRunning)} 
+              className="btn-create" 
+              style={{ 
+                padding: '6px 12px', 
+                fontSize: '12px', 
+                backgroundColor: looseIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
+                color: looseIsRunning ? 'var(--text-primary)' : 'var(--primary-text)'
+              }}
+            >
+              {looseIsRunning ? 'Pause' : 'Start'}
+            </button>
+            <button 
+              onClick={finishLooseStep} 
+              className="btn-signin" 
+              style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+            >
+              Finish step
+            </button>
+            <button 
+              onClick={resetLooseClockDefault} 
+              className="btn-signin" 
+              style={{ padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Reset timer"
+            >
+              🔄
+            </button>
+          </div>
+        </div>
+
+        {/* Middle Area: Scrollable Step List */}
+        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '12px 0', height: isExpanded ? '260px' : '160px', overflowY: 'auto' }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+            STEPS LIST
+          </span>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {looseSteps.map((step, idx) => {
+              const isActive = idx === looseActiveIndex;
+              const isCompleted = step.status === 'completed';
+              return (
+                <div 
+                  key={step.id} 
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    backgroundColor: isActive ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isActive ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.05)',
+                  }}
+                >
+                  <span style={{ 
+                    fontSize: '12px', 
+                    fontWeight: isActive ? 600 : 500, 
+                    color: isActive ? 'var(--primary-color)' : 'var(--text-primary)',
+                    textDecoration: isCompleted ? 'line-through' : 'none',
+                    opacity: isCompleted ? 0.6 : 1
+                  }}>
+                    {idx + 1}. {step.name}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 650 }}>
+                      {Math.floor(step.elapsedSeconds / 60)}m {step.elapsedSeconds % 60}s
+                    </span>
+                    <button 
+                      type="button" 
+                      onClick={() => deleteLooseStep(step.id)} 
+                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '3px', backgroundColor: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                      title="Delete step"
+                    >×</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Bottom Area: Add Step Form */}
+        <div style={{ paddingTop: '12px' }}>
+          {isAddingLooseStep ? (
+            <form 
+              onSubmit={handleAddLooseStep} 
+              style={{ display: 'flex', gap: '6px' }}
+            >
+              <input 
+                type="text" 
+                placeholder="Step name..." 
+                value={looseNewStepName} 
+                onChange={(e) => setLooseNewStepName(e.target.value)} 
+                className="search-input" 
+                style={{ flex: 1, paddingLeft: '8px', fontSize: '12px', height: '32px' }}
+                autoFocus
+                required
+              />
+              <button type="submit" className="btn-signin" style={{ padding: '0 12px', height: '32px', fontSize: '12px' }}>
+                Add
+              </button>
+              <button type="button" onClick={() => setIsAddingLooseStep(false)} className="btn-signin" style={{ padding: '0 8px', height: '32px', fontSize: '12px', backgroundColor: 'transparent', border: 'none' }}>
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => setIsAddingLooseStep(true)} 
+                className="btn-signin" 
+                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+              >
+                + Add step
+              </button>
+              <button 
+                onClick={resetLooseTimer} 
+                className="btn-signin" 
+                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+              >
+                Reset to default
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTruthOrDareUI = (isExpanded: boolean) => {
+    return (
+      <div className={`truthordare-panel-container ${isExpanded ? 'expanded' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '16px' }}>
+        {truthOrDareResult ? (
+          <div className={`truthordare-question-card ${truthOrDareResult.type.toLowerCase()} ${isExpanded ? 'expanded' : ''}`} style={{ width: '100%', maxWidth: isExpanded ? '500px' : 'none' }}>
+            <div className="card-badge">{truthOrDareResult.type}</div>
+            <div className="card-text">"{truthOrDareResult.text}"</div>
+            <div className="card-rolledby">Rolled by {truthOrDareResult.rolledBy}</div>
+          </div>
+        ) : (
+          <div className="truthordare-question-card-placeholder">
+            <span>🎲 No active card</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>Choose Truth or Dare to start the icebreaker game!</span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: isExpanded ? '500px' : 'none', marginTop: '8px' }}>
+          <button 
+            onClick={() => handleRollTruthOrDare('Truth')} 
+            className="btn-create" 
+            style={{ 
+              flex: 1, 
+              padding: isExpanded ? '14px' : '10px', 
+              fontSize: '14px', 
+              background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', 
+              borderColor: 'transparent',
+              color: '#ffffff',
+              fontWeight: 700
+            }}
+          >
+            😇 Roll Truth
+          </button>
+          <button 
+            onClick={() => handleRollTruthOrDare('Dare')} 
+            className="btn-create" 
+            style={{ 
+              flex: 1, 
+              padding: isExpanded ? '14px' : '10px', 
+              fontSize: '14px', 
+              background: 'linear-gradient(135deg, #ec4899, #be185d)', 
+              borderColor: 'transparent',
+              color: '#ffffff',
+              fontWeight: 700
+            }}
+          >
+            😈 Roll Dare
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSpinWheelUI = (isExpanded: boolean) => {
+    const activeIds = spinCheckedIds.length > 0 
+      ? spinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
+      : callParticipants.map(p => p.id);
+
+    const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
+    const n = spinParticipants.length;
+
+    const size = isExpanded ? 360 : 200;
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = size * 0.42;
+    const segmentAngle = n > 0 ? 360 / n : 360;
+
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+
+    return (
+      <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
+        <div className="spinner-main-area">
+          <div className="wheel-outer-wrapper" style={{ width: size, height: size }}>
+            <div className="wheel-pointer" style={{ top: isExpanded ? '-12px' : '-8px' }}>
+              <svg width={isExpanded ? 28 : 20} height={isExpanded ? 28 : 20} viewBox="0 0 24 24" fill="var(--primary-color)" stroke="#fff" strokeWidth="2">
+                <polygon points="12,24 4,8 20,8" />
+              </svg>
+            </div>
+
+            {n > 0 ? (
+              <svg 
+                width={size} 
+                height={size} 
+                viewBox={`0 0 ${size} ${size}`} 
+                style={{ 
+                  transform: `rotate(${spinResult ? spinResult.angle : 0}deg)`, 
+                  transition: 'transform 4s cubic-bezier(0.1, 0.8, 0.1, 1)' 
+                }}
+              >
+                {spinParticipants.map((p, idx) => {
+                  const startAngle = idx * segmentAngle;
+                  const endAngle = (idx + 1) * segmentAngle;
+                  
+                  const x1 = cx + radius * Math.cos((startAngle - 90) * Math.PI / 180);
+                  const y1 = cy + radius * Math.sin((startAngle - 90) * Math.PI / 180);
+                  const x2 = cx + radius * Math.cos((endAngle - 90) * Math.PI / 180);
+                  const y2 = cy + radius * Math.sin((endAngle - 90) * Math.PI / 180);
+                  
+                  const largeArcFlag = segmentAngle > 180 ? 1 : 0;
+                  const pathData = `
+                    M ${cx} ${cy}
+                    L ${x1} ${y1}
+                    A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}
+                    Z
+                  `;
+                  
+                  const textAngle = startAngle + segmentAngle / 2;
+                  const textRadius = radius * 0.65;
+                  const tx = cx + textRadius * Math.cos((textAngle - 90) * Math.PI / 180);
+                  const ty = cy + textRadius * Math.sin((textAngle - 90) * Math.PI / 180);
+
+                  return (
+                    <g key={p.id}>
+                      <path d={pathData} fill={p.color || '#3b82f6'} stroke="rgba(0,0,0,0.15)" strokeWidth="1.5" />
+                      <text 
+                        x={tx} 
+                        y={ty} 
+                        fill="#fff" 
+                        fontSize={isExpanded ? 11 : 9} 
+                        fontWeight="800" 
+                        textAnchor="middle" 
+                        transform={`rotate(${textAngle}, ${tx}, ${ty})`}
+                      >
+                        {p.initials || p.name.substring(0, 2)}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            ) : (
+              <div className="wheel-empty-state">No participants checked</div>
+            )}
+
+            <button 
+              onClick={handleSpinWheel} 
+              className="wheel-center-button"
+              style={{
+                width: isExpanded ? '64px' : '44px',
+                height: isExpanded ? '64px' : '44px',
+                fontSize: isExpanded ? '12px' : '10px',
+              }}
+            >
+              SPIN
+            </button>
+          </div>
+
+          {spinResult && (
+            <div className="spin-result-banner animate-fade-in" style={{ marginTop: '16px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Landed on</div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--primary-color)', marginTop: '2px' }}>
+                {callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant'}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px' }}>Spun by {spinResult.spunBy}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="spinner-participants-sidebar">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+              Checked ({n}/{callParticipants.length})
+            </span>
+            <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
+              Pool: {spinPool.length} left
+            </span>
+          </div>
+
+          <div className="spinner-participants-list">
+            {callParticipants.map(p => {
+              const isChecked = activeIds.includes(p.id);
+              return (
+                <div key={p.id} className="spinner-participant-row" onClick={() => isHostOrAdmin && handleToggleSpinCheckedParticipant(p.id)} style={{ cursor: isHostOrAdmin ? 'pointer' : 'default' }}>
+                  {isHostOrAdmin ? (
+                    <input 
+                      type="checkbox" 
+                      checked={isChecked} 
+                      onChange={() => {}} 
+                      style={{ cursor: 'pointer' }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: '12px' }}>{isChecked ? '✅' : '⬜'}</span>
+                  )}
+                  <span style={{ fontSize: '12px', fontWeight: isChecked ? 600 : 400, color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)', flex: 1, marginLeft: '6px' }}>
+                    {p.name}
+                  </span>
+                  {spinPool.includes(p.id) && isChecked && (
+                    <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
+                      Pool
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
+  const renderRoomSettingsUI = () => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '4px' }}>
+        {/* Room Name setting */}
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Room Topic (Name)</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              defaultValue={currentRoom?.name || ''} 
+              onBlur={(e) => handleChangeRoomName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleChangeRoomName(e.currentTarget.value);
+                }
+              }}
+              className="room-input" 
+              style={{ flex: 1, padding: '8px 12px', fontSize: '13px' }}
+              placeholder="e.g. Algorithms Study Group"
+            />
+          </div>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can update the room topic/name.</span>
+        </div>
+
+        {/* Room Privacy setting */}
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Room Privacy Type</label>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+              <input 
+                type="radio" 
+                name="roomTypeSetting" 
+                checked={currentRoom?.type === 'public'} 
+                onChange={() => handleChangeRoomType('public')} 
+              />
+              Public (Direct Join)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+              <input 
+                type="radio" 
+                name="roomTypeSetting" 
+                checked={currentRoom?.type === 'public-ask'} 
+                onChange={() => handleChangeRoomType('public-ask')} 
+              />
+              Ask to Join (Approval Required)
+            </label>
+          </div>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can change room privacy in this room.</span>
+        </div>
+
+        {/* Fun Tools setting (Host-only) */}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Allow Fun Tools for Members</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
+                {isHostOrAdmin ? 'Enable or disable Fun tools tab for regular members.' : 'Only hosts or co-hosts can modify this setting.'}
+              </span>
+            </div>
+            <label className="switch-toggle" style={{ opacity: isHostOrAdmin ? 1 : 0.5, pointerEvents: isHostOrAdmin ? 'auto' : 'none' }}>
+              <input 
+                type="checkbox" 
+                checked={allowFunTools} 
+                onChange={(e) => handleToggleFunTools(e.target.checked)} 
+                disabled={!isHostOrAdmin}
+              />
+              <span className="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-container">
       
@@ -3455,7 +4303,69 @@ function AppContent() {
             
             {/* Call Main Stage (Left) */}
             <div className="call-stage">
-              {viewingShare ? (
+              {expandedTool !== 'none' ? (
+                <div className="expanded-tool-stage-wrapper animate-fade-in" style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  height: '100%',
+                  backgroundColor: 'var(--card-bg)',
+                  borderRadius: 'var(--border-radius)',
+                  border: '1px solid var(--border-color)',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}>
+                  {/* Expanded Header */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 16px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>
+                        {expandedTool === 'pomodoro' && '⏱️'}
+                        {expandedTool === 'deadline' && '⏳'}
+                        {expandedTool === 'loose' && '🔄'}
+                        {expandedTool === 'truthordare' && '🎲'}
+                        {expandedTool === 'spin' && '🎡'}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)' }}>
+                        {expandedTool === 'pomodoro' && 'Pomodoro Timer'}
+                        {expandedTool === 'deadline' && 'Deadline Clock'}
+                        {expandedTool === 'loose' && 'Loose Timer (Study Flow)'}
+                        {expandedTool === 'truthordare' && 'Truth or Dare'}
+                        {expandedTool === 'spin' && 'Spin the Wheel'}
+                      </span>
+                    </div>
+                    <button 
+                      onClick={() => setExpandedTool('none')} 
+                      className="btn-signin" 
+                      style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      title="Collapse to sidebar"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="4 14 10 14 10 20"></polyline>
+                        <polyline points="20 10 14 10 14 4"></polyline>
+                        <line x1="14" y1="10" x2="21" y2="3"></line>
+                        <line x1="10" y1="14" x2="3" y2="21"></line>
+                      </svg>
+                      Collapse
+                    </button>
+                  </div>
+                  {/* Expanded Content Container */}
+                  <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '100%', maxWidth: '640px', display: 'flex', flexDirection: 'column' }}>
+                      {expandedTool === 'pomodoro' && renderPomodoroUI(true)}
+                      {expandedTool === 'deadline' && renderDeadlineUI(true)}
+                      {expandedTool === 'loose' && renderLooseTimerUI(true)}
+                      {expandedTool === 'truthordare' && renderTruthOrDareUI(true)}
+                      {expandedTool === 'spin' && renderSpinWheelUI(true)}
+                    </div>
+                  </div>
+                </div>
+              ) : viewingShare ? (
                 viewingShare.type === 'whiteboard' ? (
                 <div className="whiteboard-container">
                   <div className="whiteboard-toolbar">
@@ -3936,16 +4846,16 @@ function AppContent() {
                   </div>
                 )}
 
-                {/* 2C. Tools Tab Panel (Multi-view tools and sub-panels) */}
-                {callTab === 'tools' && (
-                  <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                     {callTab === 'tools' && (
+                  <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     
                     {activeToolDetail === 'none' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                        {/* Section 1: Collaborative Tools */}
+                        
+                        {/* Section 1: Focus Tools */}
                         <div>
                           <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            Collaborative Tools
+                            Focus Tools
                           </h4>
                           
                           <div className="tools-cards-grid">
@@ -4000,17 +4910,7 @@ function AppContent() {
                                 </span>
                               </div>
                             </div>
-                          </div>
-                        </div>
 
-                        {/* Section 2: Focus & Fun */}
-                        <div>
-                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            Focus & Fun
-                          </h4>
-                          
-                          <div className="tools-cards-grid">
-                            
                             {/* Watch Together Card */}
                             <div 
                               className={`tool-card ${youtubeVideoId ? 'active' : ''}`}
@@ -4029,27 +4929,6 @@ function AppContent() {
                               <div className="tool-card-info">
                                 <span className="tool-card-title">Watch Together</span>
                                 <span className="tool-card-desc">Play and stream YouTube links in call.</span>
-                              </div>
-                            </div>
-
-                            {/* Games Party Card */}
-                            <div 
-                              className="tool-card"
-                              onClick={() => {
-                                setActiveToolDetail('games');
-                                setActiveGameId(null);
-                              }}
-                              title="Play games together"
-                            >
-                              <div className="tool-card-icon-wrapper">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-                                  <path d="M6 12h4m-2-2v4m7-2h.01m2.99 0h.01"></path>
-                                </svg>
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Games Party</span>
-                                <span className="tool-card-desc">Play slither.io, JKLM, and party games.</span>
                               </div>
                             </div>
 
@@ -4076,17 +4955,6 @@ function AppContent() {
                               </div>
                             </div>
 
-                          </div>
-                        </div>
-
-                        {/* Section 3: Progress & Focus */}
-                        <div>
-                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            Progress & Focus
-                          </h4>
-                          
-                          <div className="tools-cards-grid">
-                            
                             {/* Session Target Card */}
                             <div 
                               className={`tool-card ${targetsList.some(t => !t.completed) ? 'active' : ''}`}
@@ -4105,27 +4973,6 @@ function AppContent() {
                               <div className="tool-card-info">
                                 <span className="tool-card-title">Session Target</span>
                                 <span className="tool-card-desc">Weekly checklist and progress tracker.</span>
-                              </div>
-                            </div>
-
-                            {/* Mini Deadline Clock Card */}
-                            <div 
-                              className={`tool-card ${deadlineIsRunning ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveToolDetail('deadline');
-                                setActiveGameId(null);
-                              }}
-                              title="Stage-by-stage deadline budgets"
-                            >
-                              <div className="tool-card-icon-wrapper">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <circle cx="12" cy="12" r="10"></circle>
-                                  <polyline points="12 6 12 12 15 15"></polyline>
-                                </svg>
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Deadline Clock</span>
-                                <span className="tool-card-desc">Budgeted session steps countdown.</span>
                               </div>
                             </div>
 
@@ -4152,6 +4999,130 @@ function AppContent() {
                               </div>
                             </div>
 
+                            {/* Spin the Wheel Focus Card */}
+                            <div 
+                              className="tool-card"
+                              onClick={() => {
+                                setActiveToolDetail('spin');
+                                setActiveGameId(null);
+                              }}
+                              title="Pick random participants fairly"
+                            >
+                              <div className="tool-card-icon-wrapper">
+                                🎯
+                              </div>
+                              <div className="tool-card-info">
+                                <span className="tool-card-title">Spin the Wheel</span>
+                                <span className="tool-card-desc">Fair circular random turn picker.</span>
+                              </div>
+                            </div>
+
+                          </div>
+                        </div>
+
+                        {/* Section 2: Fun Section (Disabled for members if toggle is OFF) */}
+                        {(() => {
+                          const myId = getMyId();
+                          const myPresence = callParticipants.find(p => p.id === myId);
+                          const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+                          const isFunLocked = !allowFunTools && !isHostOrAdmin;
+
+                          return (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                                  Fun Section
+                                </h4>
+                                {isFunLocked && (
+                                  <span style={{ fontSize: '9px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                    🔒 Locked by Host
+                                  </span>
+                                )}
+                                {!allowFunTools && isHostOrAdmin && (
+                                  <span style={{ fontSize: '9px', background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                    🔓 Disabled for Members
+                                  </span>
+                                )}
+                              </div>
+                              
+                              <div className="tools-cards-grid">
+                                {/* Games Party Card */}
+                                <div 
+                                  className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
+                                  onClick={() => {
+                                    if (isFunLocked) {
+                                      showToast("🔒 Fun tools are disabled by the host.");
+                                      return;
+                                    }
+                                    setActiveToolDetail('games');
+                                    setActiveGameId(null);
+                                  }}
+                                  title="Play games together"
+                                >
+                                  <div className="tool-card-icon-wrapper">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+                                      <path d="M6 12h4m-2-2v4m7-2h.01m2.99 0h.01"></path>
+                                    </svg>
+                                  </div>
+                                  <div className="tool-card-info">
+                                    <span className="tool-card-title">Games Party</span>
+                                    <span className="tool-card-desc">Play JKLM and multiplayer party games.</span>
+                                  </div>
+                                </div>
+
+                                {/* Truth or Dare Card */}
+                                <div 
+                                  className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
+                                  onClick={() => {
+                                    if (isFunLocked) {
+                                      showToast("🔒 Fun tools are disabled by the host.");
+                                      return;
+                                    }
+                                    setActiveToolDetail('truthordare');
+                                    setActiveGameId(null);
+                                  }}
+                                  title="Play Truth or Dare icebreakers"
+                                >
+                                  <div className="tool-card-icon-wrapper">
+                                    🎲
+                                  </div>
+                                  <div className="tool-card-info">
+                                    <span className="tool-card-title">Truth or Dare</span>
+                                    <span className="tool-card-desc">Random study-themed icebreaker cards.</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Section 3: Room Configuration & Settings */}
+                        <div>
+                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                            Room Configuration
+                          </h4>
+                          
+                          <div className="tools-cards-grid">
+                            <div 
+                              className="tool-card"
+                              onClick={() => {
+                                setActiveToolDetail('settings');
+                                setActiveGameId(null);
+                              }}
+                              title="Configure room topic, privacy, and fun tools toggle"
+                            >
+                              <div className="tool-card-icon-wrapper">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="3"></circle>
+                                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                              </div>
+                              <div className="tool-card-info">
+                                <span className="tool-card-title">Room Settings</span>
+                                <span className="tool-card-desc">Modify room name, privacy, or fun tools.</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -4298,7 +5269,7 @@ function AppContent() {
 
                     {/* Sub-panel View 3: Pomodoro Timer Controls */}
                     {activeToolDetail === 'pomodoro' && (
-                      <div className="animate-fade-in">
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
                         <div className="tools-sub-panel-header">
                           <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -4307,72 +5278,20 @@ function AppContent() {
                             </svg>
                           </button>
                           <span className="tools-sub-panel-title">Pomodoro Timer</span>
+                          <button 
+                            onClick={() => setExpandedTool(expandedTool === 'pomodoro' ? 'none' : 'pomodoro')} 
+                            className={`tools-expand-btn ${expandedTool === 'pomodoro' ? 'active' : ''}`}
+                            title="Expand to Stage"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <polyline points="9 21 3 21 3 15"></polyline>
+                              <line x1="21" y1="3" x2="14" y2="10"></line>
+                              <line x1="3" y1="21" x2="10" y2="14"></line>
+                            </svg>
+                          </button>
                         </div>
-
-                        <div className="pomodoro-panel-container">
-                          
-                          {/* Timer circle display */}
-                          <div className={`pomodoro-timer-circle ${pomodoroPhase === 'focus' ? 'active-focus' : 'active-break'}`}>
-                            <span className="pomodoro-time-digits">
-                              {pomodoroMinutes.toString().padStart(2, '0')}:
-                              {pomodoroSeconds.toString().padStart(2, '0')}
-                            </span>
-                            <span className={`pomodoro-phase-label ${pomodoroPhase}`}>
-                              {pomodoroPhase === 'focus' ? 'Focus Session' : 'Short Break'}
-                            </span>
-                          </div>
-
-                          {/* Host Controls */}
-                          <div className="pomodoro-button-row">
-                            <button 
-                              onClick={togglePomodoro} 
-                              className="btn-create" 
-                              style={{ 
-                                padding: '8px 16px', 
-                                fontSize: '13px', 
-                                backgroundColor: pomodoroIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
-                                color: pomodoroIsRunning ? 'var(--text-primary)' : 'var(--primary-text)',
-                                border: '1px solid var(--border-color)' 
-                              }}
-                            >
-                              {pomodoroIsRunning ? 'Pause' : 'Start'}
-                            </button>
-                            
-                            <button 
-                              onClick={skipPomodoroPhase} 
-                              className="btn-signin" 
-                              style={{ padding: '8px 16px', fontSize: '13px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
-                            >
-                              Skip
-                            </button>
-                          </div>
-
-                          {/* Adjust Lengths Row controls */}
-                          <div className="pomodoro-adjusters-container">
-                            
-                            {/* Focus adjust */}
-                            <div className="pomodoro-adjust-row">
-                              <span className="pomodoro-adjust-label">Focus Length</span>
-                              <div className="pomodoro-adjust-controls">
-                                <button type="button" onClick={() => adjustPomodoroLength('focus', -1)} className="pomodoro-adjust-btn">-</button>
-                                <span className="pomodoro-adjust-val">{pomodoroFocusLength}m</span>
-                                <button type="button" onClick={() => adjustPomodoroLength('focus', 1)} className="pomodoro-adjust-btn">+</button>
-                              </div>
-                            </div>
-
-                            {/* Break adjust */}
-                            <div className="pomodoro-adjust-row">
-                              <span className="pomodoro-adjust-label">Break Length</span>
-                              <div className="pomodoro-adjust-controls">
-                                <button type="button" onClick={() => adjustPomodoroLength('break', -1)} className="pomodoro-adjust-btn">-</button>
-                                <span className="pomodoro-adjust-val">{pomodoroBreakLength}m</span>
-                                <button type="button" onClick={() => adjustPomodoroLength('break', 1)} className="pomodoro-adjust-btn">+</button>
-                              </div>
-                            </div>
-
-                          </div>
-
-                        </div>
+                        {renderPomodoroUI(false)}
                       </div>
                     )}
 
@@ -4510,167 +5429,20 @@ function AppContent() {
                             </svg>
                           </button>
                           <span className="tools-sub-panel-title">Deadline Clock</span>
+                          <button 
+                            onClick={() => setExpandedTool(expandedTool === 'deadline' ? 'none' : 'deadline')} 
+                            className={`tools-expand-btn ${expandedTool === 'deadline' ? 'active' : ''}`}
+                            title="Expand to Stage"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <polyline points="9 21 3 21 3 15"></polyline>
+                              <line x1="21" y1="3" x2="14" y2="10"></line>
+                              <line x1="3" y1="21" x2="10" y2="14"></line>
+                            </svg>
+                          </button>
                         </div>
-
-                        {/* Top Area: Current Step + Countdown */}
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '16px' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>CURRENT STEP</span>
-                          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
-                            {deadlineActiveIndex + 1}. {deadlineSteps[deadlineActiveIndex]?.name || 'No steps'}
-                          </span>
-                          <span style={{ fontSize: '32px', fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-primary)', margin: '8px 0' }}>
-                            {deadlineTimerMinutes.toString().padStart(2, '0')}:
-                            {deadlineTimerSeconds.toString().padStart(2, '0')}
-                          </span>
-
-                          {/* Control Row */}
-                          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                            <button 
-                              onClick={deadlineIsRunning ? () => setDeadlineIsRunning(false) : startDeadlineTimer} 
-                              className="btn-create" 
-                              style={{ 
-                                padding: '6px 12px', 
-                                fontSize: '12px', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '4px',
-                                backgroundColor: deadlineIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
-                                color: deadlineIsRunning ? 'var(--text-primary)' : 'var(--primary-text)'
-                              }}
-                            >
-                              {deadlineIsRunning ? 'Pause' : 'Start'}
-                            </button>
-                            <button 
-                              onClick={finishDeadlineStep} 
-                              className="btn-signin" 
-                              style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
-                            >
-                              Finish step
-                            </button>
-                            <button 
-                              onClick={resetDeadlineTimer} 
-                              className="btn-signin" 
-                              style={{ padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                              title="Reset step timer"
-                            >
-                              🔄
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Middle Area: Scrollable Step List (inside a fixed-height parent) */}
-                        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '12px 0', height: '220px', overflowY: 'auto' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                            STEPS · SCROLL FOR MORE
-                          </span>
-                          
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {deadlineSteps.map((step, idx) => {
-                              const isActive = idx === deadlineActiveIndex;
-                              return (
-                                <div 
-                                  key={step.id} 
-                                  style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'space-between',
-                                    backgroundColor: isActive ? 'rgba(241, 196, 15, 0.08)' : 'rgba(255, 255, 255, 0.01)',
-                                    border: isActive ? '1px solid var(--primary-color)' : '1px solid var(--border-color)',
-                                    borderRadius: 'var(--btn-radius)',
-                                    padding: '8px 10px',
-                                    transition: 'all var(--transition-speed) ease'
-                                  }}
-                                >
-                                  {/* Dot + Step Title */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                                    <div 
-                                      style={{ 
-                                        width: '8px', 
-                                        height: '8px', 
-                                        borderRadius: '50%', 
-                                        border: '1px solid var(--text-secondary)',
-                                        backgroundColor: isActive ? 'var(--primary-color)' : 'transparent',
-                                        flexShrink: 0
-                                      }}
-                                    />
-                                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      {idx + 1}. {step.name}
-                                    </span>
-                                  </div>
-
-                                  {/* Budget Controls */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', flexShrink: 0 }}>
-                                    <button 
-                                      type="button" 
-                                      onClick={() => adjustDeadlineMinutes(step.id, -1)} 
-                                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-color)', borderRadius: '3px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                                    >-</button>
-                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '32px' }}>
-                                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{step.minutes}</span>
-                                      <span style={{ fontSize: '8px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>min</span>
-                                    </div>
-                                    <button 
-                                      type="button" 
-                                      onClick={() => adjustDeadlineMinutes(step.id, 1)} 
-                                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border-color)', borderRadius: '3px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                                    >+</button>
-                                    <button 
-                                      type="button" 
-                                      onClick={() => deleteDeadlineStep(step.id)} 
-                                      style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '3px', backgroundColor: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginLeft: '4px' }}
-                                      title="Delete step"
-                                    >×</button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Bottom Area: Add step and Reset controls (fixed layout) */}
-                        <div style={{ paddingTop: '12px' }}>
-                          {isAddingDeadlineStep ? (
-                            <form 
-                              onSubmit={handleAddDeadlineStep} 
-                              style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}
-                            >
-                              <input 
-                                type="text"
-                                placeholder="Step name..."
-                                className="search-input"
-                                style={{ paddingLeft: '8px', fontSize: '12px', height: '32px' }}
-                                value={deadlineNewStepName}
-                                onChange={(e) => setDeadlineNewStepName(e.target.value)}
-                                autoFocus
-                                required
-                              />
-                              <button type="submit" className="btn-signin" style={{ padding: '0 12px', height: '32px', fontSize: '12px' }}>
-                                Add
-                              </button>
-                              <button type="button" onClick={() => setIsAddingDeadlineStep(false)} className="btn-signin" style={{ padding: '0 8px', height: '32px', fontSize: '12px', backgroundColor: 'transparent', border: 'none' }}>
-                                Cancel
-                              </button>
-                            </form>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button 
-                                onClick={() => setIsAddingDeadlineStep(true)} 
-                                className="btn-signin" 
-                                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                              >
-                                + Add step
-                              </button>
-                              <button 
-                                onClick={resetDeadlineClockDefault} 
-                                className="btn-signin" 
-                                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                              >
-                                Reset to default
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
+                        {renderDeadlineUI(false)}
                       </div>
                     )}
 
@@ -4685,195 +5457,92 @@ function AppContent() {
                             </svg>
                           </button>
                           <span className="tools-sub-panel-title">Loose Timer</span>
+                          <button 
+                            onClick={() => setExpandedTool(expandedTool === 'loose' ? 'none' : 'loose')} 
+                            className={`tools-expand-btn ${expandedTool === 'loose' ? 'active' : ''}`}
+                            title="Expand to Stage"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <polyline points="9 21 3 21 3 15"></polyline>
+                              <line x1="21" y1="3" x2="14" y2="10"></line>
+                              <line x1="3" y1="21" x2="10" y2="14"></line>
+                            </svg>
+                          </button>
                         </div>
+                        {renderLooseTimerUI(false)}
+                      </div>
+                    )}
 
-                        {/* Top Area: Current Step + Countup */}
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '16px' }}>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>CURRENT STEP</span>
-                          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
-                            {looseActiveIndex + 1}. {looseSteps[looseActiveIndex]?.name || 'No steps'}
-                          </span>
-                          <span style={{ fontSize: '32px', fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-primary)', marginTop: '8px' }}>
-                            {(Math.floor(looseTimerSeconds / 60)).toString().padStart(2, '0')}:
-                            {(looseTimerSeconds % 60).toString().padStart(2, '0')}
-                          </span>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '4px 0 10px 0', letterSpacing: '0.02em' }}>
-                            No time limit · counting up
-                          </span>
-
-                          {/* Control Row */}
-                          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                            <button 
-                              onClick={() => setLooseIsRunning(!looseIsRunning)} 
-                              className="btn-create" 
-                              style={{ 
-                                padding: '6px 12px', 
-                                fontSize: '12px', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '4px',
-                                backgroundColor: looseIsRunning ? 'var(--button-secondary-bg)' : 'var(--primary-color)',
-                                color: looseIsRunning ? 'var(--text-primary)' : 'var(--primary-text)'
-                              }}
-                            >
-                              {looseIsRunning ? 'Pause' : 'Start'}
-                            </button>
-                            <button 
-                              onClick={finishLooseStep} 
-                              className="btn-signin" 
-                              style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
-                            >
-                              Finish step
-                            </button>
-                            <button 
-                              onClick={resetLooseTimer} 
-                              className="btn-signin" 
-                              style={{ padding: '6px 8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                              title="Reset timer"
-                            >
-                              🔄
-                            </button>
-                          </div>
+                    {/* Sub-panel View 7: Truth or Dare */}
+                    {activeToolDetail === 'truthordare' && (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Truth or Dare</span>
+                          <button 
+                            onClick={() => setExpandedTool(expandedTool === 'truthordare' ? 'none' : 'truthordare')} 
+                            className={`tools-expand-btn ${expandedTool === 'truthordare' ? 'active' : ''}`}
+                            title="Expand to Stage"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <polyline points="9 21 3 21 3 15"></polyline>
+                              <line x1="21" y1="3" x2="14" y2="10"></line>
+                              <line x1="3" y1="21" x2="10" y2="14"></line>
+                            </svg>
+                          </button>
                         </div>
+                        {renderTruthOrDareUI(false)}
+                      </div>
+                    )}
 
-                        {/* Middle Area: Scrollable Step List */}
-                        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '12px 0', height: '160px', overflowY: 'auto' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                            STEPS · SCROLL FOR MORE
-                          </span>
-                          
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {looseSteps.map((step, idx) => {
-                              const isActive = idx === looseActiveIndex;
-                              return (
-                                <div 
-                                  key={step.id} 
-                                  style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'space-between',
-                                    backgroundColor: isActive ? 'rgba(241, 196, 15, 0.08)' : 'rgba(255, 255, 255, 0.01)',
-                                    border: isActive ? '1px solid var(--primary-color)' : '1px solid var(--border-color)',
-                                    borderRadius: 'var(--btn-radius)',
-                                    padding: '8px 10px',
-                                    transition: 'all var(--transition-speed) ease'
-                                  }}
-                                >
-                                  {/* Dot + Step Title */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                                    <div 
-                                      style={{ 
-                                        width: '8px', 
-                                        height: '8px', 
-                                        borderRadius: '50%', 
-                                        border: '1px solid var(--text-secondary)',
-                                        backgroundColor: step.status === 'completed' ? 'var(--text-secondary)' : isActive ? 'var(--primary-color)' : 'transparent',
-                                        flexShrink: 0
-                                      }}
-                                    />
-                                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: step.status === 'completed' ? 'line-through' : 'none' }}>
-                                      {idx + 1}. {step.name}
-                                    </span>
-                                  </div>
-
-                                  {/* Delete button */}
-                                  <button 
-                                    type="button" 
-                                    onClick={() => deleteLooseStep(step.id)} 
-                                    style={{ width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '3px', backgroundColor: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                                    title="Delete step"
-                                  >×</button>
-                                </div>
-                              );
-                            })}
-                          </div>
+                    {/* Sub-panel View 8: Spin the Wheel */}
+                    {activeToolDetail === 'spin' && (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Spin the Wheel</span>
+                          <button 
+                            onClick={() => setExpandedTool(expandedTool === 'spin' ? 'none' : 'spin')} 
+                            className={`tools-expand-btn ${expandedTool === 'spin' ? 'active' : ''}`}
+                            title="Expand to Stage"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"></polyline>
+                              <polyline points="9 21 3 21 3 15"></polyline>
+                              <line x1="21" y1="3" x2="14" y2="10"></line>
+                              <line x1="3" y1="21" x2="10" y2="14"></line>
+                            </svg>
+                          </button>
                         </div>
+                        {renderSpinWheelUI(false)}
+                      </div>
+                    )}
 
-                        {/* Add / Reset controls (fixed layout at the bottom) */}
-                        <div style={{ padding: '12px 0 16px 0', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                          {isAddingLooseStep ? (
-                            <form 
-                              onSubmit={handleAddLooseStep} 
-                              style={{ display: 'flex', gap: '6px' }}
-                            >
-                              <input 
-                                type="text"
-                                placeholder="Step name..."
-                                className="search-input"
-                                style={{ paddingLeft: '8px', fontSize: '12px', height: '32px' }}
-                                value={looseNewStepName}
-                                onChange={(e) => setLooseNewStepName(e.target.value)}
-                                autoFocus
-                                required
-                              />
-                              <button type="submit" className="btn-signin" style={{ padding: '0 12px', height: '32px', fontSize: '12px' }}>
-                                Add
-                              </button>
-                              <button type="button" onClick={() => setIsAddingLooseStep(false)} className="btn-signin" style={{ padding: '0 8px', height: '32px', fontSize: '12px', backgroundColor: 'transparent', border: 'none' }}>
-                                Cancel
-                              </button>
-                            </form>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button 
-                                onClick={() => setIsAddingLooseStep(true)} 
-                                className="btn-signin" 
-                                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                              >
-                                + Add step
-                              </button>
-                              <button 
-                                onClick={resetLooseClockDefault} 
-                                className="btn-signin" 
-                                style={{ flex: 1, padding: '8px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                              >
-                                Reset to default
-                              </button>
-                            </div>
-                          )}
+                    {/* Sub-panel View 9: Room Settings */}
+                    {activeToolDetail === 'settings' && (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Room Settings</span>
                         </div>
-
-                        {/* Bottom summary block */}
-                        <div style={{ padding: '12px 0 4px 0' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                            STEP TIME SUMMARY
-                          </span>
-                          
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '120px', overflowY: 'auto' }}>
-                            {looseSteps.map((step) => {
-                              const minutes = Math.floor(step.elapsedSeconds / 60);
-                              const seconds = step.elapsedSeconds % 60;
-                              const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                              
-                              return (
-                                <div key={step.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                                  <span style={{ color: 'var(--text-secondary)' }}>{step.name}</span>
-                                  {step.status === 'completed' && (
-                                    <span style={{ color: '#10b981', fontWeight: 600 }}>done · {timeStr}</span>
-                                  )}
-                                  {step.status === 'active' && (
-                                    <span style={{ color: 'var(--primary-color)', fontWeight: 600, animation: 'pulse 1.5s infinite' }}>in progress · {timeStr}</span>
-                                  )}
-                                  {step.status === 'pending' && (
-                                    <span style={{ color: 'var(--text-secondary)', opacity: 0.5 }}>not completed</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-
-                            {/* Total summary once all done */}
-                            {looseSteps.every(s => s.status === 'completed') && (
-                              <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: 'var(--primary-color)' }}>
-                                <span>TOTAL TIME</span>
-                                <span>
-                                  {Math.floor(looseSteps.reduce((acc, s) => acc + s.elapsedSeconds, 0) / 60).toString().padStart(2, '0')}:
-                                  {(looseSteps.reduce((acc, s) => acc + s.elapsedSeconds, 0) % 60).toString().padStart(2, '0')}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
+                        {renderRoomSettingsUI()}
                       </div>
                     )}
 

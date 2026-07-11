@@ -2025,3 +2025,186 @@ input[type=number]::-webkit-outer-spin-button {
 input[type=number] {
   -moz-appearance: textfield;
 }
+
+/* ==========================================================================
+   Spin the Wheel Styles
+   ========================================================================== */
+.spinwheel-layout-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 20px;
+}
+
+.spinwheel-layout-container.expanded {
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 40px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.spinner-main-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.wheel-outer-wrapper {
+  position: relative;
+  border-radius: 50%;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 0 0 0 4px rgba(255, 255, 255, 0.05);
+  background-color: #121318;
+}
+
+.wheel-pointer {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+.wheel-pointer polygon {
+  fill: var(--primary-color);
+  stroke: #ffffff;
+  stroke-width: 2px;
+}
+
+.spinner-participants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.spinner-participant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  transition: all var(--transition-speed) ease;
+}
+
+.spinner-participant-row:hover {
+  background-color: var(--button-secondary-bg);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ==========================================================================
+   Truth or Dare Styles
+   ========================================================================== */
+.truthordare-panel-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 20px;
+}
+
+.truthordare-panel-container.expanded {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.truthordare-card {
+  width: 100%;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.truthordare-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #f1c40f, #3b82f6);
+}
+
+.truthordare-card.type-truth::before {
+  background: linear-gradient(90deg, #f1c40f, #f59e0b);
+}
+
+.truthordare-card.type-dare::before {
+  background: linear-gradient(90deg, #ef4444, #ec4899);
+}
+
+.truthordare-text {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-weight: 500;
+  margin: 12px 0;
+}
+
+.truthordare-panel-container.expanded .truthordare-text {
+  font-size: 20px;
+}
+
+/* ==========================================================================
+   Expanded Stage Overlay animations
+   ========================================================================== */
+.expanded-tool-stage-wrapper {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  position: relative;
+  overflow: hidden;
+}
+
+.expanded-tool-stage-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+/* Extra hover styles for expand button */
+.tools-expand-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all var(--transition-speed) ease;
+  margin-left: auto;
+}
+
+.tools-expand-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--button-secondary-bg);
+}
+
+.tools-expand-btn.active {
+  color: var(--primary-color);
+  background-color: rgba(241, 196, 15, 0.1);
+}
+
