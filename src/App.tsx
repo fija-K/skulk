@@ -173,11 +173,10 @@ function DeviceRecoveryManager({
           console.warn("Camera track unexpectedly ended (hardware switch?)");
           handleCameraRecovery();
         };
-        currentCamErr = false;
-      } else if (!isCamOff) {
-        currentCamErr = true;
-      } else {
-        currentCamErr = false;
+        if (currentCamErr) {
+          currentCamErr = false;
+          reportErrors();
+        }
       }
 
       const micTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack;
@@ -186,20 +185,25 @@ function DeviceRecoveryManager({
           console.warn("Mic track unexpectedly ended");
           handleMicRecovery();
         };
-        currentMicErr = false;
-      } else if (!isMicMuted) {
-        currentMicErr = true;
-      } else {
-        currentMicErr = false;
+        if (currentMicErr) {
+          currentMicErr = false;
+          reportErrors();
+        }
       }
-      
-      reportErrors();
     };
 
     checkTracks();
+
+    const onMediaError = (error: Error) => {
+      console.warn("Media devices error:", error);
+      if (!isCamOff) currentCamErr = true;
+      if (!isMicMuted) currentMicErr = true;
+      reportErrors();
+    };
     
     localParticipant.on(ParticipantEvent.LocalTrackPublished, checkTracks);
     localParticipant.on(ParticipantEvent.LocalTrackUnpublished, checkTracks);
+    localParticipant.on(ParticipantEvent.MediaDevicesError, onMediaError);
 
     const onRetryDevice = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -211,6 +215,7 @@ function DeviceRecoveryManager({
     return () => {
       localParticipant.off(ParticipantEvent.LocalTrackPublished, checkTracks);
       localParticipant.off(ParticipantEvent.LocalTrackUnpublished, checkTracks);
+      localParticipant.off(ParticipantEvent.MediaDevicesError, onMediaError);
       window.removeEventListener('retry-device', onRetryDevice);
     };
   }, [localParticipant, isCamOff, isMicMuted, onErrorChange]);
@@ -218,7 +223,17 @@ function DeviceRecoveryManager({
   return null;
 }
 
+// Export the global app wrapper
 export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
+}
+
+let globalPendingLeavePromise: Promise<void> | null = null;
+function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -342,6 +357,7 @@ export default function App() {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [newRoomType, setNewRoomType] = useState<'private' | 'public-ask' | 'public'>('public-ask');
   const [newMaxParticipants, setNewMaxParticipants] = useState(10);
@@ -757,7 +773,7 @@ export default function App() {
 
   const openModal = () => {
     if (!user) {
-      showToast("🔒 Please sign in with Google to create a room.");
+      setShowSignInPrompt(true);
       return;
     }
     setIsModalOpen(true);
@@ -851,28 +867,37 @@ export default function App() {
   const leavePresence = async (roomIdToLeave: string) => {
     const myId = getMyId();
     if (!myId || !roomIdToLeave) return;
-    try {
-      await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
-      // Delete any signals associated with this user
-      const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
-      const snapshot = await getDocs(signalsRef);
-      for (const docSnap of snapshot.docs) {
-        if (docSnap.id.includes(myId)) {
-          try {
-            // Delete candidates subcollection first
-            const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
-            const candSnap = await getDocs(candidatesRef);
-            for (const d of candSnap.docs) {
-              try { await deleteDoc(d.ref); } catch (e) {}
-            }
-            await deleteDoc(docSnap.ref);
-          } catch (e) {}
+
+    const performLeave = async () => {
+      try {
+        await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'participants', myId));
+        // Delete any signals associated with this user
+        const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
+        const snapshot = await getDocs(signalsRef);
+        for (const docSnap of snapshot.docs) {
+          if (docSnap.id.includes(myId)) {
+            try {
+              // Delete candidates subcollection first
+              const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
+              const candSnap = await getDocs(candidatesRef);
+              for (const d of candSnap.docs) {
+                try { await deleteDoc(d.ref); } catch (e) {}
+              }
+              await deleteDoc(docSnap.ref);
+            } catch (e) {}
+          }
         }
+        // Delete my join request doc if any exists
+        await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
+      } catch (e) {
+        console.error('Error removing presence document:', e);
       }
-      // Delete my join request doc if any exists
-      await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
-    } catch (e) {
-      console.error('Error removing presence document:', e);
+    };
+
+    globalPendingLeavePromise = performLeave();
+    await globalPendingLeavePromise;
+    globalPendingLeavePromise = null;
+  };
     }
   };
 
@@ -923,6 +948,11 @@ export default function App() {
 
   // Setup conference shell room data
   const enterCallRoom = async (room: Room) => {
+    if (globalPendingLeavePromise) {
+      try {
+        await globalPendingLeavePromise;
+      } catch (e) {}
+    }
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     hasSeenSelfInListRef.current = false; // Reset on initial join
@@ -2046,6 +2076,11 @@ export default function App() {
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (newMaxParticipants === 0) {
+      showToast("At least 1 participant is required");
+      return;
+    }
+
     const randomId = Math.random().toString(36).substring(2, 8);
     const roomLink = `${window.location.origin}/room/${randomId}`;
 
@@ -2731,6 +2766,7 @@ export default function App() {
             audio={!isMicMuted}
             video={!isCamOff}
             className="call-layout animate-fade-in"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: 'var(--bg-color)', overflow: 'hidden' }}
           >
             <DeviceRecoveryManager 
               isCamOff={isCamOff} 
@@ -4658,6 +4694,28 @@ export default function App() {
         </div>
       )}
 
+      {/* Sign In Prompt Modal */}
+      {showSignInPrompt && !user && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-container animate-fade-in" style={{ maxWidth: '400px', textAlign: 'center' }}>
+            <h3 style={{ fontSize: '18px', marginBottom: '12px', fontWeight: '600' }}>Sign in to create a room</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: '1.5' }}>
+              You need a Google account to create and host rooms.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button type="button" className="btn-secondary" onClick={() => setShowSignInPrompt(false)} style={{ padding: '8px 16px' }}>Cancel</button>
+              <button type="button" className="btn-signin" onClick={() => {
+                setShowSignInPrompt(false);
+                handleGoogleSignIn().then(() => {
+                  // After successful sign in, open the modal
+                  setTimeout(() => setIsModalOpen(true), 500);
+                });
+              }} style={{ padding: '8px 16px' }}>Sign in</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 4. Create Room Modal Dialog (rendered on dashboard) */}
       {isModalOpen && !currentRoom && (
         <div className="modal-overlay" onClick={handleBackdropClick}>
@@ -4814,12 +4872,15 @@ export default function App() {
                   <input 
                     type="number" 
                     id="maxParticipants" 
-                    min="1" 
+                    min="0" 
                     max="100"
                     className="search-input"
                     style={{ paddingLeft: '16px' }}
                     value={newMaxParticipants}
-                    onChange={(e) => setNewMaxParticipants(parseInt(e.target.value) || 10)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setNewMaxParticipants(isNaN(val) ? 0 : val);
+                    }}
                     required
                   />
                 </div>
