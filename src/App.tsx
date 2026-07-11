@@ -1020,6 +1020,11 @@ function AppContent() {
           camOffBy: myId,
           sessionId: newSessionId
         });
+        localStorage.setItem('skulk_active_session', JSON.stringify({
+          roomId: normalizedRoom.id,
+          sessionId: newSessionId,
+          timestamp: Date.now()
+        }));
       } catch (err) {
         console.warn("Failed to set presence in Firestore, joining locally:", err);
       }
@@ -1230,6 +1235,45 @@ function AppContent() {
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, [currentRoom, user, guestId]);
+
+  // Evict this tab to homepage if the same user joins any room from another tab/window
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'skulk_active_session' && e.newValue) {
+        try {
+          const activeSession = JSON.parse(e.newValue);
+          if (currentRoom) {
+            const currentRoomId = roomDocId(currentRoom);
+            const mySessionId = currentSessionIdRef.current;
+            
+            // If the active session belongs to a different room or a different session ID in the same room
+            if (activeSession.roomId !== currentRoomId || activeSession.sessionId !== mySessionId) {
+              console.log("New session detected in another tab via localStorage:", activeSession);
+              showToast("🔄 Joined from another tab/window. Redirecting to dashboard...");
+              
+              // Clean up our presence in the room we are leaving
+              leavePresence(currentRoomId, mySessionId);
+              
+              // Reset local state
+              hasSeenSelfInListRef.current = false;
+              clearMySharing();
+              setCurrentRoom(null);
+              setCallParticipants([]);
+              setChatMessages([]);
+              setViewingShare(null);
+              setLiveKitToken(null);
+              navigate('/');
+            }
+          }
+        } catch (err) {
+          console.error("Failed to parse active session from localStorage:", err);
+        }
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [currentRoom ? roomDocId(currentRoom) : null]);
 
   // Real-time synchronization of call participants list inside calls
   useEffect(() => {
