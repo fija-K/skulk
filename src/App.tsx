@@ -357,8 +357,8 @@ interface PipWindowContentProps {
   toggleCamera: () => void;
   toggleMiniMode: () => void;
   handleLeaveCall: () => void;
-  miniModeTab: 'call' | 'tool';
-  setMiniModeTab: (tab: 'call' | 'tool') => void;
+  miniModeTab: 'call' | 'tool' | 'chat';
+  setMiniModeTab: (tab: 'call' | 'tool' | 'chat') => void;
   expandedTool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin';
   setExpandedTool: (tool: 'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin') => void;
   callParticipants: Participant[];
@@ -383,6 +383,10 @@ interface PipWindowContentProps {
   todSelectedId: string;
   todChoice: string | null;
   todText: string;
+  unreadChatCount: number;
+  chatMessages: ChatMessage[];
+  systemMessages: any[];
+  sendChatMessage: (text: string) => Promise<void>;
 }
 
 function PipWindowContent({
@@ -418,7 +422,11 @@ function PipWindowContent({
   handleSpinWheel,
   todSelectedId,
   todChoice,
-  todText
+  todText,
+  unreadChatCount,
+  chatMessages,
+  systemMessages,
+  sendChatMessage
 }: PipWindowContentProps) {
   const remoteParticipants = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -486,6 +494,22 @@ function PipWindowContent({
 
   const showToolView = miniModeTab === 'tool' && expandedTool !== 'none';
 
+  const combinedMessages = [
+    ...chatMessages.map(m => ({ ...m, type: 'chat' as const })),
+    ...systemMessages.map(m => ({ ...m, type: 'system' as const }))
+  ].sort((a, b) => {
+    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return timeA - timeB;
+  });
+
+  const pipChatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (miniModeTab === 'chat' && pipChatEndRef.current) {
+      pipChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [combinedMessages.length, miniModeTab]);
+
   return (
     <div className="skulk-pip-window" style={{ 
       width: '100vw', 
@@ -514,10 +538,10 @@ function PipWindowContent({
           style={{
             flex: 1,
             height: '24px',
-            backgroundColor: !showToolView ? '#2d3139' : 'transparent',
+            backgroundColor: miniModeTab === 'call' ? '#2d3139' : 'transparent',
             border: 'none',
             borderRadius: '4px',
-            color: !showToolView ? '#f1c40f' : '#94a3b8',
+            color: miniModeTab === 'call' ? '#f1c40f' : '#94a3b8',
             fontSize: '11px',
             fontWeight: 600,
             cursor: 'pointer',
@@ -529,6 +553,38 @@ function PipWindowContent({
         >
           <span>📞 Call</span>
         </button>
+
+        <button 
+          onClick={() => setMiniModeTab('chat')}
+          style={{
+            flex: 1,
+            height: '24px',
+            backgroundColor: miniModeTab === 'chat' ? '#2d3139' : 'transparent',
+            border: 'none',
+            borderRadius: '4px',
+            color: miniModeTab === 'chat' ? '#f1c40f' : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            gap: '4px'
+          }}
+        >
+          <span>💬 Chat</span>
+          {unreadChatCount > 0 && (
+            <span style={{
+              width: '6px',
+              height: '6px',
+              backgroundColor: '#ef4444',
+              borderRadius: '50%',
+              display: 'inline-block'
+            }} />
+          )}
+        </button>
+
         <button 
           onClick={() => {
             if (expandedTool !== 'none') {
@@ -539,12 +595,12 @@ function PipWindowContent({
           style={{
             flex: 1,
             height: '24px',
-            backgroundColor: showToolView ? '#2d3139' : 'transparent',
+            backgroundColor: miniModeTab === 'tool' ? '#2d3139' : 'transparent',
             border: 'none',
             borderRadius: '4px',
             color: expandedTool === 'none' 
               ? 'rgba(255, 255, 255, 0.15)' 
-              : showToolView 
+              : miniModeTab === 'tool' 
                 ? '#f1c40f' 
                 : '#94a3b8',
             fontSize: '11px',
@@ -562,7 +618,100 @@ function PipWindowContent({
 
       {/* Main Viewport Content Area */}
       <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {!showToolView ? (
+        {miniModeTab === 'chat' ? (
+          /* Chat View */
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {combinedMessages.length === 0 ? (
+                <div style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '20px', fontStyle: 'italic' }}>
+                  No messages yet.
+                </div>
+              ) : (
+                combinedMessages.map((msg) => {
+                  if (msg.type === 'system') {
+                    return (
+                      <div key={msg.id} style={{ textAlign: 'center', fontSize: '10px', color: '#94a3b8', fontStyle: 'italic', padding: '2px 0' }}>
+                        {msg.text}
+                      </div>
+                    );
+                  }
+                  const isMe = msg.senderId === myId || msg.sender === 'You';
+                  return (
+                    <div 
+                      key={msg.id} 
+                      style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        gap: '2px', 
+                        backgroundColor: isMe ? 'rgba(241, 196, 15, 0.08)' : 'rgba(255,255,255,0.03)', 
+                        padding: '6px 8px', 
+                        borderRadius: '4px',
+                        borderLeft: isMe ? '2px solid #f1c40f' : '2px solid transparent'
+                      }}
+                    >
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: isMe ? '#f1c40f' : '#94a3b8' }}>{msg.sender}</span>
+                      <span style={{ fontSize: '11px', color: '#e2e8f0', wordBreak: 'break-word', marginTop: '1px' }}>{msg.text}</span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={pipChatEndRef} />
+            </div>
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const input = form.elements.namedItem('pipChatInput') as HTMLInputElement;
+                if (input && input.value.trim()) {
+                  sendChatMessage(input.value);
+                  input.value = '';
+                }
+              }}
+              style={{
+                display: 'flex',
+                padding: '4px',
+                backgroundColor: '#16181d',
+                borderTop: '1px solid #2d3139',
+                gap: '4px',
+                flexShrink: 0
+              }}
+            >
+              <input 
+                name="pipChatInput"
+                type="text" 
+                placeholder="Message..." 
+                autoComplete="off"
+                style={{
+                  flex: 1,
+                  height: '24px',
+                  backgroundColor: '#2d3139',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  padding: '0 8px',
+                  outline: 'none'
+                }}
+              />
+              <button 
+                type="submit"
+                style={{
+                  backgroundColor: '#f1c40f',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#0f1013',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  padding: '0 8px',
+                  height: '24px',
+                  cursor: 'pointer'
+                }}
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        ) : !showToolView ? (
           /* Call View */
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
             {activeSpeaker && !activeSpeakerCamOff ? (
@@ -1072,7 +1221,17 @@ function AppContent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [systemMessages, setSystemMessages] = useState<any[]>([]);
   const isInitialLoadRef = useRef(true);
+  const isChatInitialLoadRef = useRef(true);
   const localJoinTimeRef = useRef<number | null>(null);
+
+  const isMicMutedRef = useRef(isMicMuted);
+  const isCamOffRef = useRef(isCamOff);
+  useEffect(() => {
+    isMicMutedRef.current = isMicMuted;
+  }, [isMicMuted]);
+  useEffect(() => {
+    isCamOffRef.current = isCamOff;
+  }, [isCamOff]);
   
   // In-call participants state
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
@@ -1115,7 +1274,34 @@ function AppContent() {
   // Whole-call Mini Mode (Zoom-like Call PiP) states
   const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
   const [isMiniModeActive, setIsMiniModeActive] = useState(false);
-  const [miniModeTab, setMiniModeTab] = useState<'call' | 'tool'>('call');
+  const [miniModeTab, setMiniModeTab] = useState<'call' | 'tool' | 'chat'>('call');
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  const isChatActiveRef = useRef(false);
+  useEffect(() => {
+    isChatActiveRef.current = isMiniModeActive ? (miniModeTab === 'chat') : (callTab === 'chat');
+  }, [callTab, miniModeTab, isMiniModeActive]);
+
+  // Clear unread count when chat is active either in sidebar or PiP
+  useEffect(() => {
+    const isChatActive = isMiniModeActive ? (miniModeTab === 'chat') : (callTab === 'chat');
+    if (isChatActive) {
+      setUnreadChatCount(0);
+    }
+  }, [callTab, miniModeTab, isMiniModeActive]);
+
+  // Update browser tab title / badge when there are unread messages
+  useEffect(() => {
+    const originalTitle = currentRoom ? `Skulk - ${currentRoom.name}` : 'Skulk';
+    if (unreadChatCount > 0) {
+      document.title = `🔴 (${unreadChatCount}) ${originalTitle}`;
+    } else {
+      document.title = originalTitle;
+    }
+    return () => {
+      document.title = 'Skulk';
+    };
+  }, [unreadChatCount, currentRoom]);
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -1802,6 +1988,8 @@ function AppContent() {
     setCallTab('chat');
     setViewingShare(null);
     setChatMessages([]);
+    setUnreadChatCount(0);
+    isChatInitialLoadRef.current = true;
 
     // Fetch LiveKit Token
     try {
@@ -1845,6 +2033,8 @@ function AppContent() {
       setChatMessages([]);
       setSystemMessages([]);
       isInitialLoadRef.current = true;
+      isChatInitialLoadRef.current = true;
+      setUnreadChatCount(0);
       setViewingShare(null);
       setLiveKitToken(null);
     }
@@ -1939,6 +2129,8 @@ function AppContent() {
         setChatMessages([]);
         setSystemMessages([]);
         isInitialLoadRef.current = true;
+        isChatInitialLoadRef.current = true;
+        setUnreadChatCount(0);
         setViewingShare(null);
         setLiveKitToken(null);
       }
@@ -2092,6 +2284,9 @@ function AppContent() {
                 createdAt: timestamp
               }
             ]);
+            if (!isChatActiveRef.current) {
+              setUnreadChatCount(prev => prev + 1);
+            }
           }
         } else if (change.type === 'modified') {
           console.log(`[PRESENCE EVENT] Participant MODIFIED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, EventTime=${timestamp}`);
@@ -2108,6 +2303,9 @@ function AppContent() {
                 createdAt: timestamp
               }
             ]);
+            if (!isChatActiveRef.current) {
+              setUnreadChatCount(prev => prev + 1);
+            }
           }
         }
       });
@@ -2122,8 +2320,8 @@ function AppContent() {
           initials: data.initials,
           color: data.color,
           photoURL: data.photoURL,
-          isMuted: isMe ? isMicMuted : (data.isMuted ?? false),
-          isCamOff: isMe ? isCamOff : (data.isCamOff ?? false),
+          isMuted: isMe ? isMicMutedRef.current : (data.isMuted ?? false),
+          isCamOff: isMe ? isCamOffRef.current : (data.isCamOff ?? false),
           isSpeaking: false,
           isPinned: false,
           role: data.role || (currentRoom.creatorId === docSnap.id ? 'host' : 'member'),
@@ -2166,8 +2364,8 @@ function AppContent() {
           initials: guestInitials,
           color: guestColor,
           photoURL: user ? user.photoURL : null,
-          isMuted: isMicMuted,
-          isCamOff: isCamOff,
+          isMuted: isMicMutedRef.current,
+          isCamOff: isCamOffRef.current,
           isSpeaking: false,
           isPinned: false,
           role: determineRole(currentRoom.creatorId)
@@ -2176,7 +2374,7 @@ function AppContent() {
     });
     
     return () => unsubscribe();
-  }, [currentRoom ? roomDocId(currentRoom) : null, user, guestId, isMicMuted, isCamOff]);
+  }, [currentRoom ? roomDocId(currentRoom) : null, user, guestId]);
   // Synchronize remote mute actions with local microphone state
   useEffect(() => {
     if (!currentRoom) return;
@@ -3421,26 +3619,23 @@ function AppContent() {
     showToast('Profile updated!');
   };
 
-  // Local chat submission
-  const handleSendChatMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatMessageText.trim() || !currentRoom) return;
+  // Reusable chat sending function for both main app and PiP window
+  const sendChatMessage = async (text: string) => {
+    if (!text.trim() || !currentRoom) return;
 
     const senderName = user ? user.displayName || 'Google User' : guestName;
     const myId = getMyId();
     const myRole = callParticipants.find(p => p.id === myId)?.role || determineRole(currentRoom.creatorId);
-    
+
     const msgId = Date.now().toString();
     const newMsg: ChatMessage = {
       id: msgId,
       sender: senderName,
       senderId: myId,
       senderRole: myRole,
-      text: chatMessageText.trim(),
+      text: text.trim(),
       createdAt: new Date().toISOString()
     };
-    
-    setChatMessageText('');
 
     try {
       await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), newMsg);
@@ -3449,6 +3644,14 @@ function AppContent() {
       setChatMessages(prev => [...prev, newMsg]);
       showToast('Message saved locally — check your connection');
     }
+  };
+
+  // Local chat submission
+  const handleSendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMessageText.trim()) return;
+    await sendChatMessage(chatMessageText);
+    setChatMessageText('');
   };
 
   // Co-host control triggers (Mute, Pin, Remove)
@@ -4939,6 +5142,10 @@ function AppContent() {
         todSelectedId={todSelectedId}
         todChoice={todChoice}
         todText={todText}
+        unreadChatCount={unreadChatCount}
+        chatMessages={chatMessages}
+        systemMessages={systemMessages}
+        sendChatMessage={sendChatMessage}
       />,
       pipWindowInstance.document.body
     );
