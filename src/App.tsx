@@ -463,16 +463,28 @@ function AppContent() {
   const [drawColor, setDrawColor] = useState('#f1c40f'); // Neon gold as default
 
   // Tools sub-panel toggle
-  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin' | 'settings'>('none');
+  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
 
-  // Fun Tools toggle & Truth or Dare synced state
+  // Fun Tools toggle & Truth or Dare synced spinner states
   const [allowFunTools, setAllowFunTools] = useState(true);
-  const [truthOrDareResult, setTruthOrDareResult] = useState<{ type: 'Truth' | 'Dare', text: string, rolledBy: string, timestamp: number } | null>(null);
+  const [todSpinResult, setTodSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
+  const [todSpinCheckedIds, setTodSpinCheckedIds] = useState<string[]>([]);
+  const [todSpinPool, setTodSpinPool] = useState<string[]>([]);
+  const [todState, setTodState] = useState<'idle' | 'spinning' | 'choice' | 'reveal'>('idle');
+  const [todChoice, setTodChoice] = useState<'Truth' | 'Dare' | null>(null);
+  const [todText, setTodText] = useState('');
+  const [todSelectedId, setTodSelectedId] = useState('');
+  const [todLocalSpinning, setTodLocalSpinning] = useState(false);
 
   // Spin the Wheel synced state
   const [spinResult, setSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
   const [spinCheckedIds, setSpinCheckedIds] = useState<string[]>([]);
   const [spinPool, setSpinPool] = useState<string[]>([]);
+  const [spinLocalSpinning, setSpinLocalSpinning] = useState(false);
+
+  // Header popover states
+  const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
+  const roomSettingsRef = useRef<HTMLDivElement>(null);
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -732,6 +744,10 @@ function AppContent() {
       // Theme picker click outside close
       if (themePickerRef.current && !themePickerRef.current.contains(e.target as Node)) {
         setIsThemePickerOpen(false);
+      }
+      // Room settings click outside close
+      if (roomSettingsRef.current && !roomSettingsRef.current.contains(e.target as Node)) {
+        setIsRoomSettingsOpen(false);
       }
       // Hover participant action dropdown click outside close
       if (sidebarMenuRef.current && !sidebarMenuRef.current.contains(e.target as Node)) {
@@ -1567,8 +1583,26 @@ function AppContent() {
       if (data.allowFunTools !== undefined) {
         setAllowFunTools(data.allowFunTools);
       }
-      if (data.truthOrDareResult !== undefined) {
-        setTruthOrDareResult(data.truthOrDareResult);
+      if (data.todSpinResult !== undefined) {
+        setTodSpinResult(data.todSpinResult);
+      }
+      if (data.todSpinCheckedIds !== undefined) {
+        setTodSpinCheckedIds(data.todSpinCheckedIds);
+      }
+      if (data.todSpinPool !== undefined) {
+        setTodSpinPool(data.todSpinPool);
+      }
+      if (data.todState !== undefined) {
+        setTodState(data.todState);
+      }
+      if (data.todChoice !== undefined) {
+        setTodChoice(data.todChoice);
+      }
+      if (data.todText !== undefined) {
+        setTodText(data.todText);
+      }
+      if (data.todSelectedId !== undefined) {
+        setTodSelectedId(data.todSelectedId);
       }
       if (data.spinResult !== undefined) {
         setSpinResult(data.spinResult);
@@ -1960,6 +1994,17 @@ function AppContent() {
       setLooseActiveIndex(0);
       setLooseTimerSeconds(0);
       setLooseSteps(prev => prev.map(s => ({ ...s, status: 'pending' as const, elapsedSeconds: 0 })));
+
+      // Reset Truth or Dare spinner states
+      setTodSpinResult(null);
+      setTodSpinCheckedIds([]);
+      setTodSpinPool([]);
+      setTodState('idle');
+      setTodChoice(null);
+      setTodText('');
+      setTodSelectedId('');
+      setTodLocalSpinning(false);
+      setSpinLocalSpinning(false);
     }
   }, [currentRoom, pomodoroFocusLength]);
 
@@ -2042,11 +2087,12 @@ function AppContent() {
   };
 
   // Room settings handlers (Privacy and topic changes)
-  const handleChangeRoomType = async (type: 'public' | 'public-ask') => {
+  const handleChangeRoomType = async (type: 'public' | 'public-ask' | 'private') => {
     if (!currentRoom) return;
+    const buttonText = type === 'public-ask' ? 'Ask to join' : 'Join';
     try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), { type });
-      showToast(`Privacy changed to: ${type === 'public' ? 'Public' : 'Ask to Join'}`);
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), { type, buttonText });
+      showToast(`Privacy changed to: ${type === 'public' ? 'Public' : type === 'public-ask' ? 'Ask to Join' : 'Private'}`);
     } catch (e) {
       console.warn("Failed to change room privacy:", e);
     }
@@ -2075,22 +2121,98 @@ function AppContent() {
     }
   };
 
-  const handleRollTruthOrDare = async (type: 'Truth' | 'Dare') => {
-    if (!currentRoom) return;
-    const questions = type === 'Truth' ? truthQuestions : dareQuestions;
-    const text = questions[Math.floor(Math.random() * questions.length)];
-    const rolledBy = user ? user.displayName || 'Google User' : guestName;
+  const handleSpinTruthOrDare = async () => {
+    if (!currentRoom || callParticipants.length === 0) return;
+
+    const activeIds = todSpinCheckedIds.length > 0 
+      ? todSpinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
+      : callParticipants.map(p => p.id);
+      
+    if (activeIds.length === 0) return;
+
+    let candidates = todSpinPool.filter(id => activeIds.includes(id));
+    if (candidates.length === 0) {
+      candidates = [...activeIds];
+    }
+
+    const selectedId = candidates[Math.floor(Math.random() * candidates.length)];
+    const newPool = candidates.filter(id => id !== selectedId);
+
+    const idx = activeIds.indexOf(selectedId);
+    const segmentAngle = 360 / activeIds.length;
+    const targetAngle = 360 - (idx * segmentAngle + segmentAngle / 2);
+    
+    const prevAngle = todSpinResult ? todSpinResult.angle : 0;
+    const prevFullSpins = Math.floor(prevAngle / 360);
+    const newAngle = (prevFullSpins + 5) * 360 + targetAngle;
+
+    const spunBy = user ? user.displayName || 'Google User' : guestName;
+
     try {
       await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        truthOrDareResult: {
-          type,
-          text,
-          rolledBy,
+        todSpinResult: {
+          selectedId,
+          angle: newAngle,
+          spunBy,
           timestamp: Date.now()
-        }
+        },
+        todSpinPool: newPool,
+        todSpinCheckedIds: activeIds,
+        todState: 'spinning',
+        todChoice: null,
+        todText: '',
+        todSelectedId: selectedId
       });
     } catch (e) {
-      console.warn("Failed to roll Truth or Dare:", e);
+      console.warn("Failed to spin Truth or Dare:", e);
+    }
+  };
+
+  const handleToggleTodSpinCheckedParticipant = async (id: string) => {
+    if (!currentRoom) return;
+    const defaultIds = callParticipants.map(p => p.id);
+    const activeIds = todSpinCheckedIds.length > 0 ? todSpinCheckedIds : defaultIds;
+    
+    const nextChecked = activeIds.includes(id)
+      ? activeIds.filter(x => x !== id)
+      : [...activeIds, id];
+      
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        todSpinCheckedIds: nextChecked,
+        todSpinPool: todSpinPool.filter(x => nextChecked.includes(x))
+      });
+    } catch (e) {
+      console.warn("Failed to toggle tod spin participant:", e);
+    }
+  };
+
+  const handleSelectTodChoice = async (choice: 'Truth' | 'Dare') => {
+    if (!currentRoom) return;
+    const questions = choice === 'Truth' ? truthQuestions : dareQuestions;
+    const randomText = questions[Math.floor(Math.random() * questions.length)];
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        todState: 'reveal',
+        todChoice: choice,
+        todText: randomText
+      });
+    } catch (e) {
+      console.warn("Failed to select Truth or Dare choice:", e);
+    }
+  };
+
+  const handleResetTod = async () => {
+    if (!currentRoom) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        todState: 'idle',
+        todChoice: null,
+        todText: '',
+        todSelectedId: ''
+      });
+    } catch (e) {
+      console.warn("Failed to reset Truth or Dare:", e);
     }
   };
 
@@ -2327,6 +2449,36 @@ function AppContent() {
     }
     return () => clearInterval(interval);
   }, [looseIsRunning, looseActiveIndex]);
+
+  // Synchronize Spin the Wheel pointer rotation animation duration
+  useEffect(() => {
+    if (spinResult) {
+      setSpinLocalSpinning(true);
+      const timer = setTimeout(() => {
+        setSpinLocalSpinning(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [spinResult?.timestamp]);
+
+  // Synchronize Truth or Dare spinning animation and host/admin state transition
+  useEffect(() => {
+    if (todSpinResult && todState === 'spinning') {
+      setTodLocalSpinning(true);
+      const timer = setTimeout(() => {
+        setTodLocalSpinning(false);
+        const myId = getMyId();
+        const myPresence = callParticipants.find(p => p.id === myId);
+        const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+        if (isHost && currentRoom) {
+          updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+            todState: 'choice'
+          }).catch((e) => console.warn("Failed to transition todState to choice:", e));
+        }
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [todSpinResult?.timestamp, todState]);
 
   const finishLooseStep = () => {
     setLooseSteps(prev => prev.map((step, idx) => 
@@ -3456,54 +3608,289 @@ function AppContent() {
     );
   };
 
-  const renderTruthOrDareUI = (isExpanded: boolean) => {
+  const renderWheelSVG = (
+    spinParticipants: Participant[],
+    angle: number,
+    size: number,
+    isExpanded: boolean,
+    onSpin: () => void
+  ) => {
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = size * 0.42;
+    const n = spinParticipants.length;
+    const segmentAngle = n > 0 ? 360 / n : 360;
+
     return (
-      <div className={`truthordare-panel-container ${isExpanded ? 'expanded' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '16px' }}>
-        {truthOrDareResult ? (
-          <div className={`truthordare-question-card ${truthOrDareResult.type.toLowerCase()} ${isExpanded ? 'expanded' : ''}`} style={{ width: '100%', maxWidth: isExpanded ? '500px' : 'none' }}>
-            <div className="card-badge">{truthOrDareResult.type}</div>
-            <div className="card-text">"{truthOrDareResult.text}"</div>
-            <div className="card-rolledby">Rolled by {truthOrDareResult.rolledBy}</div>
-          </div>
+      <div className="wheel-outer-wrapper" style={{ width: size, height: size }}>
+        <div className="wheel-pointer" style={{ top: isExpanded ? '-12px' : '-8px' }}>
+          <svg width={isExpanded ? 28 : 20} height={isExpanded ? 28 : 20} viewBox="0 0 24 24" fill="var(--primary-color)" stroke="#fff" strokeWidth="2">
+            <polygon points="12,24 4,8 20,8" />
+          </svg>
+        </div>
+
+        {n > 0 ? (
+          <svg 
+            width={size} 
+            height={size} 
+            viewBox={`0 0 ${size} ${size}`} 
+            style={{ 
+              transform: `rotate(${angle}deg)`, 
+              transition: 'transform 4s cubic-bezier(0.1, 0.8, 0.1, 1)' 
+            }}
+          >
+            {spinParticipants.map((p, idx) => {
+              const startAngle = idx * segmentAngle;
+              const endAngle = (idx + 1) * segmentAngle;
+              
+              const x1 = cx + radius * Math.cos((startAngle - 90) * Math.PI / 180);
+              const y1 = cy + radius * Math.sin((startAngle - 90) * Math.PI / 180);
+              const x2 = cx + radius * Math.cos((endAngle - 90) * Math.PI / 180);
+              const y2 = cy + radius * Math.sin((endAngle - 90) * Math.PI / 180);
+              
+              const largeArcFlag = segmentAngle > 180 ? 1 : 0;
+              const pathData = `
+                M ${cx} ${cy}
+                L ${x1} ${y1}
+                A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}
+                Z
+              `;
+              
+              const textAngle = startAngle + segmentAngle / 2;
+              const textRadius = radius * 0.65;
+              const tx = cx + textRadius * Math.cos((textAngle - 90) * Math.PI / 180);
+              const ty = cy + textRadius * Math.sin((textAngle - 90) * Math.PI / 180);
+
+              return (
+                <g key={p.id}>
+                  <path d={pathData} fill={p.color || '#3b82f6'} stroke="rgba(0,0,0,0.15)" strokeWidth="1.5" />
+                  <text 
+                    x={tx} 
+                    y={ty} 
+                    fill="#fff" 
+                    fontSize={isExpanded ? 11 : 9} 
+                    fontWeight="800" 
+                    textAnchor="middle" 
+                    transform={`rotate(${textAngle}, ${tx}, ${ty})`}
+                  >
+                    {p.initials || p.name.substring(0, 2)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
         ) : (
-          <div className="truthordare-question-card-placeholder">
-            <span>🎲 No active card</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>Choose Truth or Dare to start the icebreaker game!</span>
-          </div>
+          <div className="wheel-empty-state">No participants checked</div>
         )}
 
-        <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: isExpanded ? '500px' : 'none', marginTop: '8px' }}>
-          <button 
-            onClick={() => handleRollTruthOrDare('Truth')} 
-            className="btn-create" 
-            style={{ 
-              flex: 1, 
-              padding: isExpanded ? '14px' : '10px', 
-              fontSize: '14px', 
-              background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', 
-              borderColor: 'transparent',
-              color: '#ffffff',
-              fontWeight: 700
-            }}
-          >
-            😇 Roll Truth
-          </button>
-          <button 
-            onClick={() => handleRollTruthOrDare('Dare')} 
-            className="btn-create" 
-            style={{ 
-              flex: 1, 
-              padding: isExpanded ? '14px' : '10px', 
-              fontSize: '14px', 
-              background: 'linear-gradient(135deg, #ec4899, #be185d)', 
-              borderColor: 'transparent',
-              color: '#ffffff',
-              fontWeight: 700
-            }}
-          >
-            😈 Roll Dare
-          </button>
+        <button 
+          type="button"
+          onClick={onSpin} 
+          className="wheel-center-button"
+          style={{
+            width: isExpanded ? '64px' : '44px',
+            height: isExpanded ? '64px' : '44px',
+            fontSize: isExpanded ? '12px' : '10px',
+          }}
+        >
+          SPIN
+        </button>
+      </div>
+    );
+  };
+
+  const renderTruthOrDareUI = (isExpanded: boolean) => {
+    const size = isExpanded ? 320 : 180;
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+
+    const activeIds = todSpinCheckedIds.length > 0 
+      ? todSpinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
+      : callParticipants.map(p => p.id);
+
+    const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
+    const n = spinParticipants.length;
+
+    return (
+      <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
+        <div className="spinner-main-area" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          
+          {/* Wheel rendering in IDLE or SPINNING state */}
+          {(todState === 'idle' || todState === 'spinning') && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {renderWheelSVG(spinParticipants, todSpinResult ? todSpinResult.angle : 0, size, isExpanded, handleSpinTruthOrDare)}
+              
+              {todSpinResult && todState === 'idle' && !todLocalSpinning && (
+                <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Spun by {todSpinResult.spunBy}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Choice phase */}
+          {todState === 'choice' && (
+            <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px', padding: '16px 0' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Landed on</div>
+              
+              {(() => {
+                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
+                const isMeSelected = myId === todSelectedId;
+                
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div className="participant-avatar-large" style={{ backgroundColor: selectedUser?.color || '#3b82f6', width: '48px', height: '48px', border: '2px solid var(--primary-color)', position: 'relative', overflow: 'hidden' }}>
+                        {selectedUser?.photoURL ? (
+                          <img src={selectedUser.photoURL} alt={selectedUser.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
+                        ) : (
+                          selectedUser?.initials || selectedUser?.name.substring(0, 2)
+                        )}
+                      </div>
+                      <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--primary-color)' }}>
+                        {selectedUser?.name.replace(' (You)', '') || 'Participant'}
+                      </span>
+                    </div>
+
+                    {/* Choice action buttons */}
+                    {isMeSelected || isHostOrAdmin ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                          {isMeSelected ? "Choose your challenge:" : "Choose on behalf of participant (Host Admin Bypass):"}
+                        </span>
+                        <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: '240px' }}>
+                          <button 
+                            type="button"
+                            onClick={() => handleSelectTodChoice('Truth')} 
+                            className="btn-create" 
+                            style={{ flex: 1, padding: '10px', fontSize: '13px', background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', borderColor: 'transparent', color: '#fff', fontWeight: 700 }}
+                          >
+                            😇 Truth
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleSelectTodChoice('Dare')} 
+                            className="btn-create" 
+                            style={{ flex: 1, padding: '10px', fontSize: '13px', background: 'linear-gradient(135deg, #ec4899, #be185d)', borderColor: 'transparent', color: '#fff', fontWeight: 700 }}
+                          >
+                            😈 Dare
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Waiting for {selectedUser?.name} to choose...
+                      </span>
+                    )}
+
+                    {isHostOrAdmin && (
+                      <button 
+                        type="button"
+                        onClick={handleResetTod} 
+                        className="btn-signin"
+                        style={{ marginTop: '16px', fontSize: '11px', padding: '6px 12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+                      >
+                        Reset / Spin Again
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Reveal prompt phase */}
+          {todState === 'reveal' && (
+            <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px', padding: '16px 0' }}>
+              {(() => {
+                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
+                const isMeSelected = myId === todSelectedId;
+                
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px' }}>
+                    <div className={`truthordare-card type-${todChoice?.toLowerCase() || 'truth'} ${isExpanded ? 'expanded' : ''}`} style={{ width: '100%', maxWidth: isExpanded ? '500px' : 'none' }}>
+                      <div className="card-badge" style={{
+                        display: 'inline-block',
+                        fontSize: '9px',
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        marginBottom: '12px',
+                        backgroundColor: todChoice === 'Truth' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(236, 72, 153, 0.15)',
+                        color: todChoice === 'Truth' ? '#3b82f6' : '#ec4899'
+                      }}>
+                        {todChoice} for {selectedUser?.name.replace(' (You)', '')}
+                      </div>
+                      <div className="truthordare-text" style={{ fontSize: isExpanded ? '20px' : '15px', fontWeight: 700, margin: '8px 0 0 0' }}>
+                        "{todText}"
+                      </div>
+                    </div>
+
+                    {(isMeSelected || isHostOrAdmin) ? (
+                      <button 
+                        type="button"
+                        onClick={handleResetTod} 
+                        className="btn-signin"
+                        style={{ width: '100%', maxWidth: '200px', padding: '10px', fontWeight: 700, backgroundColor: 'var(--primary-color)', color: '#0f1013', border: 'none' }}
+                      >
+                        Done (Next Turn)
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Waiting for completion...
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
         </div>
+
+        {/* Sidebar participant checkboxes list for the wheel */}
+        {(todState === 'idle' || todState === 'spinning') && (
+          <div className="spinner-participants-sidebar">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                Checked ({n}/{callParticipants.length})
+              </span>
+              <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
+                Pool: {todSpinPool.length} left
+              </span>
+            </div>
+
+            <div className="spinner-participants-list">
+              {callParticipants.map(p => {
+                const isChecked = activeIds.includes(p.id);
+                return (
+                  <div key={p.id} className="spinner-participant-row" onClick={() => isHostOrAdmin && handleToggleTodSpinCheckedParticipant(p.id)} style={{ cursor: isHostOrAdmin ? 'pointer' : 'default' }}>
+                    {isHostOrAdmin ? (
+                      <input 
+                        type="checkbox" 
+                        checked={isChecked} 
+                        onChange={() => {}} 
+                        style={{ cursor: 'pointer' }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: '12px' }}>{isChecked ? '✅' : '⬜'}</span>
+                    )}
+                    <span style={{ fontSize: '12px', fontWeight: isChecked ? 600 : 400, color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)', flex: 1, marginLeft: '6px' }}>
+                      {p.name}
+                    </span>
+                    {todSpinPool.includes(p.id) && isChecked && (
+                      <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
+                        Pool
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3515,95 +3902,14 @@ function AppContent() {
 
     const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
     const n = spinParticipants.length;
-
     const size = isExpanded ? 360 : 200;
-    const cx = size / 2;
-    const cy = size / 2;
-    const radius = size * 0.42;
-    const segmentAngle = n > 0 ? 360 / n : 360;
-
-    const myId = getMyId();
-    const myPresence = callParticipants.find(p => p.id === myId);
-    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
 
     return (
       <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
         <div className="spinner-main-area">
-          <div className="wheel-outer-wrapper" style={{ width: size, height: size }}>
-            <div className="wheel-pointer" style={{ top: isExpanded ? '-12px' : '-8px' }}>
-              <svg width={isExpanded ? 28 : 20} height={isExpanded ? 28 : 20} viewBox="0 0 24 24" fill="var(--primary-color)" stroke="#fff" strokeWidth="2">
-                <polygon points="12,24 4,8 20,8" />
-              </svg>
-            </div>
+          {renderWheelSVG(spinParticipants, spinResult ? spinResult.angle : 0, size, isExpanded, handleSpinWheel)}
 
-            {n > 0 ? (
-              <svg 
-                width={size} 
-                height={size} 
-                viewBox={`0 0 ${size} ${size}`} 
-                style={{ 
-                  transform: `rotate(${spinResult ? spinResult.angle : 0}deg)`, 
-                  transition: 'transform 4s cubic-bezier(0.1, 0.8, 0.1, 1)' 
-                }}
-              >
-                {spinParticipants.map((p, idx) => {
-                  const startAngle = idx * segmentAngle;
-                  const endAngle = (idx + 1) * segmentAngle;
-                  
-                  const x1 = cx + radius * Math.cos((startAngle - 90) * Math.PI / 180);
-                  const y1 = cy + radius * Math.sin((startAngle - 90) * Math.PI / 180);
-                  const x2 = cx + radius * Math.cos((endAngle - 90) * Math.PI / 180);
-                  const y2 = cy + radius * Math.sin((endAngle - 90) * Math.PI / 180);
-                  
-                  const largeArcFlag = segmentAngle > 180 ? 1 : 0;
-                  const pathData = `
-                    M ${cx} ${cy}
-                    L ${x1} ${y1}
-                    A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}
-                    Z
-                  `;
-                  
-                  const textAngle = startAngle + segmentAngle / 2;
-                  const textRadius = radius * 0.65;
-                  const tx = cx + textRadius * Math.cos((textAngle - 90) * Math.PI / 180);
-                  const ty = cy + textRadius * Math.sin((textAngle - 90) * Math.PI / 180);
-
-                  return (
-                    <g key={p.id}>
-                      <path d={pathData} fill={p.color || '#3b82f6'} stroke="rgba(0,0,0,0.15)" strokeWidth="1.5" />
-                      <text 
-                        x={tx} 
-                        y={ty} 
-                        fill="#fff" 
-                        fontSize={isExpanded ? 11 : 9} 
-                        fontWeight="800" 
-                        textAnchor="middle" 
-                        transform={`rotate(${textAngle}, ${tx}, ${ty})`}
-                      >
-                        {p.initials || p.name.substring(0, 2)}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-            ) : (
-              <div className="wheel-empty-state">No participants checked</div>
-            )}
-
-            <button 
-              onClick={handleSpinWheel} 
-              className="wheel-center-button"
-              style={{
-                width: isExpanded ? '64px' : '44px',
-                height: isExpanded ? '64px' : '44px',
-                fontSize: isExpanded ? '12px' : '10px',
-              }}
-            >
-              SPIN
-            </button>
-          </div>
-
-          {spinResult && (
+          {spinResult && !spinLocalSpinning && (
             <div className="spin-result-banner animate-fade-in" style={{ marginTop: '16px' }}>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Landed on</div>
               <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--primary-color)', marginTop: '2px' }}>
@@ -3688,7 +3994,7 @@ function AppContent() {
         {/* Room Privacy setting */}
         <div>
           <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Room Privacy Type</label>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
               <input 
                 type="radio" 
@@ -3696,7 +4002,7 @@ function AppContent() {
                 checked={currentRoom?.type === 'public'} 
                 onChange={() => handleChangeRoomType('public')} 
               />
-              Public (Direct Join)
+              Public
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
               <input 
@@ -3705,7 +4011,16 @@ function AppContent() {
                 checked={currentRoom?.type === 'public-ask'} 
                 onChange={() => handleChangeRoomType('public-ask')} 
               />
-              Ask to Join (Approval Required)
+              Ask to Join
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+              <input 
+                type="radio" 
+                name="roomTypeSetting" 
+                checked={currentRoom?.type === 'private'} 
+                onChange={() => handleChangeRoomType('private')} 
+              />
+              Private
             </label>
           </div>
           <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can change room privacy in this room.</span>
@@ -4233,6 +4548,30 @@ function AppContent() {
                         )}
                       </button>
                     ))}
+                  </div>
+                )}
+              </div>
+              {/* Room Settings Popover inside Call */}
+              <div className="theme-picker-container" ref={roomSettingsRef}>
+                <button 
+                  onClick={() => setIsRoomSettingsOpen(!isRoomSettingsOpen)} 
+                  className="theme-picker-btn"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  aria-label="Room settings"
+                  title="Room settings"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                </button>
+                {isRoomSettingsOpen && (
+                  <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: '0', width: '320px', padding: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '8px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Room Settings</span>
+                      <button onClick={() => setIsRoomSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
+                    </div>
+                    {renderRoomSettingsUI()}
                   </div>
                 )}
               </div>
@@ -5097,34 +5436,7 @@ function AppContent() {
                           );
                         })()}
 
-                        {/* Section 3: Room Configuration & Settings */}
-                        <div>
-                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            Room Configuration
-                          </h4>
-                          
-                          <div className="tools-cards-grid">
-                            <div 
-                              className="tool-card"
-                              onClick={() => {
-                                setActiveToolDetail('settings');
-                                setActiveGameId(null);
-                              }}
-                              title="Configure room topic, privacy, and fun tools toggle"
-                            >
-                              <div className="tool-card-icon-wrapper">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <circle cx="12" cy="12" r="3"></circle>
-                                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                                </svg>
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Room Settings</span>
-                                <span className="tool-card-desc">Modify room name, privacy, or fun tools.</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+
 
                       </div>
                     )}
@@ -5530,21 +5842,7 @@ function AppContent() {
                       </div>
                     )}
 
-                    {/* Sub-panel View 9: Room Settings */}
-                    {activeToolDetail === 'settings' && (
-                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
-                        <div className="tools-sub-panel-header">
-                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="19" y1="12" x2="5" y2="12"></line>
-                              <polyline points="12 19 5 12 12 5"></polyline>
-                            </svg>
-                          </button>
-                          <span className="tools-sub-panel-title">Room Settings</span>
-                        </div>
-                        {renderRoomSettingsUI()}
-                      </div>
-                    )}
+
 
                   </div>
                 )}
