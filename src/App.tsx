@@ -3163,65 +3163,119 @@ function AppContent() {
                           key={p.id} 
                           className={`participant-tile ${isUser ? 'user-tile' : ''} ${p.isSpeaking && !showMuted ? 'speaker-active' : ''}`}
                         >
-                          {!p.isCamOff ? (
-                            <>
-                              <ParticipantVideo participantId={p.id} />
-                              {isUser && cameraError && (
-                                <div className="camera-error-overlay" style={{
-                                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                                  backgroundColor: 'rgba(0,0,0,0.8)', color: 'white',
-                                  display: 'flex', flexDirection: 'column',
-                                  alignItems: 'center', justifyContent: 'center',
-                                  zIndex: 10, padding: '16px', textAlign: 'center'
-                                }}>
-                                  <span style={{ fontSize: '13px', marginBottom: '8px' }}>
-                                    Camera unavailable — check permissions or hardware switch
-                                  </span>
-                                  <button 
+                          {isGalleryView ? (
+                            // Gallery Layout: Full Card Video/Avatar
+                            !p.isCamOff ? (
+                              <>
+                                <ParticipantVideo participantId={p.id} />
+                                {isUser && cameraError && (
+                                  <div className="camera-error-overlay" style={{
+                                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                    backgroundColor: 'rgba(0,0,0,0.8)', color: 'white',
+                                    display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    zIndex: 10, padding: '16px', textAlign: 'center'
+                                  }}>
+                                    <span style={{ fontSize: '13px', marginBottom: '8px' }}>
+                                      Camera unavailable — check permissions or hardware switch
+                                    </span>
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                                      }}
+                                      style={{
+                                        padding: '6px 12px', background: 'var(--primary-color)',
+                                        color: '#000', border: 'none', borderRadius: '4px',
+                                        cursor: 'pointer', fontSize: '13px', fontWeight: 'bold'
+                                      }}
+                                    >
+                                      Retry
+                                    </button>
+                                  </div>
+                                )}
+                                {p.sharing && (
+                                  <div className="sharing-badge-overlay" style={{
+                                    position: 'absolute',
+                                    bottom: '12px',
+                                    right: '12px',
+                                    backgroundColor: 'var(--primary-color)',
+                                    color: '#0f1013',
+                                    borderRadius: '50%',
+                                    width: '22px',
+                                    height: '22px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    border: '2px solid var(--card-bg, #1a1c23)',
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                    zIndex: 10
+                                  }} title={`Sharing ${p.sharing} - click to view`}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                                    }}
-                                    style={{
-                                      padding: '6px 12px', background: 'var(--primary-color)',
-                                      color: '#000', border: 'none', borderRadius: '4px',
-                                      cursor: 'pointer', fontSize: '13px', fontWeight: 'bold'
+                                      handleViewParticipantShare(p);
                                     }}
                                   >
-                                    Retry
-                                  </button>
-                                </div>
-                              )}
-                              {p.sharing && (
-                                <div className="sharing-badge-overlay" style={{
-                                  position: 'absolute',
-                                  bottom: '12px',
-                                  right: '12px',
-                                  backgroundColor: 'var(--primary-color)',
-                                  color: '#0f1013',
-                                  borderRadius: '50%',
-                                  width: '22px',
-                                  height: '22px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '11px',
-                                  fontWeight: 'bold',
-                                  border: '2px solid var(--card-bg, #1a1c23)',
-                                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                                  zIndex: 10
-                                }} title={`Sharing ${p.sharing} - click to view`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
+                                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              /* Avatar Square (Gallery Mode) */
+                              <div 
+                                className="participant-avatar-large" 
+                                style={{ 
+                                  backgroundColor: p.color, 
+                                  cursor: p.sharing ? 'pointer' : 'default',
+                                  position: 'relative',
+                                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                                  overflow: 'hidden'
+                                }}
+                                onClick={() => {
+                                  if (p.sharing) {
                                     handleViewParticipantShare(p);
-                                  }}
-                                >
-                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                                </div>
-                              )}
-                            </>
+                                  }
+                                }}
+                              >
+                                {p.photoURL ? (
+                                  <img 
+                                    src={p.photoURL} 
+                                    alt={p.name} 
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  p.initials
+                                )}
+                                {p.sharing && (
+                                  <div className="sharing-badge-overlay" style={{
+                                    position: 'absolute',
+                                    bottom: '-6px',
+                                    right: '-6px',
+                                    backgroundColor: 'var(--primary-color)',
+                                    color: '#0f1013',
+                                    borderRadius: '50%',
+                                    width: '22px',
+                                    height: '22px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    border: '2px solid var(--card-bg, #1a1c23)',
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                                    zIndex: 10
+                                  }} title={`Sharing ${p.sharing} - click to view`}>
+                                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                  </div>
+                                )}
+                              </div>
+                            )
                           ) : (
-                            /* Avatar Square */
+                            // Compact Grid Layout: Floating Avatar
                             <div 
                               className="participant-avatar-large" 
                               style={{ 
@@ -3238,7 +3292,9 @@ function AppContent() {
                                 }
                               }}
                             >
-                              {p.photoURL ? (
+                              {!p.isCamOff && !(isUser && cameraError) ? (
+                                <ParticipantVideo participantId={p.id} />
+                              ) : p.photoURL ? (
                                 <img 
                                   src={p.photoURL} 
                                   alt={p.name} 
@@ -3248,6 +3304,32 @@ function AppContent() {
                               ) : (
                                 p.initials
                               )}
+                              
+                              {/* Clickable Retry warning indicator in compact view */}
+                              {isUser && !p.isCamOff && cameraError && (
+                                <div 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                                  }}
+                                  style={{
+                                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                                    backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center', zIndex: 15,
+                                    cursor: 'pointer'
+                                  }} 
+                                  title="Camera error - check hardware switch and click to retry"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
+                                    <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
+                                    <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
+                                    <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
+                                  </svg>
+                                  <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
+                                </div>
+                              )}
+
                               {p.sharing && (
                                 <div className="sharing-badge-overlay" style={{
                                   position: 'absolute',
