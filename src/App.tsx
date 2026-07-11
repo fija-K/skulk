@@ -1159,7 +1159,7 @@ function AppContent() {
         setLiveKitToken(null);
       }
     }
-  }, [roomId, rooms, user, guestId, isAuthLoading, currentRoom]);
+  }, [roomId, rooms, user, guestId, isAuthLoading, currentRoom ? roomDocId(currentRoom) : null]);
 
   // Clean up presence when component unmounts or call ends
   useEffect(() => {
@@ -1172,7 +1172,7 @@ function AppContent() {
         leavePresence(prevRoomId, sessionIdToClean);
       }
     };
-  }, [currentRoom]);
+  }, [currentRoom ? roomDocId(currentRoom) : null]);
 
 
 
@@ -1303,7 +1303,7 @@ function AppContent() {
     });
     
     return () => unsubscribe();
-  }, [currentRoom, user, guestId, isMicMuted, isCamOff]);
+  }, [currentRoom ? roomDocId(currentRoom) : null, user, guestId, isMicMuted, isCamOff]);
   // Synchronize remote mute actions with local microphone state
   useEffect(() => {
     if (!currentRoom) return;
@@ -1316,7 +1316,7 @@ function AppContent() {
         showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
       }
     }
-  }, [callParticipants, currentRoom, isMicMuted]);
+  }, [callParticipants, currentRoom ? roomDocId(currentRoom) : null, isMicMuted]);
 
   // Synchronize remote camera actions with local camera state
   useEffect(() => {
@@ -1330,7 +1330,7 @@ function AppContent() {
         showToast(myPresence.isCamOff ? "📷 Your camera has been turned off by a host." : "📷 Your camera has been turned on by a host.");
       }
     }
-  }, [callParticipants, currentRoom, isCamOff]);
+  }, [callParticipants, currentRoom ? roomDocId(currentRoom) : null, isCamOff]);
 
   // Listen to pending join requests (for Admin, Host, Co-host)
   useEffect(() => {
@@ -1465,7 +1465,7 @@ function AppContent() {
     });
     
     return () => unsubscribe();
-  }, [currentRoom, pomodoroIsRunning]);
+  }, [currentRoom ? roomDocId(currentRoom) : null, pomodoroIsRunning]);
 
   // Sync whiteboard canvas from the participant being viewed
   useEffect(() => {
