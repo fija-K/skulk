@@ -517,6 +517,7 @@ function AppContent() {
   // Whole-call Mini Mode (Zoom-like Call PiP) states
   const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
   const [isMiniModeActive, setIsMiniModeActive] = useState(false);
+  const [miniModeTab, setMiniModeTab] = useState<'call' | 'tool'>('call');
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -4197,6 +4198,8 @@ function AppContent() {
     const activeSpeakerCamOff = activeSpeaker ? (activeSpeaker.id === getMyId() ? isCamOff : activeSpeaker.isCamOff) : true;
     const activeSpeakerMicMuted = activeSpeaker ? (activeSpeaker.id === getMyId() ? isMicMuted : activeSpeaker.isMuted) : true;
 
+    const showToolView = miniModeTab === 'tool' && expandedTool !== 'none';
+
     return createPortal(
       <div className="skulk-pip-window" style={{ 
         width: '100vw', 
@@ -4209,59 +4212,287 @@ function AppContent() {
         position: 'relative',
         overflow: 'hidden'
       }}>
-        {/* Main Video viewport */}
-        <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          {!activeSpeakerCamOff ? (
-            <ParticipantVideo participantId={activeSpeakerId} />
-          ) : (
-            <div style={{
-              width: '72px',
-              height: '72px',
-              borderRadius: '50%',
-              backgroundColor: activeSpeaker?.color || '#8b5cf6',
+        {/* Top Switcher Bar */}
+        <div style={{
+          display: 'flex',
+          backgroundColor: '#16181d',
+          borderBottom: '1px solid #2d3139',
+          height: '32px',
+          alignItems: 'center',
+          padding: '0 8px',
+          gap: '4px',
+          flexShrink: 0
+        }}>
+          <button 
+            onClick={() => setMiniModeTab('call')}
+            style={{
+              flex: 1,
+              height: '24px',
+              backgroundColor: !showToolView ? '#2d3139' : 'transparent',
+              border: 'none',
+              borderRadius: '4px',
+              color: !showToolView ? '#f1c40f' : '#94a3b8',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '24px',
-              fontWeight: 'bold',
-              color: '#ffffff'
-            }}>
-              {activeSpeaker?.photoURL ? (
-                <img 
-                  src={activeSpeaker.photoURL} 
-                  alt={activeSpeaker.name} 
-                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                />
+              gap: '4px'
+            }}
+          >
+            <span>📞 Call</span>
+          </button>
+          <button 
+            onClick={() => {
+              if (expandedTool !== 'none') {
+                setMiniModeTab('tool');
+              }
+            }}
+            disabled={expandedTool === 'none'}
+            style={{
+              flex: 1,
+              height: '24px',
+              backgroundColor: showToolView ? '#2d3139' : 'transparent',
+              border: 'none',
+              borderRadius: '4px',
+              color: expandedTool === 'none' 
+                ? 'rgba(255, 255, 255, 0.15)' 
+                : showToolView 
+                  ? '#f1c40f' 
+                  : '#94a3b8',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: expandedTool === 'none' ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px'
+            }}
+          >
+            <span>⚙️ Tool</span>
+          </button>
+        </div>
+
+        {/* Main Viewport Content Area */}
+        <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          {!showToolView ? (
+            /* Call View */
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+              {!activeSpeakerCamOff ? (
+                <ParticipantVideo participantId={activeSpeakerId} />
               ) : (
-                activeSpeaker?.initials || 'S'
+                <div style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '50%',
+                  backgroundColor: activeSpeaker?.color || '#8b5cf6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '24px',
+                  fontWeight: 'bold',
+                  color: '#ffffff'
+                }}>
+                  {activeSpeaker?.photoURL ? (
+                    <img 
+                      src={activeSpeaker.photoURL} 
+                      alt={activeSpeaker.name} 
+                      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    activeSpeaker?.initials || 'S'
+                  )}
+                </div>
               )}
+
+              {/* Overlay nametag */}
+              <div style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                backgroundColor: 'rgba(15, 16, 19, 0.75)',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                zIndex: 10
+              }}>
+                <span>{activeSpeaker?.name || 'User'}</span>
+                {activeSpeakerMicMuted && (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                  </svg>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Tool View */
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '10px', boxSizing: 'border-box' }}>
+              {expandedTool === 'pomodoro' && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', fontWeight: 800 }}>
+                    ⏱️ {pomodoroPhase === 'focus' ? 'Focus Phase' : 'Break Phase'}
+                  </span>
+                  <span style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                    {pomodoroMinutes.toString().padStart(2, '0')}:{pomodoroSeconds.toString().padStart(2, '0')}
+                  </span>
+                  <button 
+                    onClick={togglePomodoro} 
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '11px',
+                      backgroundColor: '#2d3139',
+                      border: '1px solid #475569',
+                      borderRadius: '4px',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    {pomodoroIsRunning ? 'Pause' : 'Start'}
+                  </button>
+                </div>
+              )}
+
+              {expandedTool === 'deadline' && (() => {
+                const currentStep = deadlineSteps[deadlineActiveIndex];
+                const stepName = currentStep ? `${deadlineActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                    <span 
+                      style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
+                      title={stepName}
+                    >
+                      ⏳ {stepName}
+                    </span>
+                    <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                      {deadlineTimerMinutes.toString().padStart(2, '0')}:{deadlineTimerSeconds.toString().padStart(2, '0')}
+                    </span>
+                    <button 
+                      onClick={() => setDeadlineIsRunning(!deadlineIsRunning)} 
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        backgroundColor: '#2d3139',
+                        border: '1px solid #475569',
+                        borderRadius: '4px',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      {deadlineIsRunning ? 'Pause' : 'Start'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {expandedTool === 'loose' && (() => {
+                const currentStep = looseSteps[looseActiveIndex];
+                const stepName = currentStep ? `${looseActiveIndex + 1}. ${currentStep.name}` : 'No steps';
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                    <span 
+                      style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
+                      title={stepName}
+                    >
+                      🔄 {stepName}
+                    </span>
+                    <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', color: '#ffffff', lineHeight: 1 }}>
+                      {Math.floor(looseTimerSeconds / 60).toString().padStart(2, '0')}:{Math.floor(looseTimerSeconds % 60).toString().padStart(2, '0')}
+                    </span>
+                    <button 
+                      onClick={() => setLooseIsRunning(!looseIsRunning)} 
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        backgroundColor: '#2d3139',
+                        border: '1px solid #475569',
+                        borderRadius: '4px',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      {looseIsRunning ? 'Pause' : 'Start'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {expandedTool === 'spin' && (() => {
+                const lastSelectedName = spinResult 
+                  ? (callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant') 
+                  : null;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800 }}>
+                      🎡 {lastSelectedName ? `Landed on: ${lastSelectedName}` : 'Ready to spin'}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        toggleMiniMode();
+                        setExpandedTool('spin');
+                        handleSpinWheel();
+                      }} 
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '11px',
+                        backgroundColor: 'var(--primary-color, #f1c40f)',
+                        color: '#0f1013',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 700
+                      }}
+                    >
+                      Spin Wheel (Full)
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {expandedTool === 'truthordare' && (() => {
+                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
+                const titleText = selectedUser && todChoice ? `${selectedUser.name.replace(' (You)', '')} — ${todChoice}` : 'No turn active';
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '10px', color: 'var(--primary-color, #f1c40f)', fontWeight: 800 }}>
+                      🎲 {titleText}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#ffffff', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.3, maxWidth: '240px' }}>
+                      {todText ? `"${todText}"` : 'No prompt active.'}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        toggleMiniMode();
+                        setExpandedTool('truthordare');
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '10px',
+                        backgroundColor: '#2d3139',
+                        border: '1px solid #475569',
+                        borderRadius: '4px',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        marginTop: '4px'
+                      }}
+                    >
+                      Expand Game
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
-
-          {/* Overlay nametag */}
-          <div style={{
-            position: 'absolute',
-            bottom: '10px',
-            left: '10px',
-            backgroundColor: 'rgba(15, 16, 19, 0.75)',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            fontSize: '11px',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            zIndex: 10
-          }}>
-            <span>{activeSpeaker?.name || 'User'}</span>
-            {activeSpeakerMicMuted && (
-              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-              </svg>
-            )}
-          </div>
         </div>
 
         {/* Small bottom action controls bar */}
@@ -4693,10 +4924,10 @@ function AppContent() {
                       {/* Participant Avatars Row */}
                       {(() => {
                         const totalParticipants = currentRoomParticipants.length;
-                        if (totalParticipants > 8) {
+                        if (totalParticipants > 18) {
                           return (
-                            <div className="avatar-row has-overflow">
-                              {currentRoomParticipants.slice(0, 8).map((participant, index) => {
+                            <div className="avatar-row">
+                              {currentRoomParticipants.slice(0, 17).map((participant, index) => {
                                 return participant.photoURL ? (
                                   <img 
                                     key={index}
@@ -4726,12 +4957,12 @@ function AppContent() {
                                   fontWeight: 'bold'
                                 }}
                               >
-                                +{totalParticipants - 8}
+                                +{totalParticipants - 17}
                               </div>
                             </div>
                           );
                         } else {
-                          const maxSlots = Math.min(room.maxParticipants || 10, 8);
+                          const maxSlots = Math.min(room.maxParticipants || 10, 18);
                           return (
                             <div className="avatar-row">
                               {Array.from({ length: maxSlots }).map((_, index) => {
