@@ -21,7 +21,8 @@ import {
   useTracks,
   RoomAudioRenderer,
   useLocalParticipant,
-  useParticipants
+  useParticipants,
+  useRoomContext
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Track, ParticipantEvent } from 'livekit-client';
@@ -95,6 +96,68 @@ function ParticipantVideo({ participantId }: { participantId: string }) {
         zIndex: 1
       }} 
     />
+  );
+}
+
+function AudioDiagnostics({ myRole }: { myRole: string }) {
+  const room = useRoomContext();
+  const [info, setInfo] = useState<string>('Initializing diagnostics...');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!room) {
+        setInfo('No room context');
+        return;
+      }
+      
+      const r = room as any;
+      let debugText = `Room State: ${r.state}\n`;
+      debugText += `My Role: ${myRole}\n`;
+      debugText += `Local Identity: ${r.localParticipant?.identity}\n`;
+      debugText += `Room AudioContext State: ${r.audioContext?.state || 'unknown'}\n`;
+      
+      debugText += `\nRemote Participants (${r.remoteParticipants?.size || 0}):\n`;
+      if (r.remoteParticipants) {
+        r.remoteParticipants.forEach((p: any, identity: string) => {
+          debugText += `- ${p.name || identity} (identity: ${p.identity}):\n`;
+          p.trackPublications.forEach((pub: any) => {
+            if (pub.kind === 'audio') {
+              debugText += `  * Audio Track: ${pub.trackSid} (Subscribed: ${pub.isSubscribed}, Enabled: ${pub.isEnabled}, Muted: ${pub.isMuted})\n`;
+            } else if (pub.kind === 'video') {
+              debugText += `  * Video Track: ${pub.trackSid} (Subscribed: ${pub.isSubscribed}, Enabled: ${pub.isEnabled}, Muted: ${pub.isMuted})\n`;
+            }
+          });
+        });
+      }
+
+      setInfo(debugText);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [room, myRole]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: '100px',
+      right: '20px',
+      backgroundColor: 'rgba(0, 0, 0, 0.85)',
+      color: '#00ff00',
+      padding: '16px',
+      borderRadius: '8px',
+      fontFamily: 'monospace',
+      fontSize: '11px',
+      whiteSpace: 'pre-wrap',
+      zIndex: 99999,
+      maxWidth: '400px',
+      maxHeight: '300px',
+      overflowY: 'auto',
+      border: '2px solid #00ff00',
+      pointerEvents: 'none'
+    }}>
+      <h4 style={{ margin: '0 0 8px 0', borderBottom: '1px solid #00ff00', paddingBottom: '4px' }}>Audio Diagnostics</h4>
+      {info}
+    </div>
   );
 }
 
@@ -5625,7 +5688,8 @@ function AppContent() {
                 if (micError !== mic) setMicError(mic);
               }} 
             />
-            <RoomAudioRenderer />
+             <RoomAudioRenderer />
+             <AudioDiagnostics myRole={callParticipants.find(p => p.id === getMyId())?.role || 'member'} />
             
             {isMiniModeActive ? (
               <div className="mini-mode-placeholder animate-fade-in" style={{
