@@ -974,7 +974,8 @@ function AppContent() {
     if (room.type === 'public') {
       window.open(`/room/${id}`, '_blank');
     } else if (room.type === 'public-ask') {
-      if (isCreator) {
+      const myRole = determineRole(room.creatorId);
+      if (isCreator || myRole === 'admin') {
         window.open(`/room/${id}`, '_blank');
       } else {
         // Show waiting modal triggering the request status useEffect
@@ -1109,7 +1110,8 @@ function AppContent() {
           const myId = getMyId();
           const isCreator = roomObj.creatorId === myId;
           
-          if (roomObj.type === 'public-ask' && !isCreator) {
+          const myRole = determineRole(roomObj.creatorId);
+          if (roomObj.type === 'public-ask' && !isCreator && myRole !== 'admin') {
             // Halt user and verify presence status in joinRequests document
             try {
               const reqDocRef = doc(db, 'rooms', roomObj.id, 'joinRequests', myId);
@@ -1143,10 +1145,11 @@ function AppContent() {
 
   // Clean up presence when component unmounts or call ends
   useEffect(() => {
+    const sessionIdToClean = currentSessionIdRef.current;
     return () => {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
-        leavePresence(prevRoomId, currentSessionIdRef.current);
+        leavePresence(prevRoomId, sessionIdToClean);
       }
     };
   }, [currentRoom]);
