@@ -1066,6 +1066,7 @@ function AppContent() {
     hasSeenSelfInListRef.current = false;
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
+      console.log("[LEAVE EVENT] leavePresence triggered from handleLeaveCall, session:", currentSessionIdRef.current);
       leavePresence(prevRoomId, currentSessionIdRef.current);
       clearMySharing();
       setCurrentRoom(null);
@@ -1148,6 +1149,7 @@ function AppContent() {
       isEnteringRoomRef.current = null;
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
+        console.log("[LEAVE EVENT] leavePresence triggered from route sync useEffect else-block (dashboard route), session:", currentSessionIdRef.current);
         leavePresence(prevRoomId, currentSessionIdRef.current);
         clearMySharing();
         setCurrentRoom(null);
@@ -1162,9 +1164,11 @@ function AppContent() {
   // Clean up presence when component unmounts or call ends
   useEffect(() => {
     const sessionIdToClean = currentSessionIdRef.current;
+    console.log("[CLEANUP EFFECT SETUP] registering cleanup for session:", sessionIdToClean);
     return () => {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
+        console.log("[CLEANUP EFFECT CLEANUP] leavePresence triggered from cleanup useEffect, session:", sessionIdToClean);
         leavePresence(prevRoomId, sessionIdToClean);
       }
     };
