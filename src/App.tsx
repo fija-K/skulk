@@ -891,7 +891,7 @@ function AppContent() {
 
   const leavePresence = async (roomIdToLeave: string, sessionIdToDelete?: string | null) => {
     const myId = getMyId();
-    console.log("leavePresence called:", { roomIdToLeave, sessionIdToDelete, myId });
+    console.log("leavePresence called:", { roomIdToLeave, sessionIdToDelete, myId }, new Error().stack);
     if (!myId || !roomIdToLeave) return;
 
     const performLeave = async () => {
@@ -1000,7 +1000,7 @@ function AppContent() {
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     const newSessionId = Math.random().toString(36).substring(2, 10);
-    console.log("enterCallRoom executing:", { roomId: normalizedRoom.id, myId, newSessionId });
+    console.log("enterCallRoom executing:", { roomId: normalizedRoom.id, myId, newSessionId }, new Error().stack);
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
