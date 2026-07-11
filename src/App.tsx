@@ -1055,21 +1055,36 @@ export default function App() {
     };
   }, [currentRoom]);
 
+  const signalUnsubsRef = useRef<Record<string, (() => void)[]>>({});
+
   // Real-time WebRTC Mesh signaling over Firestore for participant video/audio
   useEffect(() => {
-    if (!currentRoom || !localStream) return;
+    if (!currentRoom || !localStream) {
+      Object.keys(pcsRef.current).forEach(peerId => {
+        try { pcsRef.current[peerId].close(); } catch (e) {}
+        delete pcsRef.current[peerId];
+        if (signalUnsubsRef.current[peerId]) {
+          signalUnsubsRef.current[peerId].forEach(u => u());
+          delete signalUnsubsRef.current[peerId];
+        }
+      });
+      setRemoteStreams({});
+      return;
+    }
     const myId = getMyId();
     const rid = roomDocId(currentRoom);
     
     const currentPeerIds = callParticipants.map(p => p.id).filter(id => id !== myId);
     
-    // Cleanup stale peer connections for peers who left
+    // Cleanup dropped peers
     Object.keys(pcsRef.current).forEach(peerId => {
       if (!currentPeerIds.includes(peerId)) {
-        try {
-          pcsRef.current[peerId].close();
-        } catch (e) {}
+        try { pcsRef.current[peerId].close(); } catch (e) {}
         delete pcsRef.current[peerId];
+        if (signalUnsubsRef.current[peerId]) {
+          signalUnsubsRef.current[peerId].forEach(u => u());
+          delete signalUnsubsRef.current[peerId];
+        }
         setRemoteStreams(prev => {
           const next = { ...prev };
           delete next[peerId];
@@ -1077,8 +1092,6 @@ export default function App() {
         });
       }
     });
-    
-    const unsubscribes: (() => void)[] = [];
 
     currentPeerIds.forEach(peerId => {
       if (pcsRef.current[peerId]) return; // Already connected or connecting
@@ -1087,6 +1100,7 @@ export default function App() {
         iceServers: iceServersConfig
       });
       pcsRef.current[peerId] = pc;
+      signalUnsubsRef.current[peerId] = [];
       
       // Candidate queue to ensure we only add ICE candidates AFTER remoteDescription is set
       let remoteDescriptionSet = false;
@@ -1162,6 +1176,7 @@ export default function App() {
       if (myId < peerId) {
         // Direct offer creation for Initiator to avoid negotiationneeded timing issues
         const makeOffer = async () => {
+          if (pc.signalingState !== 'stable') return;
           try {
             // Delete any stale signals and candidates from a previous session first
             await deleteDoc(signalDoc);
@@ -1202,7 +1217,7 @@ export default function App() {
             }
           }
         });
-        unsubscribes.push(unsub);
+        signalUnsubsRef.current[peerId].push(unsub);
       } else {
         const unsub = onSnapshot(signalDoc, async (snap) => {
           if (!snap.exists()) return;
@@ -1229,7 +1244,7 @@ export default function App() {
             }
           }
         });
-        unsubscribes.push(unsub);
+        signalUnsubsRef.current[peerId].push(unsub);
       }
 
       const unsubCandidates = onSnapshot(candidatesRef, (snap) => {
@@ -1243,12 +1258,11 @@ export default function App() {
           }
         });
       });
-      unsubscribes.push(unsubCandidates);
+      signalUnsubsRef.current[peerId].push(unsubCandidates);
     });
 
-    return () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
+    // Cleanup is now handled inside the effect when dependencies change in a way that should drop peers.
+    // We intentionally omit the returned cleanup function so listeners stay alive across re-renders for active peers.
   }, [currentRoom, localStream, callParticipants, iceServersConfig]);
 
   // Update or migrate Firestore presence document when authentication state changes
