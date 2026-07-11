@@ -1597,6 +1597,11 @@ function AppContent() {
       // Sync new tools tab fields
       if (data.allowFunTools !== undefined) {
         setAllowFunTools(data.allowFunTools);
+        if (!data.allowFunTools) {
+          // If fun tools are disabled, force close any active fun tool detail screen
+          setActiveToolDetail(prev => (prev === 'games' || prev === 'truthordare') ? 'none' : prev);
+          setExpandedTool(prev => (prev === 'truthordare') ? 'none' : prev);
+        }
       }
       if (data.todSpinResult !== undefined) {
         setTodSpinResult(data.todSpinResult);
@@ -5357,33 +5362,12 @@ function AppContent() {
                               </div>
                             </div>
 
-                            {/* Spin the Wheel Focus Card */}
-                            <div 
-                              className="tool-card"
-                              onClick={() => {
-                                setActiveToolDetail('spin');
-                                setActiveGameId(null);
-                              }}
-                              title="Pick random participants fairly"
-                            >
-                              <div className="tool-card-icon-wrapper">
-                                🎯
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Spin the Wheel</span>
-                                <span className="tool-card-desc">Fair circular random turn picker.</span>
-                              </div>
-                            </div>
-
                           </div>
                         </div>
 
-                        {/* Section 2: Fun Section (Disabled for members if toggle is OFF) */}
+                        {/* Section 2: Fun Section (Disabled for everyone if toggle is OFF) */}
                         {(() => {
-                          const myId = getMyId();
-                          const myPresence = callParticipants.find(p => p.id === myId);
-                          const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
-                          const isFunLocked = !allowFunTools && !isHostOrAdmin;
+                          const isFunLocked = !allowFunTools;
 
                           return (
                             <div>
@@ -5393,12 +5377,7 @@ function AppContent() {
                                 </h4>
                                 {isFunLocked && (
                                   <span style={{ fontSize: '9px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                    🔒 Locked by Host
-                                  </span>
-                                )}
-                                {!allowFunTools && isHostOrAdmin && (
-                                  <span style={{ fontSize: '9px', background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                    🔓 Disabled for Members
+                                    🔒 Study Mode Active
                                   </span>
                                 )}
                               </div>
@@ -5409,7 +5388,7 @@ function AppContent() {
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
                                     if (isFunLocked) {
-                                      showToast("🔒 Fun tools are disabled by the host.");
+                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
                                       return;
                                     }
                                     setActiveToolDetail('games');
@@ -5434,7 +5413,7 @@ function AppContent() {
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
                                     if (isFunLocked) {
-                                      showToast("🔒 Fun tools are disabled by the host.");
+                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
                                       return;
                                     }
                                     setActiveToolDetail('truthordare');
