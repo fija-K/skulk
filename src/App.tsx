@@ -45,6 +45,7 @@ interface Room {
   link?: string;
   creatorId?: string; // Room creator is the Admin
   creatorName?: string;
+  creatorEmail?: string;
   createdAt?: string;
   currentHostId?: string;
   currentHostName?: string;
@@ -2991,7 +2992,7 @@ function AppContent() {
         if (room.type === 'private') {
           showToast("This room is private. You must use a direct invite link with a secret key to join.");
         } else {
-          if (user && user.isAnonymous) {
+          if (!user || user.isAnonymous) {
             setPendingSignInRoom(room);
           } else {
             setPendingJoinRoom(room);
@@ -3255,7 +3256,7 @@ function AppContent() {
                 showToast("❌ This room is private. You must use a valid direct invite link with a secret key to join.");
                 navigate('/');
               } else {
-                if (user && user.isAnonymous) {
+                if (!user || user.isAnonymous) {
                   setPendingSignInRoom(roomObj);
                   navigate('/');
                 } else {
@@ -3686,13 +3687,14 @@ function AppContent() {
       // Update room metadata in state to sync Firestore room name
       setCurrentRoom(prev => {
         if (!prev) return null;
-        if (prev.name === data.name && prev.creatorName === data.creatorName && prev.type === data.type) {
+        if (prev.name === data.name && prev.creatorName === data.creatorName && prev.creatorEmail === data.creatorEmail && prev.type === data.type) {
           return prev;
         }
         return {
           ...prev,
           name: data.name || prev.name,
           creatorName: data.creatorName || prev.creatorName,
+          creatorEmail: data.creatorEmail || prev.creatorEmail,
           type: data.type || prev.type
         };
       });
@@ -5033,6 +5035,7 @@ function AppContent() {
       link: roomDetails.link,
       creatorId: getMyId(),
       creatorName: user ? user.displayName || 'Google User' : 'Unknown',
+      creatorEmail: user?.email || undefined,
       createdAt: new Date().toISOString(),
       currentHostId: getMyId(),
       currentHostName: user ? user.displayName || 'Google User' : 'Unknown'
@@ -7373,7 +7376,10 @@ function AppContent() {
                   const currentRoomParticipants = roomsParticipants[room.id] || [];
                   const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
                   const currentHostId = room.currentHostId || room.creatorId;
-                  const isAdminHost = currentRoomParticipants.some(p => p.uid === currentHostId && p.role === 'admin');
+                  const isCreatorAdmin = (room.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') || 
+                                         (room.creatorEmail && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(room.creatorEmail.toLowerCase())) ||
+                                         (room.creatorId === getMyId() && isUserAdmin(user));
+                  const isAdminHost = isCreatorAdmin || currentRoomParticipants.some(p => p.uid === currentHostId && p.role === 'admin');
                   const hostLabel = isAdminHost ? 'Admin' : (room.currentHostName || room.creatorName || 'Unknown');
                   
                   return (
@@ -8034,11 +8040,17 @@ function AppContent() {
             <div className="call-room-info">
               <a href="/" onClick={(e) => { e.preventDefault(); handleLeaveCall(); }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
               <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
-              {currentRoom.creatorName && (
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px', display: 'flex', alignItems: 'center' }}>
-                  Created by <strong style={{ marginLeft: '4px', color: 'var(--text-primary)' }}>{currentRoom.creatorName}</strong>
-                </span>
-              )}
+              {currentRoom.creatorName && (() => {
+                const isAdminCreator = (currentRoom.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') ||
+                                       (currentRoom.creatorEmail && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(currentRoom.creatorEmail.toLowerCase())) ||
+                                       (currentRoom.creatorId === getMyId() && isUserAdmin(user));
+                const displayCreatorName = isAdminCreator ? 'Admin' : currentRoom.creatorName;
+                return (
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px', display: 'flex', alignItems: 'center' }}>
+                    Created by <strong style={{ marginLeft: '4px', color: 'var(--text-primary)' }}>{displayCreatorName}</strong>
+                  </span>
+                );
+              })()}
               <div className="recording-dot-wrapper">
                 <div className="recording-dot"></div>
                 <span>LIVE</span>
@@ -9670,10 +9682,10 @@ function AppContent() {
         <div className="modal-overlay" style={{ zIndex: 1200 }}>
           <div className="modal-container animate-fade-in" style={{ maxWidth: '400px', textAlign: 'center', padding: '32px' }}>
             <h3 style={{ fontSize: '18px', marginBottom: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>
-              Sign in to request to join
+              Sign in required
             </h3>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: '1.5' }}>
-              To ask to join **"{pendingSignInRoom.name}"**, please sign in. Guests are only allowed to join public rooms.
+              To ask to join, please sign in. Guests can only join public or private rooms.
             </p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
               <button 
