@@ -67,6 +67,11 @@ interface Participant {
   role?: 'admin' | 'host' | 'cohost' | 'member'; // admin, host, cohost, member
   mutedBy?: string;
   camOffBy?: string;
+  todJoined?: boolean;
+  todPending?: boolean;
+  todRequestedSpin?: number | null;
+  todRequestedChoice?: 'Truth' | 'Dare' | null;
+  todRequestedReset?: number | null;
 }
 
 type ViewingShare = {
@@ -1864,6 +1869,59 @@ function AppContent() {
   const [todActiveIds, setTodActiveIds] = useState<string[]>([]);
   const [todPendingIds, setTodPendingIds] = useState<string[]>([]);
 
+  // Local sync of Truth or Dare active/pending participant states from callParticipants list
+  useEffect(() => {
+    const active = callParticipants.filter(p => p.todJoined).map(p => p.id);
+    const pending = callParticipants.filter(p => p.todPending).map(p => p.id);
+    setTodActiveIds(active);
+    setTodPendingIds(pending);
+  }, [callParticipants]);
+
+  // Host proxy listener for Truth or Dare player spin, choice, and reset requests
+  useEffect(() => {
+    if (!currentRoom) return;
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin' || currentRoom.creatorId === myId;
+    if (!isHost) return;
+    
+    // 1. Check spin requests
+    const spinRequester = callParticipants.find(p => p.todRequestedSpin && p.id !== myId);
+    if (spinRequester && todState === 'idle' && !todLocalSpinning) {
+      const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', spinRequester.id);
+      updateDoc(pRef, { todRequestedSpin: null })
+        .then(() => {
+          handleSpinTruthOrDare();
+        })
+        .catch(e => console.warn("Failed to clear spin request:", e));
+    }
+    
+    // 2. Check choice requests
+    const choiceRequester = callParticipants.find(p => p.todRequestedChoice && p.id !== myId);
+    if (choiceRequester && todState === 'choice') {
+      const choice = choiceRequester.todRequestedChoice;
+      if (choice) {
+        const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', choiceRequester.id);
+        updateDoc(pRef, { todRequestedChoice: null })
+          .then(() => {
+            handleSelectTodChoice(choice);
+          })
+          .catch(e => console.warn("Failed to clear choice request:", e));
+      }
+    }
+    
+    // 3. Check reset requests
+    const resetRequester = callParticipants.find(p => p.todRequestedReset && p.id !== myId);
+    if (resetRequester && (todState === 'reveal' || todState === 'choice')) {
+      const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', resetRequester.id);
+      updateDoc(pRef, { todRequestedReset: null })
+        .then(() => {
+          handleResetTod();
+        })
+        .catch(e => console.warn("Failed to clear reset request:", e));
+    }
+  }, [callParticipants, currentRoom, todState, todLocalSpinning, todSpinPool]);
+
   // Spin the Wheel synced state
   const [spinResult, setSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
   const [spinCheckedIds, setSpinCheckedIds] = useState<string[]>([]);
@@ -3377,6 +3435,11 @@ function AppContent() {
           whiteboardData: data.whiteboardData,
           mutedBy: data.mutedBy || null,
           camOffBy: data.camOffBy || null,
+          todJoined: data.todJoined ?? false,
+          todPending: data.todPending ?? false,
+          todRequestedSpin: data.todRequestedSpin || null,
+          todRequestedChoice: data.todRequestedChoice || null,
+          todRequestedReset: data.todRequestedReset || null,
         } as Participant;
       });
 
@@ -3600,12 +3663,6 @@ function AppContent() {
       }
       if (data.todState !== undefined) {
         setTodState(data.todState);
-      }
-      if (data.todActiveIds !== undefined) {
-        setTodActiveIds(data.todActiveIds || []);
-      }
-      if (data.todPendingIds !== undefined) {
-        setTodPendingIds(data.todPendingIds || []);
       }
       if (data.todChoice !== undefined) {
         setTodChoice(data.todChoice);
@@ -4229,33 +4286,20 @@ function AppContent() {
     if (!currentRoom) return;
     const myId = getMyId();
     try {
-      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
-      await runTransaction(db, async (transaction) => {
-        const roomSnap = await transaction.get(roomRef);
-        if (!roomSnap.exists()) return;
-        const data = roomSnap.data();
-        
-        const state = data.todState || 'idle';
-        const isSpinning = state !== 'idle';
-        
-        if (isSpinning) {
-          const pending = data.todPendingIds || [];
-          if (!pending.includes(myId)) {
-            transaction.update(roomRef, {
-              todPendingIds: [...pending, myId]
-            });
-          }
-        } else {
-          const active = data.todActiveIds || [];
-          const currentPool = data.todSpinPool || [];
-          if (!active.includes(myId)) {
-            transaction.update(roomRef, {
-              todActiveIds: [...active, myId],
-              todSpinPool: [...currentPool, myId]
-            });
-          }
-        }
-      });
+      const isSpinning = todState !== 'idle';
+      const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId);
+      
+      if (isSpinning) {
+        await updateDoc(pRef, {
+          todPending: true,
+          todJoined: false
+        });
+      } else {
+        await updateDoc(pRef, {
+          todJoined: true,
+          todPending: false
+        });
+      }
       showToast("Joined Truth or Dare game!");
     } catch (e) {
       console.warn("Failed to join Truth or Dare game:", e);
@@ -4266,22 +4310,21 @@ function AppContent() {
     if (!currentRoom) return;
     const myId = getMyId();
     try {
-      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
-      await runTransaction(db, async (transaction) => {
-        const roomSnap = await transaction.get(roomRef);
-        if (!roomSnap.exists()) return;
-        const data = roomSnap.data();
-        
-        const active = data.todActiveIds || [];
-        const pending = data.todPendingIds || [];
-        const pool = data.todSpinPool || [];
-        
-        transaction.update(roomRef, {
-          todActiveIds: active.filter((id: string) => id !== myId),
-          todPendingIds: pending.filter((id: string) => id !== myId),
-          todSpinPool: pool.filter((id: string) => id !== myId)
-        });
+      const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId);
+      await updateDoc(pRef, {
+        todJoined: false,
+        todPending: false
       });
+      
+      // Keep todSpinPool in sync if host
+      const myPresence = callParticipants.find(p => p.id === myId);
+      const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin' || currentRoom.creatorId === myId;
+      if (isHost) {
+        const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
+        await updateDoc(roomRef, {
+          todSpinPool: todSpinPool.filter(id => id !== myId)
+        });
+      }
       showToast("Left Truth or Dare game.");
     } catch (e) {
       console.warn("Failed to leave Truth or Dare game:", e);
@@ -4291,6 +4334,23 @@ function AppContent() {
   const handleSpinTruthOrDare = async () => {
     if (!currentRoom || callParticipants.length === 0) return;
     const myId = getMyId();
+
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin' || currentRoom.creatorId === myId;
+
+    if (!isHost) {
+      // Non-host: write spin request to my participant document
+      try {
+        const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId);
+        await updateDoc(pRef, {
+          todRequestedSpin: Date.now()
+        });
+        showToast("Spin requested...");
+      } catch (e) {
+        console.warn("Failed to request spin:", e);
+      }
+      return;
+    }
 
     try {
       const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
@@ -4304,9 +4364,8 @@ function AppContent() {
           throw new Error("Spin in progress");
         }
         
-        const activeIds = (data.todActiveIds || [])
-          .filter((id: string) => callParticipants.some(p => p.id === id));
-          
+        // Filter active IDs against presence list to handle departed users
+        const activeIds = callParticipants.filter(p => p.todJoined).map(p => p.id);
         if (activeIds.length === 0) {
           throw new Error("No active participants in game");
         }
@@ -4362,6 +4421,24 @@ function AppContent() {
     if (!currentRoom) return;
     const questions = choice === 'Truth' ? truthQuestions : dareQuestions;
     const randomText = questions[Math.floor(Math.random() * questions.length)];
+    
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin' || currentRoom.creatorId === myId;
+    
+    if (!isHost) {
+      try {
+        const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId);
+        await updateDoc(pRef, {
+          todRequestedChoice: choice
+        });
+        showToast(`Choice requested: ${choice}`);
+      } catch (e) {
+        console.warn("Failed to request choice:", e);
+      }
+      return;
+    }
+
     try {
       await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
         todState: 'reveal',
@@ -4375,6 +4452,24 @@ function AppContent() {
 
   const handleResetTod = async () => {
     if (!currentRoom) return;
+    
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin' || currentRoom.creatorId === myId;
+    
+    if (!isHost) {
+      try {
+        const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId);
+        await updateDoc(pRef, {
+          todRequestedReset: Date.now()
+        });
+        showToast("Reset requested...");
+      } catch (e) {
+        console.warn("Failed to request reset:", e);
+      }
+      return;
+    }
+
     try {
       const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
       await runTransaction(db, async (transaction) => {
@@ -4382,23 +4477,28 @@ function AppContent() {
         if (!roomSnap.exists()) return;
         const data = roomSnap.data();
         
-        const pending = data.todPendingIds || [];
-        const active = data.todActiveIds || [];
-        const newActive = [...new Set([...active, ...pending])];
-        
+        // Find all pending participants from the presence list
+        const pendingIds = callParticipants.filter(p => p.todPending).map(p => p.id);
         const currentPool = data.todSpinPool || [];
-        const newPool = [...new Set([...currentPool, ...pending])];
+        const newPool = [...new Set([...currentPool, ...pendingIds])];
         
         transaction.update(roomRef, {
           todState: 'idle',
           todChoice: null,
           todText: '',
           todSelectedId: '',
-          todActiveIds: newActive,
-          todPendingIds: [],
           todSpinPool: newPool,
           todSpinInProgress: false
         });
+
+        // Promote pending participants to joined
+        for (const pId of pendingIds) {
+          const pRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', pId);
+          transaction.update(pRef, {
+            todJoined: true,
+            todPending: false
+          });
+        }
       });
     } catch (e) {
       console.warn("Failed to reset Truth or Dare:", e);
@@ -6468,7 +6568,7 @@ function AppContent() {
                 Joined ({n}/{callParticipants.length})
               </span>
               <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-                Pool: {todSpinPool.length} left
+                Pool: {todSpinPool.filter(id => activeIds.includes(id)).length} left
               </span>
             </div>
 
