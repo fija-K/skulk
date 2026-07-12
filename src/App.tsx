@@ -394,54 +394,90 @@ function createWrappedPlayer(
   }
 
   if (platform === 'dailymotion') {
-    return loadPlatformScript('dailymotion', 'https://api.dmcdn.net/all.js').then(() => {
-      const container = document.getElementById(elementId);
-      if (!container) throw new Error("Dailymotion container not found");
-      container.innerHTML = '';
+    const container = document.getElementById(elementId);
+    if (!container) throw new Error("Dailymotion container not found");
+    container.innerHTML = '';
 
-      const playerDiv = document.createElement('div');
-      playerDiv.id = `dm-player-inner-${Math.random().toString(36).substring(2, 9)}`;
-      playerDiv.style.width = '100%';
-      playerDiv.style.height = '100%';
-      container.appendChild(playerDiv);
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=${isPresenter ? 1 : 0}&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+    container.appendChild(iframe);
 
-      const player = (window as any).DM.player(playerDiv, {
-        video: videoId,
-        width: '100%',
-        height: '100%',
-        params: {
-          autoplay: true,
-          controls: isPresenter,
-          mute: !isPresenter
-        }
-      });
-
-      return new Promise<AbstractPlayer>((resolve) => {
-        player.addEventListener('apiready', () => {
-          if (isPresenter) {
-            player.addEventListener('play', () => {
-              onStateChange(true, player.currentTime);
-            });
-            player.addEventListener('pause', () => {
-              onStateChange(false, player.currentTime);
-            });
-            player.addEventListener('seeked', () => {
-              onStateChange(true, player.currentTime);
-            });
+    let playerState = 2; // 2 = paused, 1 = playing
+    let currentTime = 0;
+    
+    // Listen to messages from Dailymotion iframe
+    const messageListener = (event: MessageEvent) => {
+      if (!event.origin.includes('dailymotion.com')) return;
+      
+      try {
+        let eventName = '';
+        let timeVal = currentTime;
+        
+        if (typeof event.data === 'string') {
+          if (event.data.startsWith('event=')) {
+            const params = new URLSearchParams(event.data);
+            eventName = params.get('event') || '';
+            timeVal = parseFloat(params.get('time') || String(currentTime));
+          } else {
+            try {
+              const parsed = JSON.parse(event.data);
+              eventName = parsed.event || '';
+              timeVal = parsed.time !== undefined ? parsed.time : currentTime;
+            } catch (e) {}
           }
+        } else if (event.data && typeof event.data === 'object') {
+          eventName = event.data.event || '';
+          timeVal = event.data.time !== undefined ? event.data.time : currentTime;
+        }
+        
+        if (eventName) {
+          if (eventName === 'play') {
+            playerState = 1;
+            onStateChange(true, timeVal);
+          } else if (eventName === 'pause') {
+            playerState = 2;
+            onStateChange(false, timeVal);
+          } else if (eventName === 'timeupdate' || eventName === 'progress') {
+            currentTime = timeVal;
+          } else if (eventName === 'seeked') {
+            currentTime = timeVal;
+            onStateChange(playerState === 1, timeVal);
+          }
+        }
+      } catch (e) {}
+    };
 
-          resolve({
-            play: () => player.play(),
-            pause: () => player.pause(),
-            seekTo: (sec) => player.seek(sec),
-            getCurrentTime: () => player.currentTime || 0,
-            getPlayerState: () => player.paused ? 2 : 1,
-            destroy: () => {
-              container.innerHTML = '';
-            }
-          });
-        });
-      });
+    window.addEventListener('message', messageListener);
+
+    return Promise.resolve({
+      play: () => {
+        try {
+          iframe.contentWindow?.postMessage('play', '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
+        } catch (e) {}
+      },
+      pause: () => {
+        try {
+          iframe.contentWindow?.postMessage('pause', '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
+        } catch (e) {}
+      },
+      seekTo: (sec) => {
+        try {
+          iframe.contentWindow?.postMessage(`seek=${sec}`, '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', value: sec }), '*');
+        } catch (e) {}
+      },
+      getCurrentTime: () => currentTime,
+      getPlayerState: () => playerState,
+      destroy: () => {
+        window.removeEventListener('message', messageListener);
+        container.innerHTML = '';
+      }
     });
   }
 
@@ -518,6 +554,36 @@ function UniversalVideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<AbstractPlayer | null>(null);
   const isLocalChangeRef = useRef(false);
+  const lastPresenterDataRef = useRef<any>(null);
+
+  const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
+    if (isPresenter || isLive) return;
+    const targetPlaying = data.ytPlaying ?? false;
+    const targetTime = data.ytTime ?? 0;
+    const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
+    
+    let correctedTime = targetTime;
+    if (targetPlaying && targetTimestamp) {
+      const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
+      correctedTime += elapsedSeconds;
+    }
+
+    isLocalChangeRef.current = true;
+    try {
+      const currentState = await player.getPlayerState();
+      if (targetPlaying && currentState !== 1) {
+        player.play();
+      } else if (!targetPlaying && currentState === 1) {
+        player.pause();
+      }
+
+      const currentTime = await player.getCurrentTime();
+      if (Math.abs(currentTime - correctedTime) > 2) {
+        player.seekTo(correctedTime);
+      }
+    } catch (e) {}
+    isLocalChangeRef.current = false;
+  };
 
   useEffect(() => {
     let active = true;
@@ -550,6 +616,11 @@ function UniversalVideoPlayer({
         return;
       }
       playerRef.current = wrappedPlayer;
+
+      // Sync to latest presenter state immediately when player mounts
+      if (!isPresenter && lastPresenterDataRef.current) {
+        syncToPresenterState(lastPresenterDataRef.current, wrappedPlayer);
+      }
     }).catch(err => {
       console.error("Failed to load player:", err);
     });
@@ -575,6 +646,7 @@ function UniversalVideoPlayer({
     }
   };
 
+  // Host playback periodic updates
   useEffect(() => {
     if (!isPresenter || isLive) return;
 
@@ -593,58 +665,61 @@ function UniversalVideoPlayer({
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
 
+  // Viewer Firestore snapshot listener
   useEffect(() => {
     if (isPresenter || isLive) return;
 
     const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
     const unsubscribe = onSnapshot(partRef, async (snapshot) => {
-      if (!snapshot.exists() || !playerRef.current) return;
-      
+      if (!snapshot.exists()) return;
       const data = snapshot.data();
-      const targetPlaying = data.ytPlaying ?? false;
-      const targetTime = data.ytTime ?? 0;
-      const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
-      
-      let correctedTime = targetTime;
-      if (targetPlaying && targetTimestamp) {
-        const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
-        correctedTime += elapsedSeconds;
-      }
+      lastPresenterDataRef.current = data;
 
-      isLocalChangeRef.current = true;
-
-      try {
-        const currentState = await playerRef.current.getPlayerState();
-        if (targetPlaying && currentState !== 1) {
-          playerRef.current.play();
-        } else if (!targetPlaying && currentState === 1) {
-          playerRef.current.pause();
-        }
-
-        const currentTime = await playerRef.current.getCurrentTime();
-        if (Math.abs(currentTime - correctedTime) > 2) {
-          playerRef.current.seekTo(correctedTime);
-        }
-      } catch (e) {}
-
-      isLocalChangeRef.current = false;
+      if (!playerRef.current) return;
+      syncToPresenterState(data, playerRef.current);
     });
 
     return () => unsubscribe();
   }, [isPresenter, presenterId, roomId, isLive]);
 
+  // Viewer proactive local force sync interval
+  useEffect(() => {
+    if (isPresenter || isLive) return;
+
+    const interval = setInterval(() => {
+      if (playerRef.current && lastPresenterDataRef.current) {
+        syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isPresenter, isLive]);
+
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        position: 'relative', 
-        borderRadius: 'var(--border-radius)', 
-        overflow: 'hidden',
-        backgroundColor: '#000'
-      }} 
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div 
+        ref={containerRef} 
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          borderRadius: 'var(--border-radius)', 
+          overflow: 'hidden',
+          backgroundColor: '#000'
+        }} 
+      />
+      {!isPresenter && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 10,
+          background: 'transparent',
+          cursor: 'not-allowed'
+        }} />
+      )}
+    </div>
   );
 }
 
@@ -2604,6 +2679,8 @@ function AppContent() {
   };
 
   const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+  const myPresence = callParticipants.find(p => p.id === getMyId());
+  const hasControl = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
 
   const updateMySharing = async (fields: Record<string, unknown>) => {
     const myId = getMyId();
@@ -5054,86 +5131,204 @@ function AppContent() {
     const showCamOff = isUser ? isCamOff : p.isCamOff;
     const isSpeaking = p.isSpeaking && !showMuted;
     
+    // Check if we should do a full profile takeover for media sharing
+    const showMediaTakeover = !isThumbnail && p.sharing === 'youtube';
+    
     return (
       <div 
         key={p.id} 
-        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''}`}
+        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''} ${showMediaTakeover ? 'media-takeover-active' : ''}`}
         onClick={() => {
           if (isThumbnail) {
             setSpotlightParticipantId(p.id);
+          } else if (p.sharing) {
+            handleViewParticipantShare(p);
           } else if (!spotlightParticipantId) {
             setSpotlightParticipantId(p.id);
           }
         }}
-        style={{ cursor: 'pointer' }}
+        style={{ 
+          cursor: 'pointer',
+          ...showMediaTakeover ? {
+            boxShadow: '0 0 20px rgba(241, 196, 15, 0.4)',
+            border: '2px solid var(--primary-color)',
+            background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+          } : {}
+        }}
       >
-        {isGalleryView && !isThumbnail ? (
-          // Gallery Layout: Full Card Video/Avatar
-          !showCamOff ? (
-            <>
-              {isUser && cameraError ? (
-                // Refined camera error display: show PFP/initials background + a small centered retry box!
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  {p.photoURL ? (
-                    <img 
-                      src={p.photoURL} 
-                      alt={p.name} 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
-                  )}
-                  <div 
+        {showMediaTakeover ? (
+          /* FULL PROFILE TAKEOVER FOR MEDIA PLAYING */
+          <div 
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px',
+              padding: '16px',
+              zIndex: 5
+            }}
+          >
+            {/* Pulsing media play icon */}
+            <div style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(241, 196, 15, 0.15)',
+              border: '2px dashed var(--primary-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              animation: 'pulse 2s infinite'
+            }}>
+              <span style={{ fontSize: '24px', color: 'var(--primary-color)', marginLeft: '4px' }}>▶</span>
+            </div>
+            
+            <span style={{ 
+              fontSize: '11px', 
+              fontWeight: 800, 
+              color: 'var(--primary-color)', 
+              letterSpacing: '0.12em', 
+              textTransform: 'uppercase',
+              textAlign: 'center' 
+            }}>
+              Watching Together
+            </span>
+            <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
+              Click avatar to join
+            </span>
+          </div>
+        ) : (
+          /* STANDARD PARTICIPANT TILE RENDER */
+          (!showCamOff || isGalleryView) && !isThumbnail ? (
+            // Gallery Layout or camera is ON: Full Card Video/Avatar
+            !showCamOff ? (
+              <>
+                {isUser && cameraError ? (
+                  // Refined camera error display: show PFP/initials background + a small centered retry box!
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    {p.photoURL ? (
+                      <img 
+                        src={p.photoURL} 
+                        alt={p.name} 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                    )}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                      }}
+                      style={{
+                        position: 'absolute',
+                        padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
+                        border: '1px solid var(--border-color)', borderRadius: '6px',
+                        cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+                    </div>
+                  </div>
+                ) : (
+                  <ParticipantVideo participantId={p.id} />
+                )}
+                
+                {p.sharing && (
+                  <div className="sharing-badge-overlay" style={{
+                    position: 'absolute',
+                    bottom: '12px',
+                    right: '12px',
+                    backgroundColor: 'var(--primary-color)',
+                    color: '#0f1013',
+                    borderRadius: '50%',
+                    width: '22px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    border: '2px solid var(--card-bg, #1a1c23)',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                    zIndex: 10
+                  }} title={`Sharing ${p.sharing} - click to view`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                    }}
-                    style={{
-                      position: 'absolute',
-                      padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
-                      border: '1px solid var(--border-color)', borderRadius: '6px',
-                      cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
+                      handleViewParticipantShare(p);
                     }}
                   >
-                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
-                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
                   </div>
-                </div>
-              ) : (
-                <ParticipantVideo participantId={p.id} />
-              )}
-              
-              {p.sharing && (
-                <div className="sharing-badge-overlay" style={{
-                  position: 'absolute',
-                  bottom: '12px',
-                  right: '12px',
-                  backgroundColor: 'var(--primary-color)',
-                  color: '#0f1013',
+                )}
+              </>
+            ) : (
+              /* Avatar Square (Gallery Mode) */
+              <div 
+                className="participant-avatar-large" 
+                style={{ 
+                  backgroundColor: p.color, 
+                  cursor: p.sharing ? 'pointer' : 'default',
+                  position: 'relative',
+                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                  overflow: 'hidden',
+                  width: '96px',
+                  height: '96px',
                   borderRadius: '50%',
-                  width: '22px',
-                  height: '22px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  border: '2px solid var(--card-bg, #1a1c23)',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                  zIndex: 10
-                }} title={`Sharing ${p.sharing} - click to view`}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  fontSize: '32px',
+                  marginBottom: '0'
+                }}
+                onClick={() => {
+                  if (p.sharing) {
                     handleViewParticipantShare(p);
-                  }}
-                >
-                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                </div>
-              )}
-            </>
+                  }
+                }}
+              >
+                {p.photoURL ? (
+                  <img 
+                    src={p.photoURL} 
+                    alt={p.name} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  p.initials
+                )}
+                {p.sharing && (
+                  <div className="sharing-badge-overlay" style={{
+                    position: 'absolute',
+                    bottom: '-6px',
+                    right: '-6px',
+                    backgroundColor: 'var(--primary-color)',
+                    color: '#0f1013',
+                    borderRadius: '50%',
+                    width: '22px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    border: '2px solid var(--card-bg, #1a1c23)',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                    zIndex: 10
+                  }} title={`Sharing ${p.sharing} - click to view`}>
+                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                  </div>
+                )}
+              </div>
+            )
           ) : (
-            /* Avatar Square (Gallery Mode) */
+            // Compact Grid Layout OR Thumbnail view: Floating Avatar
             <div 
               className="participant-avatar-large" 
               style={{ 
@@ -5143,19 +5338,13 @@ function AppContent() {
                 boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
                 border: p.sharing ? '2px solid var(--primary-color)' : 'none',
                 overflow: 'hidden',
-                width: '96px',
-                height: '96px',
-                borderRadius: '50%',
-                fontSize: '32px',
-                marginBottom: '0'
-              }}
-              onClick={() => {
-                if (p.sharing) {
-                  handleViewParticipantShare(p);
-                }
+                // Shrink for thumbnail strip
+                ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
               }}
             >
-              {p.photoURL ? (
+              {!showCamOff && !(isUser && cameraError) ? (
+                <ParticipantVideo participantId={p.id} />
+              ) : p.photoURL ? (
                 <img 
                   src={p.photoURL} 
                   alt={p.name} 
@@ -5165,6 +5354,32 @@ function AppContent() {
               ) : (
                 p.initials
               )}
+              
+              {/* Clickable Retry warning indicator in compact view */}
+              {isUser && !showCamOff && cameraError && (
+                <div 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                  }}
+                  style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', zIndex: 15,
+                    cursor: 'pointer'
+                  }} 
+                  title="Camera error - check hardware switch and click to retry"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
+                    <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
+                    <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
+                    <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
+                  </svg>
+                  <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
+                </div>
+              )}
+    
               {p.sharing && (
                 <div className="sharing-badge-overlay" style={{
                   position: 'absolute',
@@ -5189,87 +5404,6 @@ function AppContent() {
               )}
             </div>
           )
-        ) : (
-          // Compact Grid Layout OR Thumbnail view: Floating Avatar
-          <div 
-            className="participant-avatar-large" 
-            style={{ 
-              backgroundColor: p.color, 
-              cursor: p.sharing ? 'pointer' : 'default',
-              position: 'relative',
-              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-              overflow: 'hidden',
-              // Shrink for thumbnail strip
-              ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
-            }}
-            onClick={() => {
-              if (p.sharing) {
-                handleViewParticipantShare(p);
-              }
-            }}
-          >
-            {!showCamOff && !(isUser && cameraError) ? (
-              <ParticipantVideo participantId={p.id} />
-            ) : p.photoURL ? (
-              <img 
-                src={p.photoURL} 
-                alt={p.name} 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              p.initials
-            )}
-            
-            {/* Clickable Retry warning indicator in compact view */}
-            {isUser && !showCamOff && cameraError && (
-              <div 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                }}
-                style={{
-                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center', zIndex: 15,
-                  cursor: 'pointer'
-                }} 
-                title="Camera error - check hardware switch and click to retry"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
-                  <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
-                  <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
-                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
-                </svg>
-                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
-              </div>
-            )}
-  
-            {p.sharing && (
-              <div className="sharing-badge-overlay" style={{
-                position: 'absolute',
-                bottom: '-6px',
-                right: '-6px',
-                backgroundColor: 'var(--primary-color)',
-                color: '#0f1013',
-                borderRadius: '50%',
-                width: '22px',
-                height: '22px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                border: '2px solid var(--card-bg, #1a1c23)',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                zIndex: 10
-              }} title={`Sharing ${p.sharing} - click to view`}>
-                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-              </div>
-            )}
-          </div>
         )}
         
         {/* Name Tag + Muted Status */}
@@ -7642,178 +7776,218 @@ function AppContent() {
             {/* Call Main Stage (Left) */}
             <div className="call-stage">
               {expandedTool !== 'none' ? (
-                <div className="expanded-tool-stage-wrapper animate-fade-in" style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  height: '100%',
-                  backgroundColor: 'var(--card-bg)',
-                  borderRadius: 'var(--border-radius)',
-                  border: '1px solid var(--border-color)',
-                  overflow: 'hidden',
-                  position: 'relative'
-                }}>
-                  {/* Expanded Header */}
-                  <div style={{
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+                  <div className="expanded-tool-stage-wrapper animate-fade-in" style={{
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 16px',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                    backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                    flexDirection: 'column',
+                    flex: 1,
+                    backgroundColor: 'var(--card-bg)',
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid var(--border-color)',
+                    overflow: 'hidden',
+                    position: 'relative'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '16px' }}>
-                        {expandedTool === 'pomodoro' && '⏱️'}
-                        {expandedTool === 'deadline' && '⏳'}
-                        {expandedTool === 'loose' && '🔄'}
-                        {expandedTool === 'truthordare' && '🎲'}
-                        {expandedTool === 'spin' && '🎡'}
-                      </span>
-                      <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)' }}>
-                        {expandedTool === 'pomodoro' && 'Pomodoro Timer'}
-                        {expandedTool === 'deadline' && 'Deadline Clock'}
-                        {expandedTool === 'loose' && 'Loose Timer (Study Flow)'}
-                        {expandedTool === 'truthordare' && 'Truth or Dare'}
-                        {expandedTool === 'spin' && 'Spin the Wheel'}
-                      </span>
+                    {/* Expanded Header */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                      backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '16px' }}>
+                          {expandedTool === 'pomodoro' && '⏱️'}
+                          {expandedTool === 'deadline' && '⏳'}
+                          {expandedTool === 'loose' && '🔄'}
+                          {expandedTool === 'truthordare' && '🎲'}
+                          {expandedTool === 'spin' && '🎡'}
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)' }}>
+                          {expandedTool === 'pomodoro' && 'Pomodoro Timer'}
+                          {expandedTool === 'deadline' && 'Deadline Clock'}
+                          {expandedTool === 'loose' && 'Loose Timer (Study Flow)'}
+                          {expandedTool === 'truthordare' && 'Truth or Dare'}
+                          {expandedTool === 'spin' && 'Spin the Wheel'}
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => setExpandedTool('none')} 
+                        className="btn-signin" 
+                        style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        title="Collapse to sidebar"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="4 14 10 14 10 20"></polyline>
+                          <polyline points="20 10 14 10 14 4"></polyline>
+                          <line x1="14" y1="10" x2="21" y2="3"></line>
+                          <line x1="10" y1="14" x2="3" y2="21"></line>
+                        </svg>
+                        Collapse
+                      </button>
                     </div>
-                    <button 
-                      onClick={() => setExpandedTool('none')} 
-                      className="btn-signin" 
-                      style={{ padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                      title="Collapse to sidebar"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="4 14 10 14 10 20"></polyline>
-                        <polyline points="20 10 14 10 14 4"></polyline>
-                        <line x1="14" y1="10" x2="21" y2="3"></line>
-                        <line x1="10" y1="14" x2="3" y2="21"></line>
-                      </svg>
-                      Collapse
-                    </button>
+                    {/* Expanded Content Container */}
+                    <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: '100%', maxWidth: '640px', display: 'flex', flexDirection: 'column' }}>
+                        {expandedTool === 'pomodoro' && renderPomodoroUI(true)}
+                        {expandedTool === 'deadline' && renderDeadlineUI(true)}
+                        {expandedTool === 'loose' && renderLooseTimerUI(true)}
+                        {expandedTool === 'truthordare' && renderTruthOrDareUI(true)}
+                        {expandedTool === 'spin' && renderSpinWheelUI(true)}
+                      </div>
+                    </div>
                   </div>
-                  {/* Expanded Content Container */}
-                  <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ width: '100%', maxWidth: '640px', display: 'flex', flexDirection: 'column' }}>
-                      {expandedTool === 'pomodoro' && renderPomodoroUI(true)}
-                      {expandedTool === 'deadline' && renderDeadlineUI(true)}
-                      {expandedTool === 'loose' && renderLooseTimerUI(true)}
-                      {expandedTool === 'truthordare' && renderTruthOrDareUI(true)}
-                      {expandedTool === 'spin' && renderSpinWheelUI(true)}
-                    </div>
+                  
+                  {/* Bottom Participant Strip */}
+                  <div className="screenshare-tiles-strip" style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    gap: '12px',
+                    overflowX: 'auto',
+                    padding: '8px 4px',
+                    height: '110px',
+                    alignItems: 'center',
+                    backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid var(--border-color)',
+                    scrollbarWidth: 'thin'
+                  }}>
+                    {callParticipants.map((p) => renderParticipantTile(p, true))}
                   </div>
                 </div>
               ) : viewingShare ? (
-                viewingShare.type === 'whiteboard' ? (
-                <div className="whiteboard-container">
-                  <div className="whiteboard-toolbar">
-                    <div className="whiteboard-tools-left">
-                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                        Whiteboard {viewingShare.participantId !== getMyId() ? `(viewing ${callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'participant'})` : '(You)'}
-                      </span>
-                      {viewingShare.participantId === getMyId() && (
-                      <div className="whiteboard-color-pickers">
-                        {['#f1c40f', '#ef4444', '#10b981', '#3b82f6', '#ffffff'].map(color => (
-                          <div 
-                            key={color}
-                            className={`whiteboard-color-dot ${drawColor === color ? 'selected' : ''}`}
-                            style={{ backgroundColor: color }}
-                            onClick={() => setDrawColor(color)}
-                            title={`Select ${color} pen`}
-                          />
-                        ))}
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+                  <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                    {viewingShare.type === 'whiteboard' ? (
+                      <div className="whiteboard-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <div className="whiteboard-toolbar">
+                          <div className="whiteboard-tools-left">
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              Whiteboard {viewingShare.participantId !== getMyId() ? `(viewing ${callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'participant'})` : '(You)'}
+                            </span>
+                            {viewingShare.participantId === getMyId() && (
+                            <div className="whiteboard-color-pickers">
+                              {['#f1c40f', '#ef4444', '#10b981', '#3b82f6', '#ffffff'].map(color => (
+                                <div 
+                                  key={color}
+                                  className={`whiteboard-color-dot ${drawColor === color ? 'selected' : ''}`}
+                                  style={{ backgroundColor: color }}
+                                  onClick={() => setDrawColor(color)}
+                                  title={`Select ${color} pen`}
+                                />
+                              ))}
+                            </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {viewingShare.participantId === getMyId() && (
+                              <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
+                                Clear
+                              </button>
+                            )}
+                            <button 
+                              onClick={async () => {
+                                if (viewingShare.participantId === getMyId()) {
+                                  await clearMySharing();
+                                }
+                                setViewingShare(null);
+                              }} 
+                              className="btn-create" 
+                              style={{ padding: '6px 12px', fontSize: '12px' }}
+                            >
+                              {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
+                            </button>
+                          </div>
+                        </div>
+                        <canvas 
+                          ref={canvasRef}
+                          className="whiteboard-canvas"
+                          onMouseDown={viewingShare.participantId === getMyId() ? startDrawing : undefined}
+                          onMouseMove={viewingShare.participantId === getMyId() ? draw : undefined}
+                          onMouseUp={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                          onMouseLeave={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                          onTouchStart={viewingShare.participantId === getMyId() ? startDrawingTouch : undefined}
+                          onTouchMove={viewingShare.participantId === getMyId() ? drawTouch : undefined}
+                          onTouchEnd={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
+                          style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default', flex: 1, height: 'auto' }}
+                        />
                       </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      {viewingShare.participantId === getMyId() && (
-                        <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
-                          Clear
-                        </button>
-                      )}
-                      <button 
-                        onClick={async () => {
-                          if (viewingShare.participantId === getMyId()) {
-                            await clearMySharing();
-                          }
-                          setViewingShare(null);
-                        }} 
-                        className="btn-create" 
-                        style={{ padding: '6px 12px', fontSize: '12px' }}
-                      >
-                        {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
-                      </button>
-                    </div>
-                  </div>
-                  <canvas 
-                    ref={canvasRef}
-                    className="whiteboard-canvas"
-                    onMouseDown={viewingShare.participantId === getMyId() ? startDrawing : undefined}
-                    onMouseMove={viewingShare.participantId === getMyId() ? draw : undefined}
-                    onMouseUp={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                    onMouseLeave={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                    onTouchStart={viewingShare.participantId === getMyId() ? startDrawingTouch : undefined}
-                    onTouchMove={viewingShare.participantId === getMyId() ? drawTouch : undefined}
-                    onTouchEnd={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                    style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default' }}
-                  />
-                </div>
-              ) : (
-                <div className="screenshare-stage-layout animate-fade-in">
-                  <div className="screenshare-video-wrapper">
-                    {viewingShare.type === 'screen' ? (
-                      <ScreenShareVideo participantId={viewingShare.participantId} />
-                    ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
-                      (() => {
-                        const parsed = parseMediaUrl(viewingShare.youtubeVideoId);
-                        if (parsed) {
-                          return (
-                            <UniversalVideoPlayer
-                              videoId={parsed.videoId}
-                              platform={parsed.platform}
-                              isLive={parsed.isLive ?? false}
-                              isPresenter={viewingShare.participantId === getMyId()}
-                              presenterId={viewingShare.participantId}
-                              roomId={roomDocId(currentRoom!)}
-                              myId={getMyId()}
-                            />
-                          );
-                        } else {
-                          return (
+                    ) : (
+                      <div className="screenshare-stage-layout animate-fade-in" style={{ height: '100%' }}>
+                        <div className="screenshare-video-wrapper">
+                          {viewingShare.type === 'screen' ? (
+                            <ScreenShareVideo participantId={viewingShare.participantId} />
+                          ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
+                            (() => {
+                              const parsed = parseMediaUrl(viewingShare.youtubeVideoId);
+                              if (parsed) {
+                                return (
+                                  <UniversalVideoPlayer
+                                    videoId={parsed.videoId}
+                                    platform={parsed.platform}
+                                    isLive={parsed.isLive ?? false}
+                                    isPresenter={viewingShare.participantId === getMyId()}
+                                    presenterId={viewingShare.participantId}
+                                    roomId={roomDocId(currentRoom!)}
+                                    myId={getMyId()}
+                                  />
+                                );
+                              } else {
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                                    Content unavailable
+                                  </div>
+                                );
+                              }
+                            })()
+                          ) : (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
                               Content unavailable
                             </div>
-                          );
-                        }
-                      })()
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-                        Content unavailable
+                          )}
+                          <button 
+                            onClick={async () => {
+                              if (viewingShare.participantId === getMyId()) {
+                                if (viewingShare.type === 'screen') {
+                                  await stopScreenShare();
+                                } else if (viewingShare.type === 'youtube') {
+                                  setYoutubeVideoId(null);
+                                  await clearMySharing();
+                                  setViewingShare(null);
+                                  showToast('YouTube sharing stopped');
+                                }
+                              } else {
+                                setViewingShare(null);
+                              }
+                            }} 
+                            className="btn-create" 
+                            style={{ position: 'absolute', top: '12px', right: '12px', padding: '6px 12px', fontSize: '12px', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                          >
+                            {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
+                          </button>
+                        </div>
                       </div>
                     )}
-                    <button 
-                      onClick={async () => {
-                        if (viewingShare.participantId === getMyId()) {
-                          if (viewingShare.type === 'screen') {
-                            await stopScreenShare();
-                          } else if (viewingShare.type === 'youtube') {
-                            setYoutubeVideoId(null);
-                            await clearMySharing();
-                            setViewingShare(null);
-                            showToast('YouTube sharing stopped');
-                          }
-                        } else {
-                          setViewingShare(null);
-                        }
-                      }} 
-                      className="btn-create" 
-                      style={{ position: 'absolute', top: '12px', right: '12px', padding: '6px 12px', fontSize: '12px', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
-                    >
-                      {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
-                    </button>
+                  </div>
+                  
+                  {/* Bottom Participant Strip */}
+                  <div className="screenshare-tiles-strip" style={{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    gap: '12px',
+                    overflowX: 'auto',
+                    padding: '8px 4px',
+                    height: '110px',
+                    alignItems: 'center',
+                    backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid var(--border-color)',
+                    scrollbarWidth: 'thin'
+                  }}>
+                    {callParticipants.map((p) => renderParticipantTile(p, true))}
                   </div>
                 </div>
-              )
               ) : (
                 /* Standard conference participants grid layout display */
                 <>
@@ -8473,7 +8647,7 @@ function AppContent() {
                         </div>
 
                         {/* Platform Tabs Selection */}
-                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap', opacity: hasControl ? 1 : 0.5, pointerEvents: hasControl ? 'auto' : 'none' }}>
                           {(['youtube', 'vimeo', 'dailymotion', 'twitch'] as const).map((plat) => (
                             <button
                               key={plat}
@@ -8501,36 +8675,44 @@ function AppContent() {
                           ))}
                         </div>
 
-                        <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <div className="form-group">
-                            <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
-                              {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
-                               watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
-                               watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
-                               'Twitch Channel or VOD URL'}
-                            </label>
-                            <input 
-                              type="text"
-                              id="ytUrl"
-                              placeholder={
-                                watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
-                                watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
-                                watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
-                                'e.g. https://www.twitch.tv/twitch'
-                              }
-                              className="search-input"
-                              style={{ paddingLeft: '12px', fontSize: '13px' }}
-                              value={ytInputUrl}
-                              onChange={(e) => setYtInputUrl(e.target.value)}
-                              required
-                            />
+                        {hasControl ? (
+                          <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div className="form-group">
+                              <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                                {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
+                                 watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
+                                 watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
+                                 'Twitch Channel or VOD URL'}
+                              </label>
+                              <input 
+                                type="text"
+                                id="ytUrl"
+                                placeholder={
+                                  watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
+                                  watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
+                                  watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
+                                  'e.g. https://www.twitch.tv/twitch'
+                                }
+                                className="search-input"
+                                style={{ paddingLeft: '12px', fontSize: '13px' }}
+                                value={ytInputUrl}
+                                onChange={(e) => setYtInputUrl(e.target.value)}
+                                required
+                              />
+                            </div>
+                            <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
+                              Load Media
+                            </button>
+                          </form>
+                        ) : (
+                          <div style={{ padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.1)', textAlign: 'center' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                              🔒 Only hosts and co-hosts can control the video.
+                            </span>
                           </div>
-                          <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
-                            Load Media
-                          </button>
-                        </form>
+                        )}
                         
-                        {youtubeVideoId && (
+                        {youtubeVideoId && hasControl && (
                           <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Currently Playing Video ID: <strong>{youtubeVideoId}</strong></span>
                             <button 
