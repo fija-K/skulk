@@ -2955,10 +2955,11 @@ function AppContent() {
         return participants.some(p => p.uid === myId);
       });
       if (alreadyJoinedRoomId) {
-        const otherRoom = rooms.find(r => r.id === alreadyJoinedRoomId);
-        const otherRoomName = otherRoom ? otherRoom.name : alreadyJoinedRoomId;
-        showToast(`⚠️ You are already in another active room: "${otherRoomName}". Please leave it before joining this one.`);
-        return;
+        try {
+          await leavePresence(alreadyJoinedRoomId);
+        } catch (e) {
+          console.warn("Failed to auto-leave previous room:", e);
+        }
       }
     }
 
@@ -3208,12 +3209,11 @@ function AppContent() {
               return participants.some(p => p.uid === myId);
             });
             if (alreadyJoinedRoomId) {
-              const otherRoom = rooms.find(r => r.id === alreadyJoinedRoomId);
-              const otherRoomName = otherRoom ? otherRoom.name : alreadyJoinedRoomId;
-              showToast(`⚠️ You are already in another active room: "${otherRoomName}". Please leave it before joining this one.`);
-              isEnteringRoomRef.current = null;
-              navigate('/');
-              return;
+              try {
+                await leavePresence(alreadyJoinedRoomId);
+              } catch (e) {
+                console.warn("Failed to auto-leave previous room:", e);
+              }
             }
           }
 
