@@ -789,11 +789,17 @@ function UniversalVideoPlayer({
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
 
+  // Keep latest participants in a ref so the interval does not need to restart
+  const participantsRef = useRef(participants);
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
   // Synchronize player to presenter's active state in the room
   useEffect(() => {
     if (isLive || isPresenter || !playerRef.current) return;
 
-    const presenterData = getPresenterState();
+    const presenterData = participants.find(p => p.id === presenterId);
     if (!presenterData) return;
 
     lastPresenterDataRef.current = presenterData;
@@ -805,14 +811,16 @@ function UniversalVideoPlayer({
     if (isPresenter || isLive) return;
 
     const interval = setInterval(() => {
-      const presenterData = getPresenterState();
-      if (playerRef.current && presenterData) {
-        syncToPresenterState(presenterData, playerRef.current);
+      if (playerRef.current) {
+        const presenterData = participantsRef.current.find(p => p.id === presenterId);
+        if (presenterData) {
+          syncToPresenterState(presenterData, playerRef.current);
+        }
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPresenter, isLive, participants, presenterId]);
+  }, [isPresenter, isLive, presenterId]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
