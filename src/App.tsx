@@ -4526,6 +4526,37 @@ function AppContent() {
     return dateStr;
   };
 
+  const formatRoomCreatedAt = (createdAtStr?: string) => {
+    if (!createdAtStr) return '';
+    try {
+      const date = new Date(createdAtStr);
+      if (isNaN(date.getTime())) return '';
+
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+
+      if (diffMs < 0) {
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      if (diffMins < 1) {
+        return 'Just now';
+      }
+      if (diffMins < 60) {
+        return `${diffMins}m ago`;
+      }
+      if (diffHours < 24) {
+        return `${diffHours}h ago`;
+      }
+      
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return '';
+    }
+  };
+
 
   const getGalleryColumns = (count: number) => {
     if (count === 1) return '1fr';
@@ -6230,6 +6261,8 @@ function AppContent() {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
                   const currentRoomParticipants = roomsParticipants[room.id] || [];
                   const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
+                  const isCreatorAdmin = currentRoomParticipants.some(p => p.uid === room.creatorId && p.role === 'admin');
+                  const hostLabel = isCreatorAdmin ? 'Admin' : (room.creatorName || 'Unknown');
                   
                   return (
                     <div className="room-card" key={room.id}>
@@ -6255,10 +6288,12 @@ function AppContent() {
                       
                       {/* Room Subtitle */}
                       <p className="room-subtitle">
-                        {isScheduled 
-                          ? `Scheduled for ${formatFriendlyDate(room.scheduledDate)} at ${room.scheduledTime} · ${room.type === 'public-ask' ? 'ask to join' : 'public'}`
-                          : `${room.type === 'public-ask' ? 'ask to join' : 'public'}`
-                        }
+                        {isScheduled ? (
+                          `Scheduled for ${formatFriendlyDate(room.scheduledDate)} at ${room.scheduledTime}`
+                        ) : (
+                          `Hosted by ${hostLabel}`
+                        )}
+                        {room.createdAt && ` · ${formatRoomCreatedAt(room.createdAt)}`}
                       </p>
                       
                       {/* Participant Avatars Row */}
