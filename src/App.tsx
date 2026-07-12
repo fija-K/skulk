@@ -2809,14 +2809,24 @@ function AppContent() {
             console.log("leavePresence transaction evaluate:", { storedSessionId: data.sessionId, sessionIdToDelete });
             if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
               console.log("leavePresence transaction deleting presence:", myId);
+
+              // 1. Perform all reads first
+              let roomSnap = null;
+              let userSnap = null;
+              const isAuthUser = user && user.uid === myId;
+              
+              if (isAuthUser) {
+                const roomRef = doc(db, 'rooms', roomIdToLeave);
+                const userRef = doc(db, 'users', myId);
+                roomSnap = await transaction.get(roomRef);
+                userSnap = await transaction.get(userRef);
+              }
+
+              // 2. Perform all writes second
               transaction.delete(presenceDocRef);
 
-              // ONLY for authenticated users, log the session log and update streak!
-              if (user && user.uid === myId) {
-                // Get room details inside transaction
-                const roomRef = doc(db, 'rooms', roomIdToLeave);
-                const roomSnap = await transaction.get(roomRef);
-                const roomName = roomSnap.exists() ? (roomSnap.data().name || 'Room') : 'Room';
+              if (isAuthUser) {
+                const roomName = (roomSnap && roomSnap.exists()) ? (roomSnap.data().name || 'Room') : 'Room';
 
                 const joinedAtStr = data.joinedAt || new Date().toISOString();
                 const leftAtStr = new Date().toISOString();
@@ -2837,12 +2847,10 @@ function AppContent() {
                 });
 
                 // Update activity streak on user document
-                const userRef = doc(db, 'users', myId);
-                const userSnap = await transaction.get(userRef);
                 let currentStreak = 0;
                 let lastActiveDate = '';
                 
-                if (userSnap.exists()) {
+                if (userSnap && userSnap.exists()) {
                   const userData = userSnap.data();
                   currentStreak = userData.currentStreak || 0;
                   lastActiveDate = userData.lastActiveDate || '';
@@ -2863,6 +2871,7 @@ function AppContent() {
                   lastActiveDate = todayStr;
                 }
 
+                const userRef = doc(db, 'users', myId);
                 transaction.set(userRef, {
                   currentStreak,
                   lastActiveDate
