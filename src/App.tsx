@@ -1820,7 +1820,6 @@ function AppContent() {
   const [cameraError, setCameraError] = useState(false);
   const [micError, setMicError] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(true);
-  const [galleryPage, setGalleryPage] = useState(0);
   const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   
   // Sidebar tabs in-call panel
@@ -1845,15 +1844,6 @@ function AppContent() {
   // In-call participants state
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
   const [activeMenuParticipantId, setActiveMenuParticipantId] = useState<string | null>(null);
-
-  // Reactive clamping for paginated gallery page index
-  useEffect(() => {
-    const maxPerPage = 4;
-    const totalPages = Math.ceil(callParticipants.length / maxPerPage) || 1;
-    if (galleryPage >= totalPages) {
-      setGalleryPage(Math.max(0, totalPages - 1));
-    }
-  }, [callParticipants.length, galleryPage]);
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -3098,7 +3088,6 @@ function AppContent() {
       setUnreadChatCount(0);
       setViewingShare(null);
       setLiveKitToken(null);
-      setGalleryPage(0);
     }
     navigate('/');
   };
@@ -3235,7 +3224,6 @@ function AppContent() {
         setUnreadChatCount(0);
         setViewingShare(null);
         setLiveKitToken(null);
-        setGalleryPage(0);
       }
     }
   }, [roomId, rooms, user, guestId, isAuthLoading, currentRoom ? roomDocId(currentRoom) : null]);
@@ -5333,19 +5321,12 @@ function AppContent() {
   };
 
 
-  const getGalleryColumns = (count: number) => {
-    if (count === 1) return '1fr';
-    if (count === 2) return 'repeat(2, 1fr)';
-    if (count <= 4) return 'repeat(2, 1fr)';
-    if (count <= 6) return 'repeat(3, 1fr)';
-    return 'repeat(auto-fit, minmax(280px, 1fr))';
-  };
-
-  const getGalleryMaxWidth = (count: number) => {
-    if (count === 1) return '800px';
-    if (count === 2) return '1000px';
-    if (count <= 4) return '1000px';
-    return '100%';
+  const getGalleryGridTemplate = (count: number) => {
+    if (count === 1) return { columns: '1fr', rows: '1fr' };
+    if (count === 2) return { columns: 'repeat(2, 1fr)', rows: '1fr' };
+    if (count <= 4) return { columns: 'repeat(2, 1fr)', rows: 'repeat(2, 1fr)' };
+    if (count <= 6) return { columns: 'repeat(3, 1fr)', rows: 'repeat(2, 1fr)' };
+    return { columns: 'repeat(3, 1fr)', rows: 'repeat(3, 1fr)' };
   };
 
   const renderParticipantTile = (p: Participant, isThumbnail: boolean = false) => {
@@ -5478,6 +5459,14 @@ function AppContent() {
           ...p.sharing === 'youtube' ? {
             boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
             border: '2.5px solid var(--primary-color)'
+          } : {},
+          // Keep tiles equal size, prevent overflow/overlap, and auto-shrink to fit in gallery view
+          ...(!isThumbnail && isGalleryView) ? {
+            width: '100%',
+            height: '100%',
+            maxWidth: '100%',
+            maxHeight: '100%',
+            aspectRatio: '16/10'
           } : {}
         }}
       >
@@ -8427,59 +8416,47 @@ function AppContent() {
                       </div>
                     </div>
                   ) : (() => {
-                    const maxPerPage = 4;
-                    const totalPages = Math.ceil(callParticipants.length / maxPerPage) || 1;
-                    const currentPage = Math.min(galleryPage, totalPages - 1);
-                    const displayedParticipants = callParticipants.slice(currentPage * maxPerPage, (currentPage + 1) * maxPerPage);
+                    const myId = getMyId();
+                    const sortedParticipants = [...callParticipants].sort((a, b) => {
+                      const aIsMe = a.id === myId;
+                      const bIsMe = b.id === myId;
+                      if (aIsMe && !bIsMe) return -1;
+                      if (bIsMe && !aIsMe) return 1;
+
+                      const aSpeaking = a.isSpeaking ? 1 : 0;
+                      const bSpeaking = b.isSpeaking ? 1 : 0;
+                      if (aSpeaking !== bSpeaking) return bSpeaking - aSpeaking;
+
+                      const aSharing = a.sharing ? 1 : 0;
+                      const bSharing = b.sharing ? 1 : 0;
+                      if (aSharing !== bSharing) return bSharing - aSharing;
+
+                      const aCam = !a.isCamOff ? 1 : 0;
+                      const bCam = !b.isCamOff ? 1 : 0;
+                      if (aCam !== bCam) return bCam - aCam;
+
+                      return 0;
+                    });
+                    const displayedParticipants = sortedParticipants.slice(0, 8);
+
+                    const count = displayedParticipants.length;
+                    const gridConfig = getGalleryGridTemplate(count);
 
                     return (
-                      <>
-                        <div 
-                          className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
-                          style={isGalleryView ? {
-                            gridTemplateColumns: getGalleryColumns(displayedParticipants.length),
-                            maxWidth: getGalleryMaxWidth(displayedParticipants.length)
-                          } : {}}
-                        >
-                          {displayedParticipants.map((p) => renderParticipantTile(p, false))}
-                        </div>
-
-                        {totalPages > 1 && (
-                          <div className="gallery-pagination-controls animate-fade-in">
-                            <button 
-                              className="pagination-arrow-btn" 
-                              disabled={currentPage === 0}
-                              onClick={() => setGalleryPage(prev => Math.max(0, prev - 1))}
-                              title="Previous Page"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="15 18 9 12 15 6"></polyline>
-                              </svg>
-                            </button>
-                            
-                            <div className="pagination-dots">
-                              {Array.from({ length: totalPages }).map((_, idx) => (
-                                <div 
-                                  key={idx}
-                                  className={`pagination-dot ${idx === currentPage ? 'active' : ''}`}
-                                  onClick={() => setGalleryPage(idx)}
-                                />
-                              ))}
-                            </div>
-
-                            <button 
-                              className="pagination-arrow-btn" 
-                              disabled={currentPage === totalPages - 1}
-                              onClick={() => setGalleryPage(prev => Math.min(totalPages - 1, prev + 1))}
-                              title="Next Page"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="9 18 15 12 9 6"></polyline>
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                      </>
+                      <div 
+                        className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
+                        style={isGalleryView ? {
+                          gridTemplateColumns: gridConfig.columns,
+                          gridTemplateRows: gridConfig.rows,
+                          width: '100%',
+                          height: '100%',
+                          maxHeight: '100%',
+                          justifyItems: 'center',
+                          alignItems: 'center'
+                        } : {}}
+                      >
+                        {displayedParticipants.map((p) => renderParticipantTile(p, false))}
+                      </div>
                     );
                   })()}
 
