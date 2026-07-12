@@ -4502,13 +4502,20 @@ function AppContent() {
       const presenceRef = collection(db, 'rooms', rid, 'participants');
       const snapshot = await getDocs(presenceRef);
       for (const docSnap of snapshot.docs) {
-        await deleteDoc(docSnap.ref);
+        try {
+          await deleteDoc(docSnap.ref);
+        } catch (e) {
+          // Ignore if already deleted by other clients concurrently
+        }
       }
       
       showToast("Room closed successfully.");
     } catch (e) {
       console.warn("Failed to delete room:", e);
       showToast("Failed to close room.");
+    } finally {
+      // Always leave call client-side to redirect to dashboard and reset local states!
+      handleLeaveCall();
     }
   };
 
