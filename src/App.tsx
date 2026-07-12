@@ -553,9 +553,10 @@ function UniversalVideoPlayer({
   platform,
   isLive,
   isPresenter, 
-  presenterId,
+  presenterId: _presenterId,
   roomId,
-  myId
+  myId,
+  participants
 }: { 
   videoId: string; 
   platform: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch';
@@ -564,14 +565,34 @@ function UniversalVideoPlayer({
   presenterId: string;
   roomId: string;
   myId: string;
+  participants: Participant[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<AbstractPlayer | null>(null);
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
 
+  const getLatestPlaybackState = () => {
+    let latestData: any = null;
+    let maxTimestamp = 0;
+
+    // Search for the latest update timestamp among all participants in call
+    participants.forEach((p: any) => {
+      // Access the raw participant fields from Firestore (p as any)
+      const raw = p as any;
+      if (raw.ytUpdateTimestamp && raw.ytUpdateTimestamp > maxTimestamp) {
+        maxTimestamp = raw.ytUpdateTimestamp;
+        latestData = raw;
+      }
+    });
+
+    return latestData;
+  };
+
   const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
-    if (isPresenter || isLive) return;
+    if (isLive) return;
+    if (data.id === myId) return; // Prevent self-loop syncing!
+
     const targetPlaying = data.ytPlaying ?? false;
     const targetTime = data.ytTime ?? 0;
     const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
@@ -619,7 +640,7 @@ function UniversalVideoPlayer({
       isPresenter,
       isLive,
       (playing, time) => {
-        if (!isPresenter || isLive) return;
+        if (isLive) return;
         if (!isLocalChangeRef.current) {
           updateFirestorePlaybackState(playing, time);
         }
@@ -631,9 +652,10 @@ function UniversalVideoPlayer({
       }
       playerRef.current = wrappedPlayer;
 
-      // Sync to latest presenter state immediately when player mounts
-      if (!isPresenter && lastPresenterDataRef.current) {
-        syncToPresenterState(lastPresenterDataRef.current, wrappedPlayer);
+      // Sync to latest playback state immediately when player mounts
+      const latestData = getLatestPlaybackState();
+      if (latestData) {
+        syncToPresenterState(latestData, wrappedPlayer);
       }
     }).catch(err => {
       console.error("Failed to load player:", err);
@@ -697,35 +719,30 @@ function UniversalVideoPlayer({
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
 
-  // Viewer Firestore snapshot listener
+  // Synchronize player to latest active state in the room
   useEffect(() => {
-    if (isPresenter || isLive) return;
+    if (isLive || !playerRef.current) return;
 
-    const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
-    const unsubscribe = onSnapshot(partRef, async (snapshot) => {
-      if (!snapshot.exists()) return;
-      const data = snapshot.data();
-      lastPresenterDataRef.current = data;
+    const latestData = getLatestPlaybackState();
+    if (!latestData) return;
 
-      if (!playerRef.current) return;
-      syncToPresenterState(data, playerRef.current);
-    });
-
-    return () => unsubscribe();
-  }, [isPresenter, presenterId, roomId, isLive]);
+    lastPresenterDataRef.current = latestData;
+    syncToPresenterState(latestData, playerRef.current);
+  }, [participants, isLive]);
 
   // Viewer proactive local force sync interval
   useEffect(() => {
-    if (isPresenter || isLive) return;
+    if (isLive) return;
 
     const interval = setInterval(() => {
-      if (playerRef.current && lastPresenterDataRef.current) {
-        syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
+      const latestData = getLatestPlaybackState();
+      if (playerRef.current && latestData) {
+        syncToPresenterState(latestData, playerRef.current);
       }
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isPresenter, isLive]);
+  }, [isLive, participants]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -8419,6 +8436,7 @@ function AppContent() {
                                     presenterId={viewingShare.participantId}
                                     roomId={roomDocId(currentRoom!)}
                                     myId={getMyId()}
+                                    participants={callParticipants}
                                   />
                                 );
                               } else {
@@ -9209,44 +9227,36 @@ function AppContent() {
                           ))}
                         </div>
 
-                        {hasControl ? (
-                          <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <div className="form-group">
-                              <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
-                                {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
-                                 watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
-                                 watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
-                                 'Twitch Channel or VOD URL'}
-                              </label>
-                              <input 
-                                type="text"
-                                id="ytUrl"
-                                placeholder={
-                                  watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
-                                  watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
-                                  watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
-                                  'e.g. https://www.twitch.tv/twitch'
-                                }
-                                className="search-input"
-                                style={{ paddingLeft: '12px', fontSize: '13px' }}
-                                value={ytInputUrl}
-                                onChange={(e) => setYtInputUrl(e.target.value)}
-                                required
-                              />
-                            </div>
-                            <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
-                              Load Media
-                            </button>
-                          </form>
-                        ) : (
-                          <div style={{ padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.1)', textAlign: 'center' }}>
-                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                              🔒 Only hosts and co-hosts can control the video.
-                            </span>
+                        <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="form-group">
+                            <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                              {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
+                               watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
+                               watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
+                               'Twitch Channel or VOD URL'}
+                            </label>
+                            <input 
+                              type="text"
+                              id="ytUrl"
+                              placeholder={
+                                watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
+                                watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
+                                watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
+                                'e.g. https://www.twitch.tv/twitch'
+                              }
+                              className="search-input"
+                              style={{ paddingLeft: '12px', fontSize: '13px' }}
+                              value={ytInputUrl}
+                              onChange={(e) => setYtInputUrl(e.target.value)}
+                              required
+                            />
                           </div>
-                        )}
+                          <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
+                            Load Media
+                          </button>
+                        </form>
                         
-                        {youtubeVideoId && hasControl && (
+                        {youtubeVideoId && (
                           <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Currently Playing Video ID: <strong>{youtubeVideoId}</strong></span>
                             <button 
