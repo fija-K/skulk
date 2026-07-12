@@ -307,8 +307,8 @@ function createWrappedPlayer(
           videoId: videoId,
           playerVars: {
             autoplay: 1,
-            controls: isPresenter ? 1 : 0,
-            disablekb: isPresenter ? 0 : 1,
+            controls: 1,
+            disablekb: 0,
             rel: 0,
             modestbranding: 1
           },
@@ -348,7 +348,7 @@ function createWrappedPlayer(
       container.innerHTML = '';
       
       const iframe = document.createElement('iframe');
-      iframe.src = `https://player.vimeo.com/video/${videoId}?autoplay=1&background=${isPresenter ? 0 : 1}&muted=${isPresenter ? 0 : 1}`;
+      iframe.src = `https://player.vimeo.com/video/${videoId}?autoplay=1&controls=1&muted=${isPresenter ? 0 : 1}`;
       iframe.style.width = '100%';
       iframe.style.height = '100%';
       iframe.style.border = 'none';
@@ -399,7 +399,7 @@ function createWrappedPlayer(
     container.innerHTML = '';
 
     const iframe = document.createElement('iframe');
-    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=${isPresenter ? 1 : 0}&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
+    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=1&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
     iframe.style.width = '100%';
     iframe.style.height = '100%';
     iframe.style.border = 'none';
@@ -492,7 +492,7 @@ function createWrappedPlayer(
         height: '100%',
         autoplay: true,
         muted: !isPresenter,
-        controls: isPresenter
+        controls: true
       };
 
       if (isLive) {
@@ -646,21 +646,39 @@ function UniversalVideoPlayer({
     }
   };
 
-  // Host playback periodic updates
+  // Host/Presenter playback tracking loop
   useEffect(() => {
     if (!isPresenter || isLive) return;
+
+    let lastState: number | null = null;
+    let lastTime = 0;
+    let lastWriteTime = 0;
 
     const interval = setInterval(async () => {
       if (playerRef.current) {
         try {
-          const state = await playerRef.current.getPlayerState();
+          const state = await playerRef.current.getPlayerState(); // 1 = playing, 2 = paused
           const time = await playerRef.current.getCurrentTime();
-          if (state === 1) {
-            updateFirestorePlaybackState(true, time);
+          const now = Date.now();
+
+          const playing = state === 1;
+          const stateChanged = state !== lastState;
+          
+          // Check if user seeked: time jumped by more than 1.5 seconds from expected time
+          const expectedTime = lastTime + (playing ? (now - lastWriteTime) / 1000 : 0);
+          const timeJumped = Math.abs(time - expectedTime) > 1.5;
+
+          if (stateChanged || timeJumped || (playing && now - lastWriteTime > 3000)) {
+            updateFirestorePlaybackState(playing, time);
+            lastState = state;
+            lastTime = time;
+            lastWriteTime = now;
+          } else {
+            lastTime = time;
           }
         } catch (e) {}
       }
-    }, 2000);
+    }, 500);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
@@ -690,7 +708,7 @@ function UniversalVideoPlayer({
       if (playerRef.current && lastPresenterDataRef.current) {
         syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
       }
-    }, 1000);
+    }, 500);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
@@ -707,18 +725,6 @@ function UniversalVideoPlayer({
           backgroundColor: '#000'
         }} 
       />
-      {!isPresenter && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          zIndex: 10,
-          background: 'transparent',
-          cursor: 'not-allowed'
-        }} />
-      )}
     </div>
   );
 }
@@ -5131,13 +5137,13 @@ function AppContent() {
     const showCamOff = isUser ? isCamOff : p.isCamOff;
     const isSpeaking = p.isSpeaking && !showMuted;
     
-    // Check if we should do a full profile takeover for media sharing
+    // Check if we should do a media sharing visual state takeover
     const showMediaTakeover = !isThumbnail && p.sharing === 'youtube';
     
     return (
       <div 
         key={p.id} 
-        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''} ${showMediaTakeover ? 'media-takeover-active' : ''}`}
+        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''}`}
         onClick={() => {
           if (isThumbnail) {
             setSpotlightParticipantId(p.id);
@@ -5149,186 +5155,117 @@ function AppContent() {
         }}
         style={{ 
           cursor: 'pointer',
-          ...showMediaTakeover ? {
-            boxShadow: '0 0 20px rgba(241, 196, 15, 0.4)',
-            border: '2px solid var(--primary-color)',
-            background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+          // Show container border glow if they are sharing media
+          ...p.sharing === 'youtube' ? {
+            boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
+            border: '2.5px solid var(--primary-color)'
           } : {}
         }}
       >
-        {showMediaTakeover ? (
-          /* FULL PROFILE TAKEOVER FOR MEDIA PLAYING */
-          <div 
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '12px',
-              padding: '16px',
-              zIndex: 5
-            }}
-          >
-            {/* Pulsing media play icon */}
-            <div style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(241, 196, 15, 0.15)',
-              border: '2px dashed var(--primary-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              animation: 'pulse 2s infinite'
-            }}>
-              <span style={{ fontSize: '24px', color: 'var(--primary-color)', marginLeft: '4px' }}>▶</span>
+        {(!showCamOff || isGalleryView) && !isThumbnail ? (
+          // Gallery Layout or camera is ON: Full Card Video/Avatar
+          showMediaTakeover ? (
+            /* Takeover card for gallery layout - beautifully contained */
+            <div 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '12px',
+                background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                border: '2px dashed var(--primary-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'pulse 2s infinite'
+              }}>
+                <span style={{ fontSize: '18px', color: 'var(--primary-color)', marginLeft: '3px' }}>▶</span>
+              </div>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--primary-color)', letterSpacing: '0.1em', textTransform: 'uppercase', textAlign: 'center' }}>
+                Watching Together
+              </span>
+              <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>Click to join</span>
             </div>
-            
-            <span style={{ 
-              fontSize: '11px', 
-              fontWeight: 800, 
-              color: 'var(--primary-color)', 
-              letterSpacing: '0.12em', 
-              textTransform: 'uppercase',
-              textAlign: 'center' 
-            }}>
-              Watching Together
-            </span>
-            <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
-              Click avatar to join
-            </span>
-          </div>
-        ) : (
-          /* STANDARD PARTICIPANT TILE RENDER */
-          (!showCamOff || isGalleryView) && !isThumbnail ? (
-            // Gallery Layout or camera is ON: Full Card Video/Avatar
-            !showCamOff ? (
-              <>
-                {isUser && cameraError ? (
-                  // Refined camera error display: show PFP/initials background + a small centered retry box!
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                    {p.photoURL ? (
-                      <img 
-                        src={p.photoURL} 
-                        alt={p.name} 
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
-                    )}
-                    <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                      }}
-                      style={{
-                        position: 'absolute',
-                        padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
-                        border: '1px solid var(--border-color)', borderRadius: '6px',
-                        cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
-                      }}
-                    >
-                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
-                      <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
-                    </div>
-                  </div>
-                ) : (
-                  <ParticipantVideo participantId={p.id} />
-                )}
-                
-                {p.sharing && (
-                  <div className="sharing-badge-overlay" style={{
-                    position: 'absolute',
-                    bottom: '12px',
-                    right: '12px',
-                    backgroundColor: 'var(--primary-color)',
-                    color: '#0f1013',
-                    borderRadius: '50%',
-                    width: '22px',
-                    height: '22px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    border: '2px solid var(--card-bg, #1a1c23)',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                    zIndex: 10
-                  }} title={`Sharing ${p.sharing} - click to view`}
+          ) : !showCamOff ? (
+            <>
+              {isUser && cameraError ? (
+                // Refined camera error display: show PFP/initials background + a small centered retry box!
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {p.photoURL ? (
+                    <img 
+                      src={p.photoURL} 
+                      alt={p.name} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                  )}
+                  <div 
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleViewParticipantShare(p);
+                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                    }}
+                    style={{
+                      position: 'absolute',
+                      padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
+                      border: '1px solid var(--border-color)', borderRadius: '6px',
+                      cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
                     }}
                   >
-                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
+                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
                   </div>
-                )}
-              </>
-            ) : (
-              /* Avatar Square (Gallery Mode) */
-              <div 
-                className="participant-avatar-large" 
-                style={{ 
-                  backgroundColor: p.color, 
-                  cursor: p.sharing ? 'pointer' : 'default',
-                  position: 'relative',
-                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                  overflow: 'hidden',
-                  width: '96px',
-                  height: '96px',
+                </div>
+              ) : (
+                <ParticipantVideo participantId={p.id} />
+              )}
+              
+              {p.sharing && (
+                <div className="sharing-badge-overlay" style={{
+                  position: 'absolute',
+                  bottom: '12px',
+                  right: '12px',
+                  backgroundColor: 'var(--primary-color)',
+                  color: '#0f1013',
                   borderRadius: '50%',
-                  fontSize: '32px',
-                  marginBottom: '0'
-                }}
-                onClick={() => {
-                  if (p.sharing) {
+                  width: '22px',
+                  height: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  border: '2px solid var(--card-bg, #1a1c23)',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                  zIndex: 10
+                }} title={`Sharing ${p.sharing} - click to view`}
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleViewParticipantShare(p);
-                  }
-                }}
-              >
-                {p.photoURL ? (
-                  <img 
-                    src={p.photoURL} 
-                    alt={p.name} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  p.initials
-                )}
-                {p.sharing && (
-                  <div className="sharing-badge-overlay" style={{
-                    position: 'absolute',
-                    bottom: '-6px',
-                    right: '-6px',
-                    backgroundColor: 'var(--primary-color)',
-                    color: '#0f1013',
-                    borderRadius: '50%',
-                    width: '22px',
-                    height: '22px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    border: '2px solid var(--card-bg, #1a1c23)',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                    zIndex: 10
-                  }} title={`Sharing ${p.sharing} - click to view`}>
-                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                  </div>
-                )}
-              </div>
-            )
+                  }}
+                >
+                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                </div>
+              )}
+            </>
           ) : (
-            // Compact Grid Layout OR Thumbnail view: Floating Avatar
+            /* Avatar Square (Gallery Mode) */
             <div 
               className="participant-avatar-large" 
               style={{ 
@@ -5338,13 +5275,19 @@ function AppContent() {
                 boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
                 border: p.sharing ? '2px solid var(--primary-color)' : 'none',
                 overflow: 'hidden',
-                // Shrink for thumbnail strip
-                ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
+                width: '96px',
+                height: '96px',
+                borderRadius: '50%',
+                fontSize: '32px',
+                marginBottom: '0'
+              }}
+              onClick={() => {
+                if (p.sharing) {
+                  handleViewParticipantShare(p);
+                }
               }}
             >
-              {!showCamOff && !(isUser && cameraError) ? (
-                <ParticipantVideo participantId={p.id} />
-              ) : p.photoURL ? (
+              {p.photoURL ? (
                 <img 
                   src={p.photoURL} 
                   alt={p.name} 
@@ -5354,32 +5297,6 @@ function AppContent() {
               ) : (
                 p.initials
               )}
-              
-              {/* Clickable Retry warning indicator in compact view */}
-              {isUser && !showCamOff && cameraError && (
-                <div 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                  }}
-                  style={{
-                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center', zIndex: 15,
-                    cursor: 'pointer'
-                  }} 
-                  title="Camera error - check hardware switch and click to retry"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
-                    <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
-                    <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
-                    <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
-                  </svg>
-                  <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
-                </div>
-              )}
-    
               {p.sharing && (
                 <div className="sharing-badge-overlay" style={{
                   position: 'absolute',
@@ -5404,6 +5321,99 @@ function AppContent() {
               )}
             </div>
           )
+        ) : (
+          // Compact Grid Layout OR Thumbnail view: Floating Avatar
+          <div 
+            className="participant-avatar-large" 
+            style={{ 
+              backgroundColor: p.color, 
+              cursor: p.sharing ? 'pointer' : 'default',
+              position: 'relative',
+              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+              overflow: 'hidden',
+              background: p.sharing === 'youtube' ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)' : undefined,
+              // Shrink for thumbnail strip
+              ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
+            }}
+          >
+            {p.sharing === 'youtube' ? (
+              /* Pulsing play icon inside circular avatar circle */
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'pulse 2s infinite',
+                zIndex: 2
+              }}>
+                <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
+              </div>
+            ) : !showCamOff && !(isUser && cameraError) ? (
+              <ParticipantVideo participantId={p.id} />
+            ) : p.photoURL ? (
+              <img 
+                src={p.photoURL} 
+                alt={p.name} 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              p.initials
+            )}
+            
+            {/* Clickable Retry warning indicator in compact view */}
+            {isUser && !showCamOff && cameraError && (
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                }}
+                style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center', zIndex: 15,
+                  cursor: 'pointer'
+                }} 
+                title="Camera error - check hardware switch and click to retry"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
+                  <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
+                  <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
+                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
+                </svg>
+                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
+              </div>
+            )}
+  
+            {p.sharing && (
+              <div className="sharing-badge-overlay" style={{
+                position: 'absolute',
+                bottom: '-6px',
+                right: '-6px',
+                backgroundColor: 'var(--primary-color)',
+                color: '#0f1013',
+                borderRadius: '50%',
+                width: '22px',
+                height: '22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                border: '2px solid var(--card-bg, #1a1c23)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                zIndex: 10
+              }} title={`Sharing ${p.sharing} - click to view`}>
+                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+              </div>
+            )}
+          </div>
         )}
         
         {/* Name Tag + Muted Status */}
@@ -7840,18 +7850,22 @@ function AppContent() {
                   </div>
                   
                   {/* Bottom Participant Strip */}
-                  <div className="screenshare-tiles-strip" style={{
+                  <div className="bottom-reflow-strip" style={{
                     display: 'flex',
                     flexDirection: 'row',
                     gap: '12px',
                     overflowX: 'auto',
-                    padding: '8px 4px',
-                    height: '110px',
+                    overflowY: 'hidden',
+                    padding: '8px 12px',
+                    height: '84px',
+                    minHeight: '84px',
+                    width: '100%',
                     alignItems: 'center',
                     backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
                     borderRadius: 'var(--border-radius)',
                     border: '1px solid var(--border-color)',
-                    scrollbarWidth: 'thin'
+                    scrollbarWidth: 'thin',
+                    boxSizing: 'border-box'
                   }}>
                     {callParticipants.map((p) => renderParticipantTile(p, true))}
                   </div>
@@ -7972,18 +7986,22 @@ function AppContent() {
                   </div>
                   
                   {/* Bottom Participant Strip */}
-                  <div className="screenshare-tiles-strip" style={{
+                  <div className="bottom-reflow-strip" style={{
                     display: 'flex',
                     flexDirection: 'row',
                     gap: '12px',
                     overflowX: 'auto',
-                    padding: '8px 4px',
-                    height: '110px',
+                    overflowY: 'hidden',
+                    padding: '8px 12px',
+                    height: '84px',
+                    minHeight: '84px',
+                    width: '100%',
                     alignItems: 'center',
                     backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
                     borderRadius: 'var(--border-radius)',
                     border: '1px solid var(--border-color)',
-                    scrollbarWidth: 'thin'
+                    scrollbarWidth: 'thin',
+                    boxSizing: 'border-box'
                   }}>
                     {callParticipants.map((p) => renderParticipantTile(p, true))}
                   </div>
