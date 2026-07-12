@@ -257,84 +257,68 @@ function isDrmBlockedUrl(url: string): boolean {
          lower.includes('hbo.com');
 }
 
-const scriptLoadPromises: Record<string, Promise<void> | undefined> = {};
-
-function loadPlatformScript(platform: string, src: string, callbackName?: string): Promise<void> {
-  const existing = scriptLoadPromises[platform];
-  if (existing) return existing;
-
-  scriptLoadPromises[platform] = new Promise((resolve) => {
-    // 5-second timeout fallback to prevent hanging the player container
-    const timeout = setTimeout(() => {
-      console.warn(`Script load timed out for platform: ${platform}`);
-      resolve();
-    }, 5000);
-
-    if (platform === 'youtube' && (window as any).YT && (window as any).YT.Player) {
-      clearTimeout(timeout);
+let ytApiPromise: Promise<void> | null = null;
+function loadYoutubeApi(): Promise<void> {
+  if (ytApiPromise) return ytApiPromise;
+  
+  ytApiPromise = new Promise((resolve) => {
+    if ((window as any).YT && (window as any).YT.Player) {
       resolve();
       return;
     }
-
-    if (platform === 'youtube' && (window as any).YT) {
-      const interval = setInterval(() => {
-        if ((window as any).YT.Player) {
-          clearInterval(interval);
-          clearTimeout(timeout);
-          resolve();
-        }
-      }, 50);
-      return;
-    }
-
-    if (platform === 'vimeo' && (window as any).Vimeo) {
-      clearTimeout(timeout);
+    
+    const prevCallback = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      if (prevCallback) prevCallback();
       resolve();
-      return;
-    }
-
-    if (platform === 'dailymotion' && (window as any).DM) {
-      clearTimeout(timeout);
-      resolve();
-      return;
-    }
-
-    if (platform === 'twitch' && (window as any).Twitch) {
-      clearTimeout(timeout);
-      resolve();
-      return;
-    }
-
-    if (callbackName) {
-      const prevCallback = (window as any)[callbackName];
-      (window as any)[callbackName] = () => {
-        if (prevCallback) {
-          try {
-            prevCallback();
-          } catch (e) {}
-        }
-        clearTimeout(timeout);
-        resolve();
-      };
-    }
-
+    };
+    
     const tag = document.createElement('script');
-    tag.src = src;
-    tag.onload = () => {
-      if (!callbackName) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    };
-    tag.onerror = () => {
-      clearTimeout(timeout);
-      resolve();
-    };
-
+    tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
   });
+  
+  return ytApiPromise;
+}
 
-  return scriptLoadPromises[platform];
+let vimeoApiPromise: Promise<void> | null = null;
+function loadVimeoApi(): Promise<void> {
+  if (vimeoApiPromise) return vimeoApiPromise;
+  
+  vimeoApiPromise = new Promise((resolve) => {
+    if ((window as any).Vimeo) {
+      resolve();
+      return;
+    }
+    
+    const tag = document.createElement('script');
+    tag.src = 'https://player.vimeo.com/api/player.js';
+    tag.onload = () => resolve();
+    tag.onerror = () => resolve();
+    document.head.appendChild(tag);
+  });
+  
+  return vimeoApiPromise;
+}
+
+let twitchApiPromise: Promise<void> | null = null;
+function loadTwitchApi(): Promise<void> {
+  if (twitchApiPromise) return twitchApiPromise;
+  
+  twitchApiPromise = new Promise((resolve) => {
+    if ((window as any).Twitch) {
+      resolve();
+      return;
+    }
+    
+    const tag = document.createElement('script');
+    tag.src = 'https://embed.twitch.tv/v1/twitch.js';
+    tag.onload = () => resolve();
+    tag.onerror = () => resolve();
+    document.head.appendChild(tag);
+  });
+  
+  return twitchApiPromise;
 }
 
 interface AbstractPlayer {
@@ -357,7 +341,7 @@ function createWrappedPlayer(
   onStateChange: (playing: boolean, time: number) => void
 ): Promise<AbstractPlayer> {
   if (platform === 'youtube') {
-    return loadPlatformScript('youtube', 'https://www.youtube.com/iframe_api', 'onYouTubeIframeAPIReady').then(() => {
+    return loadYoutubeApi().then(() => {
       return new Promise<AbstractPlayer>((resolve) => {
         const player = new (window as any).YT.Player(targetElement, {
           width: '100%',
@@ -411,7 +395,7 @@ function createWrappedPlayer(
   }
 
   if (platform === 'vimeo') {
-    return loadPlatformScript('vimeo', 'https://player.vimeo.com/api/player.js').then(() => {
+    return loadVimeoApi().then(() => {
       targetElement.innerHTML = '';
       
       const iframe = document.createElement('iframe');
@@ -559,7 +543,7 @@ function createWrappedPlayer(
   }
 
   if (platform === 'twitch') {
-    return loadPlatformScript('twitch', 'https://embed.twitch.tv/v1/twitch.js').then(() => {
+    return loadTwitchApi().then(() => {
       targetElement.innerHTML = '';
 
       const options: any = {
