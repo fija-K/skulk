@@ -1699,6 +1699,17 @@ function AppContent() {
     }
   };
 
+  const saveLocalRoom = (room: Room) => {
+    try {
+      const existing = getLocalRooms();
+      if (!existing.some(r => r.id === room.id)) {
+        localStorage.setItem('skulk_local_rooms', JSON.stringify([...existing, room]));
+      }
+    } catch (e) {
+      console.error('Failed to save room to localStorage:', e);
+    }
+  };
+
 
   // Load and synchronize rooms list from Firestore in real time
   useEffect(() => {
@@ -5114,8 +5125,16 @@ function AppContent() {
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
     } catch (err: any) {
-      console.error('Failed to create room in Firestore:', err);
-      showToast(`⚠️ Failed to create room: ${err.message || 'Permission Denied'}`);
+      console.warn('Error saving room to Firestore, falling back to local creation:', err);
+      setIsFirestoreBlocked(true);
+      saveLocalRoom(newRoomObj);
+      setRooms(prev => {
+        if (prev.some(r => r.id === newRoomObj.id)) return prev;
+        return [...prev, newRoomObj];
+      });
+      setGeneratedRoomLink(roomLink);
+      setModalStep('confirmation');
+      showToast(`⚠️ Firestore Write Blocked. Room created locally (Offline Fallback).`);
     }
   };
 
