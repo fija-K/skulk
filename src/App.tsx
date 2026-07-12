@@ -350,7 +350,7 @@ interface AbstractPlayer {
 
 function createWrappedPlayer(
   platform: string,
-  elementId: string,
+  targetElement: HTMLElement,
   videoId: string,
   isPresenter: boolean,
   isLive: boolean,
@@ -359,7 +359,7 @@ function createWrappedPlayer(
   if (platform === 'youtube') {
     return loadPlatformScript('youtube', 'https://www.youtube.com/iframe_api', 'onYouTubeIframeAPIReady').then(() => {
       return new Promise<AbstractPlayer>((resolve) => {
-        const player = new (window as any).YT.Player(elementId, {
+        const player = new (window as any).YT.Player(targetElement, {
           width: '100%',
           height: '100%',
           videoId: videoId,
@@ -412,9 +412,7 @@ function createWrappedPlayer(
 
   if (platform === 'vimeo') {
     return loadPlatformScript('vimeo', 'https://player.vimeo.com/api/player.js').then(() => {
-      const container = document.getElementById(elementId);
-      if (!container) throw new Error("Vimeo container not found");
-      container.innerHTML = '';
+      targetElement.innerHTML = '';
       
       const iframe = document.createElement('iframe');
       iframe.src = `https://player.vimeo.com/video/${videoId}?autoplay=1&controls=1&muted=${isPresenter ? 0 : 1}`;
@@ -422,7 +420,7 @@ function createWrappedPlayer(
       iframe.style.height = '100%';
       iframe.style.border = 'none';
       iframe.setAttribute('allow', 'autoplay; fullscreen');
-      container.appendChild(iframe);
+      targetElement.appendChild(iframe);
 
       const player = new (window as any).Vimeo.Player(iframe);
       
@@ -466,9 +464,7 @@ function createWrappedPlayer(
   }
 
   if (platform === 'dailymotion') {
-    const container = document.getElementById(elementId);
-    if (!container) throw new Error("Dailymotion container not found");
-    container.innerHTML = '';
+    targetElement.innerHTML = '';
 
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=1&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
@@ -476,7 +472,7 @@ function createWrappedPlayer(
     iframe.style.height = '100%';
     iframe.style.border = 'none';
     iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    container.appendChild(iframe);
+    targetElement.appendChild(iframe);
 
     let playerState = 2; // 2 = paused, 1 = playing
     let currentTime = 0;
@@ -557,16 +553,14 @@ function createWrappedPlayer(
       },
       destroy: () => {
         window.removeEventListener('message', messageListener);
-        container.innerHTML = '';
+        targetElement.innerHTML = '';
       }
     });
   }
 
   if (platform === 'twitch') {
     return loadPlatformScript('twitch', 'https://embed.twitch.tv/v1/twitch.js').then(() => {
-      const container = document.getElementById(elementId);
-      if (!container) throw new Error("Twitch container not found");
-      container.innerHTML = '';
+      targetElement.innerHTML = '';
 
       const options: any = {
         width: '100%',
@@ -582,7 +576,7 @@ function createWrappedPlayer(
         options.video = videoId;
       }
 
-      const player = new (window as any).Twitch.Player(elementId, options);
+      const player = new (window as any).Twitch.Player(targetElement, options);
 
       return new Promise<AbstractPlayer>((resolve) => {
         player.addEventListener((window as any).Twitch.Player.READY, () => {
@@ -604,7 +598,7 @@ function createWrappedPlayer(
             getCurrentTime: () => isLive ? 0 : player.getCurrentTime(),
             getPlayerState: () => player.isPaused() ? 2 : 1,
             destroy: () => {
-              container.innerHTML = '';
+              targetElement.innerHTML = '';
             }
           });
         });
@@ -698,20 +692,19 @@ function UniversalVideoPlayer({
 
   useEffect(() => {
     let active = true;
-    const divId = `media-player-${Math.random().toString(36).substring(2, 9)}`;
 
-    if (containerRef.current) {
-      const targetDiv = document.createElement('div');
-      targetDiv.id = divId;
-      targetDiv.style.width = '100%';
-      targetDiv.style.height = '100%';
-      containerRef.current.innerHTML = '';
-      containerRef.current.appendChild(targetDiv);
-    }
+    if (!containerRef.current) return;
+    
+    // Clear and restore a clean div inside the container to receive the player
+    containerRef.current.innerHTML = '';
+    const targetDiv = document.createElement('div');
+    targetDiv.style.width = '100%';
+    targetDiv.style.height = '100%';
+    containerRef.current.appendChild(targetDiv);
 
     createWrappedPlayer(
       platform,
-      divId,
+      targetDiv,
       videoId,
       isPresenter,
       isLive,
@@ -831,38 +824,37 @@ function UniversalVideoPlayer({
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
 
-  // Keep latest participants in a ref so the interval does not need to restart
-  const participantsRef = useRef(participants);
+  // Synchronize player to presenter's active state in the room via direct document subscription
   useEffect(() => {
-    participantsRef.current = participants;
-  }, [participants]);
+    if (isPresenter || isLive || !roomId || !presenterId) return;
 
-  // Synchronize player to presenter's active state in the room
-  useEffect(() => {
-    if (isLive || isPresenter || !playerRef.current) return;
+    const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
+    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+      const data = snapshot.data();
+      lastPresenterDataRef.current = data;
+      if (playerRef.current) {
+        syncToPresenterState(data, playerRef.current);
+      }
+    }, (err) => {
+      console.warn("Failed to subscribe to presenter changes:", err);
+    });
 
-    const presenterData = participants.find(p => p.id === presenterId);
-    if (!presenterData) return;
-
-    lastPresenterDataRef.current = presenterData;
-    syncToPresenterState(presenterData, playerRef.current);
-  }, [participants, isLive, presenterId]);
+    return () => unsubscribe();
+  }, [isPresenter, isLive, presenterId, roomId]);
 
   // Viewer proactive local force sync interval
   useEffect(() => {
     if (isPresenter || isLive) return;
 
     const interval = setInterval(() => {
-      if (playerRef.current) {
-        const presenterData = participantsRef.current.find(p => p.id === presenterId);
-        if (presenterData) {
-          syncToPresenterState(presenterData, playerRef.current);
-        }
+      if (playerRef.current && lastPresenterDataRef.current) {
+        syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPresenter, isLive, presenterId]);
+  }, [isPresenter, isLive]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
