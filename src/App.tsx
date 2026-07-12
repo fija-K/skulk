@@ -84,7 +84,13 @@ interface ChatMessage {
   createdAt?: string;
 }
 
-const ParticipantVideo = memo(function ParticipantVideo({ participantId }: { participantId: string }) {
+const ParticipantVideo = memo(function ParticipantVideo({ 
+  participantId, 
+  objectFit = 'contain' 
+}: { 
+  participantId: string; 
+  objectFit?: 'contain' | 'cover';
+}) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
 
@@ -96,7 +102,7 @@ const ParticipantVideo = memo(function ParticipantVideo({ participantId }: { par
       style={{ 
         width: '100%', 
         height: '100%', 
-        objectFit: 'contain', 
+        objectFit: objectFit, 
         borderRadius: '8px',
         position: 'absolute',
         top: 0,
@@ -5178,7 +5184,7 @@ function AppContent() {
               <span style={{ fontSize: '16px', color: 'var(--primary-color)' }}>▶</span>
             </div>
           ) : !showCamOff && !(isUser && cameraError) ? (
-            <ParticipantVideo participantId={p.id} />
+            <ParticipantVideo participantId={p.id} objectFit="cover" />
           ) : p.photoURL ? (
             <img 
               src={p.photoURL} 
@@ -5336,7 +5342,7 @@ function AppContent() {
                   </div>
                 </div>
               ) : (
-                <ParticipantVideo participantId={p.id} />
+                <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
               )}
               
               {p.sharing && (
