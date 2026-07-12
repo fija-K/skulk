@@ -2713,7 +2713,7 @@ function AppContent() {
   }, []);
 
   const openModal = () => {
-    if (!user) {
+    if (!user || user.isAnonymous) {
       setShowSignInPrompt(true);
       return;
     }
@@ -9671,7 +9671,7 @@ function AppContent() {
       )}
 
       {/* Sign In Prompt Modal */}
-      {showSignInPrompt && !user && (
+      {showSignInPrompt && (!user || user.isAnonymous) && (
         <div className="modal-overlay" style={{ zIndex: 1200 }}>
           <div className="modal-container animate-fade-in" style={{ maxWidth: '400px', textAlign: 'center' }}>
             <h3 style={{ fontSize: '18px', marginBottom: '12px', fontWeight: '600' }}>Sign in to create a room</h3>
@@ -9683,8 +9683,13 @@ function AppContent() {
               <button type="button" className="btn-signin" onClick={() => {
                 setShowSignInPrompt(false);
                 handleSignIn().then(() => {
-                  // After successful sign in, open the modal
-                  setTimeout(() => setIsModalOpen(true), 500);
+                  // After successful sign in, verify Google auth propagation before opening the modal
+                  setTimeout(() => {
+                    const currentUser = auth.currentUser;
+                    if (currentUser && !currentUser.isAnonymous) {
+                      setIsModalOpen(true);
+                    }
+                  }, 600);
                 });
               }} style={{ padding: '8px 16px' }}>Sign in</button>
             </div>
