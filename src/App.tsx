@@ -324,7 +324,8 @@ function createWrappedPlayer(
             controls: 1,
             disablekb: 0,
             rel: 0,
-            modestbranding: 1
+            modestbranding: 1,
+            mute: isPresenter ? 0 : 1
           },
           events: {
             onReady: () => {
@@ -731,33 +732,16 @@ function UniversalVideoPlayer({
   }, [isPresenter, isLive, participants, presenterId]);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <div 
-        ref={containerRef} 
-        style={{ 
-          width: '100%', 
-          height: '100%', 
-          borderRadius: 'var(--border-radius)', 
-          overflow: 'hidden',
-          backgroundColor: '#000'
-        }} 
-      />
-      {/* Viewer pointer-events overlay to block clicks on video but allow bottom controls */}
-      {!isPresenter && (
-        <div 
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '82%', // Cover the video screen but leave bottom controls clickable!
-            backgroundColor: 'transparent',
-            zIndex: 10,
-            cursor: 'default'
-          }}
-        />
-      )}
-    </div>
+    <div 
+      ref={containerRef} 
+      style={{ 
+        width: '100%', 
+        height: '100%', 
+        borderRadius: 'var(--border-radius)', 
+        overflow: 'hidden',
+        backgroundColor: '#000'
+      }} 
+    />
   );
 }
 
