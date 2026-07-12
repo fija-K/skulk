@@ -10,6 +10,7 @@ import {
   deleteDoc, 
   getDoc,
   getDocs, 
+  getDocsFromServer,
   onSnapshot, 
   updateDoc,
   runTransaction,
@@ -2482,7 +2483,7 @@ function AppContent() {
     if (!myId) return false;
     try {
       const presenceRef = collection(db, 'rooms', targetRoom.id, 'participants');
-      const snapshot = await getDocs(presenceRef);
+      const snapshot = await getDocsFromServer(presenceRef);
       const activeParts = snapshot.docs.map(doc => doc.id);
       
       if (activeParts.length >= (targetRoom.maxParticipants || 10) && !activeParts.includes(myId)) {
@@ -2499,7 +2500,7 @@ function AppContent() {
     const id = getRoomIdFromLink(room.link);
     const allowed = await canJoin(room);
     if (!allowed) {
-      showToast(`This room is full (${room.maxParticipants}/${room.maxParticipants})`);
+      showToast(`This room is full (${room.maxParticipants || 10}/${room.maxParticipants || 10})`);
       return;
     }
 
@@ -2693,7 +2694,7 @@ function AppContent() {
 
           const allowed = await canJoin(roomObj);
           if (!allowed) {
-            showToast(`This room is full (${roomObj.maxParticipants}/${roomObj.maxParticipants})`);
+            showToast(`This room is full (${roomObj.maxParticipants || 10}/${roomObj.maxParticipants || 10})`);
             isEnteringRoomRef.current = null;
             navigate('/');
             return;
