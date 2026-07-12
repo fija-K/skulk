@@ -1820,8 +1820,37 @@ function AppContent() {
 
   // Header popover states
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
+  const [roomJoinKey, setRoomJoinKey] = useState<string | null>(null);
   const [maxPartInput, setMaxPartInput] = useState<number | ''>('');
   const roomSettingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isRoomSettingsOpen || !currentRoom) {
+      setRoomJoinKey(null);
+      return;
+    }
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+    if (!isHostOrAdmin || currentRoom.type === 'public') return;
+
+    let active = true;
+    const fetchKey = async () => {
+      try {
+        const keysRef = collection(db, 'rooms', currentRoom.id, 'keys');
+        const snap = await getDocs(keysRef);
+        if (active && !snap.empty) {
+          setRoomJoinKey(snap.docs[0].id);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch room join key inside settings:", err);
+      }
+    };
+    fetchKey();
+    return () => {
+      active = false;
+    };
+  }, [isRoomSettingsOpen, currentRoom, callParticipants]);
   const isEvictedRef = useRef(false);
 
   // Whole-call Mini Mode (Zoom-like Call PiP) states
@@ -1998,7 +2027,7 @@ function AppContent() {
   const isEnteringRoomRef = useRef<string | null>(null);
 
   // Helper to determine role dynamically based on auth email and room creator
-  const determineRole = (roomCreatorId?: string) => {
+  const determineRole = (roomCreatorId?: string): 'admin' | 'host' | 'cohost' | 'member' => {
     const myId = getMyId();
     if (!myId) return 'member';
     const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
@@ -2528,13 +2557,24 @@ function AppContent() {
 
     if (room.type === 'public') {
       window.open(`/room/${id}`, '_blank');
-    } else if (room.type === 'public-ask') {
+    } else {
+      let isAlreadyApproved = false;
       const myRole = determineRole(room.creatorId);
-      if (isCreator || myRole === 'admin') {
+      try {
+        const approvedSnap = await getDoc(doc(db, 'rooms', room.id, 'approvedUsers', myId));
+        isAlreadyApproved = approvedSnap.exists();
+      } catch (e) {
+        console.warn("Failed to check approvedUsers in dashboard click:", e);
+      }
+
+      if (isCreator || myRole === 'admin' || myRole === 'cohost' || isAlreadyApproved) {
         window.open(`/room/${id}`, '_blank');
       } else {
-        // Show waiting modal triggering the request status useEffect
-        setPendingJoinRoom(room);
+        if (room.type === 'private') {
+          showToast("This room is private. You must use a direct invite link with a secret key to join.");
+        } else {
+          setPendingJoinRoom(room);
+        }
       }
     }
   };
@@ -2566,7 +2606,19 @@ function AppContent() {
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
-      const myRole = determineRole(normalizedRoom.creatorId);
+      let myRole = determineRole(normalizedRoom.creatorId);
+      try {
+        const appDocSnap = await getDoc(doc(db, 'rooms', normalizedRoom.id, 'approvedUsers', myId));
+        if (appDocSnap.exists()) {
+          const storedRole = appDocSnap.data()?.role;
+          if (storedRole && (storedRole === 'host' || storedRole === 'cohost' || storedRole === 'admin')) {
+            myRole = storedRole;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to retrieve persistent role from approvedUsers:", err);
+      }
+
       try {
         const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
         await setDoc(presenceRef, {
@@ -2722,18 +2774,43 @@ function AppContent() {
           const myId = getMyId();
           const isCreator = roomObj.creatorId === myId;
           const myRole = determineRole(roomObj.creatorId);
-          if (roomObj.type === 'public-ask' && !isCreator && myRole !== 'admin') {
+
+          if ((roomObj.type === 'public-ask' || roomObj.type === 'private') && !isCreator && myRole !== 'admin' && myRole !== 'cohost') {
+            let isAlreadyApproved = false;
             try {
-              const reqDocRef = doc(db, 'rooms', roomObj.id, 'joinRequests', myId);
-              const reqDocSnap = await getDoc(reqDocRef);
-              const isAlreadyApproved = reqDocSnap.exists() && reqDocSnap.data()?.status === 'approved';
-              if (!isAlreadyApproved) {
-                isEnteringRoomRef.current = null;
-                setPendingJoinRoom(roomObj);
-                return;
-              }
+              const approvedSnap = await getDoc(doc(db, 'rooms', roomObj.id, 'approvedUsers', myId));
+              isAlreadyApproved = approvedSnap.exists();
             } catch (e) {
-              console.warn("Direct link capacity verification failed, joining room.");
+              console.warn("Failed to check persistent approval in route sync:", e);
+            }
+
+            if (!isAlreadyApproved) {
+              const urlParams = new URLSearchParams(window.location.search);
+              const urlKey = urlParams.get('key');
+              if (urlKey) {
+                try {
+                  const approvedDocRef = doc(db, 'rooms', roomObj.id, 'approvedUsers', myId);
+                  await setDoc(approvedDocRef, {
+                    approvedAt: new Date().toISOString(),
+                    role: 'member',
+                    joinKey: urlKey
+                  });
+                  isAlreadyApproved = true;
+                } catch (err) {
+                  console.warn("Failed to self-approve with joinKey:", err);
+                }
+              }
+            }
+
+            if (!isAlreadyApproved) {
+              isEnteringRoomRef.current = null;
+              if (roomObj.type === 'private') {
+                showToast("❌ This room is private. You must use a valid direct invite link with a secret key to join.");
+                navigate('/');
+              } else {
+                setPendingJoinRoom(roomObj);
+              }
+              return;
             }
           }
 
@@ -3105,6 +3182,10 @@ function AppContent() {
     const rid = roomDocId(currentRoom);
     try {
       await setDoc(doc(db, 'rooms', rid, 'joinRequests', req.id), { status: 'approved' }, { merge: true });
+      await setDoc(doc(db, 'rooms', rid, 'approvedUsers', req.id), {
+        approvedAt: new Date().toISOString(),
+        role: 'member'
+      });
       showToast(`Accepted ${req.name}'s request.`);
     } catch (e) {
       console.warn("Failed to approve request:", e);
@@ -4283,7 +4364,8 @@ function AppContent() {
     }
 
     const randomId = Math.random().toString(36).substring(2, 8);
-    const roomLink = `${window.location.origin}/room/${randomId}`;
+    const joinKey = newRoomType !== 'public' ? Math.random().toString(36).substring(2, 10) : '';
+    const roomLink = newRoomType !== 'public' ? `${window.location.origin}/room/${randomId}?key=${joinKey}` : `${window.location.origin}/room/${randomId}`;
 
     const roomDetails = {
       name: newRoomName || 'Untitled Room',
@@ -4341,6 +4423,21 @@ function AppContent() {
       } catch (e: any) {
         console.error("Room document write failed:", e);
         throw new Error(`Room persistence failed: ${e.message || 'Permission Denied'}`);
+      }
+
+      // If key is generated, write key document and self-approve creator
+      if (newRoomType !== 'public' && joinKey && myId) {
+        try {
+          await setDoc(doc(db, 'rooms', newRoomObj.id, 'keys', joinKey), {
+            createdAt: new Date().toISOString()
+          });
+          await setDoc(doc(db, 'rooms', newRoomObj.id, 'approvedUsers', myId), {
+            approvedAt: new Date().toISOString(),
+            role: 'host'
+          });
+        } catch (e) {
+          console.warn("Failed to create key or self-approval in Firestore:", e);
+        }
       }
 
       // 2. Update rate-limit user document second
@@ -4470,6 +4567,12 @@ function AppContent() {
     const rid = roomDocId(currentRoom);
     try {
       await deleteDoc(doc(db, 'rooms', rid, 'participants', id));
+      try {
+        await deleteDoc(doc(db, 'rooms', rid, 'approvedUsers', id));
+      } catch (err) {
+        console.warn("Failed to remove participant from approvedUsers list:", err);
+      }
+
       const signalsRef = collection(db, 'rooms', rid, 'signals');
       const snapshot = await getDocs(signalsRef);
       snapshot.forEach(async (docSnap) => {
@@ -4515,6 +4618,15 @@ function AppContent() {
             transaction.update(oldHostRef, { role: 'cohost' });
           }
 
+          // Update persistent approved list roles in transaction
+          const targetAppRef = doc(db, 'rooms', rid, 'approvedUsers', id);
+          transaction.set(targetAppRef, { approvedAt: new Date().toISOString(), role: 'host' }, { merge: true });
+          
+          if (currentHost) {
+            const oldAppRef = doc(db, 'rooms', rid, 'approvedUsers', currentHost.id);
+            transaction.set(oldAppRef, { approvedAt: new Date().toISOString(), role: 'cohost' }, { merge: true });
+          }
+
           // Update room currentHostId and currentHostName
           const roomRef = doc(db, 'rooms', rid);
           transaction.update(roomRef, {
@@ -4526,6 +4638,14 @@ function AppContent() {
       } else {
         // Standard role change
         await updateDoc(doc(db, 'rooms', rid, 'participants', id), { role: newRole });
+        try {
+          await setDoc(doc(db, 'rooms', rid, 'approvedUsers', id), {
+            approvedAt: new Date().toISOString(),
+            role: newRole
+          }, { merge: true });
+        } catch (e) {
+          console.warn("Failed to update persistent role inside approvedUsers:", e);
+        }
         showToast(`Updated role to ${newRole}`);
       }
     } catch (e: any) {
@@ -5946,6 +6066,35 @@ function AppContent() {
             </label>
           </div>
         </div>
+
+        {/* Shareable Join Key display for Host/Cohost/Admin */}
+        {isHostOrAdmin && roomJoinKey && currentRoom && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Invite Link with Secret Key</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                type="text" 
+                readOnly 
+                value={`${window.location.origin}/room/${currentRoom.id}?key=${roomJoinKey}`}
+                className="room-input"
+                style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}
+                onClick={(e) => e.currentTarget.select()}
+              />
+              <button 
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/room/${currentRoom.id}?key=${roomJoinKey}`);
+                  showToast("Invite link copied to clipboard!");
+                }}
+                className="btn-create"
+                style={{ padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap', justifyContent: 'center' }}
+              >
+                Copy
+              </button>
+            </div>
+            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone with this link will bypass the join approval flow.</span>
+          </div>
+        )}
       </div>
     );
   };
