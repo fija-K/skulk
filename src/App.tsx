@@ -285,33 +285,6 @@ function loadPlatformScript(platform: string, src: string, callbackName?: string
       };
     }
 
-    // Polling fallbacks to resolve race conditions
-    if (platform === 'youtube') {
-      const interval = setInterval(() => {
-        if ((window as any).YT && (window as any).YT.Player) {
-          clearInterval(interval);
-          resolve();
-        }
-      }, 50);
-      setTimeout(() => clearInterval(interval), 10000);
-    } else if (platform === 'vimeo') {
-      const interval = setInterval(() => {
-        if ((window as any).Vimeo) {
-          clearInterval(interval);
-          resolve();
-        }
-      }, 50);
-      setTimeout(() => clearInterval(interval), 10000);
-    } else if (platform === 'twitch') {
-      const interval = setInterval(() => {
-        if ((window as any).Twitch) {
-          clearInterval(interval);
-          resolve();
-        }
-      }, 50);
-      setTimeout(() => clearInterval(interval), 10000);
-    }
-
     const tag = document.createElement('script');
     tag.src = src;
     if (!callbackName) {
@@ -345,13 +318,14 @@ function createWrappedPlayer(
     return loadPlatformScript('youtube', 'https://www.youtube.com/iframe_api', 'onYouTubeIframeAPIReady').then(() => {
       return new Promise<AbstractPlayer>((resolve) => {
         const player = new (window as any).YT.Player(elementId, {
+          width: '100%',
+          height: '100%',
           videoId: videoId,
           playerVars: {
             autoplay: 1,
             controls: 1,
             disablekb: 0,
             rel: 0,
-            modestbranding: 1,
             mute: isPresenter ? 0 : 1
           },
           events: {
