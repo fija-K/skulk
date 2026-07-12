@@ -264,19 +264,43 @@ function loadPlatformScript(platform: string, src: string, callbackName?: string
   if (existing) return existing;
 
   scriptLoadPromises[platform] = new Promise((resolve) => {
+    // 5-second timeout fallback to prevent hanging the player container
+    const timeout = setTimeout(() => {
+      console.warn(`Script load timed out for platform: ${platform}`);
+      resolve();
+    }, 5000);
+
     if (platform === 'youtube' && (window as any).YT && (window as any).YT.Player) {
+      clearTimeout(timeout);
       resolve();
       return;
     }
+
+    if (platform === 'youtube' && (window as any).YT) {
+      const interval = setInterval(() => {
+        if ((window as any).YT.Player) {
+          clearInterval(interval);
+          clearTimeout(timeout);
+          resolve();
+        }
+      }, 50);
+      return;
+    }
+
     if (platform === 'vimeo' && (window as any).Vimeo) {
+      clearTimeout(timeout);
       resolve();
       return;
     }
+
     if (platform === 'dailymotion' && (window as any).DM) {
+      clearTimeout(timeout);
       resolve();
       return;
     }
+
     if (platform === 'twitch' && (window as any).Twitch) {
+      clearTimeout(timeout);
       resolve();
       return;
     }
@@ -284,18 +308,30 @@ function loadPlatformScript(platform: string, src: string, callbackName?: string
     if (callbackName) {
       const prevCallback = (window as any)[callbackName];
       (window as any)[callbackName] = () => {
-        if (prevCallback) prevCallback();
+        if (prevCallback) {
+          try {
+            prevCallback();
+          } catch (e) {}
+        }
+        clearTimeout(timeout);
         resolve();
       };
     }
 
     const tag = document.createElement('script');
     tag.src = src;
-    if (!callbackName) {
-      tag.onload = () => resolve();
-    }
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+    tag.onload = () => {
+      if (!callbackName) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+    tag.onerror = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    document.head.appendChild(tag);
   });
 
   return scriptLoadPromises[platform];
@@ -336,6 +372,11 @@ function createWrappedPlayer(
           },
           events: {
             onReady: () => {
+              if (!isPresenter) {
+                try {
+                  player.mute();
+                } catch (e) {}
+              }
               resolve({
                 play: () => player.playVideo(),
                 pause: () => player.pauseVideo(),
@@ -380,6 +421,7 @@ function createWrappedPlayer(
       iframe.style.width = '100%';
       iframe.style.height = '100%';
       iframe.style.border = 'none';
+      iframe.setAttribute('allow', 'autoplay; fullscreen');
       container.appendChild(iframe);
 
       const player = new (window as any).Vimeo.Player(iframe);
