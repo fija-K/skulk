@@ -96,12 +96,13 @@ const ParticipantVideo = memo(function ParticipantVideo({ participantId }: { par
       style={{ 
         width: '100%', 
         height: '100%', 
-        objectFit: 'cover', 
+        objectFit: 'contain', 
         borderRadius: '8px',
         position: 'absolute',
         top: 0,
         left: 0,
-        zIndex: 1
+        zIndex: 1,
+        backgroundColor: '#0f1013'
       }} 
     />
   );
@@ -5136,25 +5137,125 @@ function AppContent() {
     const showMuted = isUser ? isMicMuted : p.isMuted;
     const showCamOff = isUser ? isCamOff : p.isCamOff;
     const isSpeaking = p.isSpeaking && !showMuted;
+
+    // If it's a thumbnail strip tile:
+    if (isThumbnail) {
+      const isSpotlightActive = p.id === spotlightParticipantId;
+      return (
+        <div 
+          key={p.id} 
+          className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''}`}
+          onClick={() => setSpotlightParticipantId(p.id)}
+          style={{ 
+            cursor: 'pointer',
+            position: 'relative',
+            width: '120px',
+            height: '75px',
+            minWidth: '120px',
+            borderRadius: '6px',
+            overflow: 'hidden',
+            backgroundColor: p.color,
+            boxSizing: 'border-box',
+            border: isSpotlightActive ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
+            boxShadow: isSpotlightActive ? '0 0 10px var(--primary-color)' : 'none',
+            flexShrink: 0
+          }}
+        >
+          {p.sharing === 'youtube' ? (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
+              animation: 'pulse 2s infinite',
+              zIndex: 2
+            }}>
+              <span style={{ fontSize: '16px', color: 'var(--primary-color)' }}>▶</span>
+            </div>
+          ) : !showCamOff && !(isUser && cameraError) ? (
+            <ParticipantVideo participantId={p.id} />
+          ) : p.photoURL ? (
+            <img 
+              src={p.photoURL} 
+              alt={p.name} 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '16px', fontWeight: 'bold', color: '#fff' }}>
+              {p.initials}
+            </div>
+          )}
+
+          {/* Micro status indicator (Muted status) */}
+          <div style={{
+            position: 'absolute',
+            top: '4px',
+            right: '4px',
+            zIndex: 10,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            borderRadius: '50%',
+            width: '16px',
+            height: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            {showMuted ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+              </svg>
+            )}
+          </div>
+          
+          {/* Small overlay name tag */}
+          <div style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            padding: '3px 6px',
+            fontSize: '9px',
+            fontWeight: 600,
+            color: '#fff',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            zIndex: 5
+          }}>
+            {p.name.replace(' (You)', '')}
+          </div>
+        </div>
+      );
+    }
     
     // Check if we should do a media sharing visual state takeover
-    const showMediaTakeover = !isThumbnail && p.sharing === 'youtube';
+    const showMediaTakeover = p.sharing === 'youtube';
     
     return (
       <div 
         key={p.id} 
-        className={`${isThumbnail ? 'spotlight-thumbnail-tile' : 'participant-tile'} ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${p.id === spotlightParticipantId && isThumbnail ? 'active' : ''}`}
+        className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''}`}
         onClick={() => {
-          if (isThumbnail) {
-            setSpotlightParticipantId(p.id);
-          } else if (p.sharing) {
+          if (p.sharing) {
             handleViewParticipantShare(p);
-          } else if (!spotlightParticipantId) {
-            setSpotlightParticipantId(p.id);
           }
         }}
         style={{ 
-          cursor: 'pointer',
+          cursor: p.sharing ? 'pointer' : 'default',
           // Show container border glow if they are sharing media
           ...p.sharing === 'youtube' ? {
             boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
@@ -8086,15 +8187,22 @@ function AppContent() {
                   )}
 
                   {/* Layout Caption toggle */}
-                  <p className="stage-caption" onClick={() => setIsGalleryView(!isGalleryView)}>
-                    Tap the grid icon to switch to {isGalleryView ? 'compact grid' : 'full gallery'} view
+                  <p className="stage-caption" onClick={() => {
+                    if (spotlightParticipantId) {
+                      setSpotlightParticipantId(null);
+                    } else {
+                      setSpotlightParticipantId(callParticipants[0]?.id || getMyId());
+                    }
+                  }}>
+                    Tap the grid icon to switch to {spotlightParticipantId ? 'compact grid' : 'focused spotlight'} view
                   </p>
                 </>
               )}
             </div>
 
             {/* Call Sidebar (Right Panel) */}
-            <div className="call-sidebar">
+            {!spotlightParticipantId && (
+              <div className="call-sidebar">
               {/* Sidebar Header Tabs */}
               <div className="call-sidebar-header">
                 <button 
@@ -8985,6 +9093,7 @@ function AppContent() {
 
               </div>
             </div>
+            )}
 
           </div>
 
@@ -9038,23 +9147,29 @@ function AppContent() {
             
             {/* Layout Toggle Button */}
             <button 
-              onClick={() => setIsGalleryView(!isGalleryView)} 
+              onClick={() => {
+                if (spotlightParticipantId) {
+                  setSpotlightParticipantId(null);
+                } else {
+                  setSpotlightParticipantId(callParticipants[0]?.id || getMyId());
+                }
+              }} 
               className="dock-btn"
-              title={isGalleryView ? 'Switch to Grid View' : 'Switch to Gallery View'}
+              title={spotlightParticipantId ? 'Switch to Grid View' : 'Switch to Spotlight View'}
             >
-              {isGalleryView ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="9"></rect>
-                  <rect x="14" y="3" width="7" height="5"></rect>
-                  <rect x="14" y="12" width="7" height="9"></rect>
-                  <rect x="3" y="16" width="7" height="5"></rect>
-                </svg>
-              ) : (
+              {spotlightParticipantId ? (
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7"></rect>
                   <rect x="14" y="3" width="7" height="7"></rect>
                   <rect x="14" y="14" width="7" height="7"></rect>
                   <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="9"></rect>
+                  <rect x="14" y="3" width="7" height="5"></rect>
+                  <rect x="14" y="12" width="7" height="9"></rect>
+                  <rect x="3" y="16" width="7" height="5"></rect>
                 </svg>
               )}
             </button>
