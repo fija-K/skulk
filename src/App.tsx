@@ -21,6 +21,7 @@ import {
   where
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
+import tdData from '../td.json';
 import {
   LiveKitRoom,
   VideoTrack,
@@ -852,51 +853,8 @@ export default function App() {
   return <AppContent />;
 }
 
-const truthQuestions = [
-  "What is your biggest fear when it comes to exams?",
-  "Have you ever cheated on a test? If so, did you get caught?",
-  "What is the most embarrassing thing that happened to you in class?",
-  "What subject do you secretly enjoy but pretend to dislike?",
-  "What is your worst study habit that you want to break?",
-  "Who was your favorite teacher and why?",
-  "Have you ever fallen asleep in a class? Tell us the story.",
-  "What is the longest time you've spent studying without sleeping?",
-  "What is the most useless piece of trivia you know?",
-  "If you could delete one academic subject from existence, what would it be?",
-  "What is your dream job that you are too afraid to pursue?",
-  "What was your worst grade ever, and what was the subject?",
-  "Have you ever lied about your grades to your parents?",
-  "What is the weirdest study snack you have ever eaten?",
-  "If you could swap lives with any classmate for a day, who would it be and why?",
-  "What is the most productive thing you did while procrastinating?",
-  "What is your secret talent that nobody in this call knows about?",
-  "Have you ever pretended to be sick to skip school/college?",
-  "If you could have any superpower to help you study, what would it be?",
-  "What is the most awkward text you sent to a study group by mistake?"
-];
-
-const dareQuestions = [
-  "Sing a line of your favorite song out loud right now.",
-  "Do 10 jumping jacks while keeping your microphone unmuted.",
-  "Show the group the last photo you took on your phone.",
-  "Draw a quick portrait of someone in the call and show it to the camera.",
-  "Speak in a dramatic whisper for the next three turns.",
-  "Balance a book on your head for the next 5 minutes without dropping it.",
-  "Tell a really bad dad joke to the group.",
-  "Show the group your most recently used emojis.",
-  "Read the last text message you received out loud.",
-  "Imitate your favorite teacher or professor for 15 seconds.",
-  "Make a funny face and hold it for 10 seconds.",
-  "Give a 30-second passionate speech about why pineapple belongs (or doesn't belong) on pizza.",
-  "Do a quick 15-second dance move on camera.",
-  "Speak in a different accent (e.g. British, Australian, etc.) for the next 2 minutes.",
-  "Try to touch your nose with your tongue.",
-  "Let the host/co-host choose a word that you must use in every sentence you speak for the next 3 minutes.",
-  "Keep your hands on your head for the next 3 minutes.",
-  "Spell your full name backwards as fast as you can.",
-  "Act like a robot introducing themselves.",
-  "Open your window (or door) and yell 'I love studying!' out loud."
-];
+const truthQuestions = tdData.game.td.truths;
+const dareQuestions = tdData.game.td.dares;
 
 interface PipWindowContentProps {
   myId: string;
