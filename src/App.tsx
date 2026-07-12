@@ -2779,8 +2779,6 @@ function AppContent() {
   };
 
   const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
-  const myPresence = callParticipants.find(p => p.id === getMyId());
-  const hasControl = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
 
   const updateMySharing = async (fields: Record<string, unknown>) => {
     const myId = getMyId();
@@ -9187,7 +9185,7 @@ function AppContent() {
                         </div>
 
                         {/* Platform Tabs Selection */}
-                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap', opacity: hasControl ? 1 : 0.5, pointerEvents: hasControl ? 'auto' : 'none' }}>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
                           {(['youtube', 'vimeo', 'dailymotion', 'twitch'] as const).map((plat) => (
                             <button
                               key={plat}
