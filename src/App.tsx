@@ -3533,6 +3533,9 @@ function AppContent() {
           todRequestedSpin: data.todRequestedSpin || null,
           todRequestedChoice: data.todRequestedChoice || null,
           todRequestedReset: data.todRequestedReset || null,
+          ytPlaying: data.ytPlaying,
+          ytTime: data.ytTime,
+          ytUpdateTimestamp: data.ytUpdateTimestamp,
         } as Participant;
       });
 
