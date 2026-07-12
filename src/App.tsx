@@ -1825,14 +1825,17 @@ function AppContent() {
   const roomSettingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isRoomSettingsOpen || !currentRoom) {
+    if (!currentRoom || currentRoom.type === 'public') {
       setRoomJoinKey(null);
       return;
     }
     const myId = getMyId();
     const myPresence = callParticipants.find(p => p.id === myId);
     const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
-    if (!isHostOrAdmin || currentRoom.type === 'public') return;
+    if (!isHostOrAdmin) {
+      setRoomJoinKey(null);
+      return;
+    }
 
     let active = true;
     const fetchKey = async () => {
@@ -1840,17 +1843,25 @@ function AppContent() {
         const keysRef = collection(db, 'rooms', currentRoom.id, 'keys');
         const snap = await getDocs(keysRef);
         if (active && !snap.empty) {
-          setRoomJoinKey(snap.docs[0].id);
+          const joinKey = snap.docs[0].id;
+          setRoomJoinKey(joinKey);
+
+          // Update URL in the browser without reload
+          const url = new URL(window.location.href);
+          if (url.searchParams.get('key') !== joinKey) {
+            url.searchParams.set('key', joinKey);
+            window.history.replaceState(null, '', url.pathname + url.search);
+          }
         }
       } catch (err) {
-        console.warn("Failed to fetch room join key inside settings:", err);
+        console.warn("Failed to fetch room key for URL sync:", err);
       }
     };
     fetchKey();
     return () => {
       active = false;
     };
-  }, [isRoomSettingsOpen, currentRoom, callParticipants]);
+  }, [currentRoom, callParticipants]);
   const isEvictedRef = useRef(false);
 
   // Whole-call Mini Mode (Zoom-like Call PiP) states
