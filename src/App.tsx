@@ -2619,16 +2619,18 @@ function AppContent() {
     hasSeenSelfInListRef.current = false; // Reset on initial join
     if (myId) {
       let myRole = determineRole(normalizedRoom.creatorId);
-      try {
-        const appDocSnap = await getDoc(doc(db, 'rooms', normalizedRoom.id, 'approvedUsers', myId));
-        if (appDocSnap.exists()) {
-          const storedRole = appDocSnap.data()?.role;
-          if (storedRole && (storedRole === 'host' || storedRole === 'cohost' || storedRole === 'admin')) {
-            myRole = storedRole;
+      if (myRole !== 'admin') {
+        try {
+          const appDocSnap = await getDoc(doc(db, 'rooms', normalizedRoom.id, 'approvedUsers', myId));
+          if (appDocSnap.exists()) {
+            const storedRole = appDocSnap.data()?.role;
+            if (storedRole && (storedRole === 'host' || storedRole === 'cohost' || storedRole === 'admin')) {
+              myRole = storedRole;
+            }
           }
+        } catch (err) {
+          console.warn("Failed to retrieve persistent role from approvedUsers:", err);
         }
-      } catch (err) {
-        console.warn("Failed to retrieve persistent role from approvedUsers:", err);
       }
 
       try {
@@ -4606,6 +4608,15 @@ function AppContent() {
   const handleParticipantRoleChange = async (id: string, newRole: 'host' | 'cohost' | 'member') => {
     if (!currentRoom) return;
     const rid = roomDocId(currentRoom);
+    
+    // Guard: Prevent modifying an existing admin role through standard cohost/member paths
+    const targetPart = callParticipants.find(p => p.id === id);
+    if (newRole !== 'host' && targetPart && targetPart.role === 'admin') {
+      showToast("❌ Admin role cannot be modified.");
+      setActiveMenuParticipantId(null);
+      return;
+    }
+
     try {
       if (newRole === 'host') {
         // Atomic Host Transfer Transaction
@@ -4617,24 +4628,29 @@ function AppContent() {
           }
           const targetData = targetSnap.data();
           const targetName = targetData.name || 'Participant';
+          const targetRole = targetData.role || 'member';
 
           // Find current host to demote
           const currentHost = callParticipants.find(p => p.role === 'host' && p.id !== id);
 
-          // Promote new host
-          transaction.update(targetRef, { role: 'host' });
+          // Promote new host - Guard admin role
+          if (targetRole !== 'admin') {
+            transaction.update(targetRef, { role: 'host' });
+          }
 
-          // Demote old host to 'cohost' if exists
-          if (currentHost) {
+          // Demote old host to 'cohost' if exists - Guard admin role
+          if (currentHost && currentHost.role !== 'admin') {
             const oldHostRef = doc(db, 'rooms', rid, 'participants', currentHost.id);
             transaction.update(oldHostRef, { role: 'cohost' });
           }
 
-          // Update persistent approved list roles in transaction
-          const targetAppRef = doc(db, 'rooms', rid, 'approvedUsers', id);
-          transaction.set(targetAppRef, { approvedAt: new Date().toISOString(), role: 'host' }, { merge: true });
+          // Update persistent approved list roles in transaction - Guard admin role
+          if (targetRole !== 'admin') {
+            const targetAppRef = doc(db, 'rooms', rid, 'approvedUsers', id);
+            transaction.set(targetAppRef, { approvedAt: new Date().toISOString(), role: 'host' }, { merge: true });
+          }
           
-          if (currentHost) {
+          if (currentHost && currentHost.role !== 'admin') {
             const oldAppRef = doc(db, 'rooms', rid, 'approvedUsers', currentHost.id);
             transaction.set(oldAppRef, { approvedAt: new Date().toISOString(), role: 'cohost' }, { merge: true });
           }
