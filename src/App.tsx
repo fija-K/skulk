@@ -49,6 +49,7 @@ interface Room {
   createdAt?: string;
   currentHostId?: string;
   currentHostName?: string;
+  isLocalOnly?: boolean;
 }
 
 interface Participant {
@@ -1760,8 +1761,13 @@ function AppContent() {
         const updatedLocal = [...local];
         
         local.forEach(r => {
-          if (!list.some(m => m.id === r.id)) {
-            // Remove from updatedLocal
+          if (r.isLocalOnly) {
+            // Keep local-only fallback rooms
+            if (!merged.some(m => m.id === r.id)) {
+              merged.push(r);
+            }
+          } else if (!list.some(m => m.id === r.id)) {
+            // Remove garbage-collected Firestore rooms from localStorage
             const idx = updatedLocal.findIndex(ul => ul.id === r.id);
             if (idx !== -1) {
               updatedLocal.splice(idx, 1);
@@ -5127,10 +5133,11 @@ function AppContent() {
     } catch (err: any) {
       console.warn('Error saving room to Firestore, falling back to local creation:', err);
       setIsFirestoreBlocked(true);
-      saveLocalRoom(newRoomObj);
+      const localRoom = { ...newRoomObj, isLocalOnly: true };
+      saveLocalRoom(localRoom);
       setRooms(prev => {
-        if (prev.some(r => r.id === newRoomObj.id)) return prev;
-        return [...prev, newRoomObj];
+        if (prev.some(r => r.id === localRoom.id)) return prev;
+        return [...prev, localRoom];
       });
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
@@ -5373,6 +5380,7 @@ function AppContent() {
       const local = getLocalRooms();
       const updatedLocal = local.filter(r => r.id !== rid);
       localStorage.setItem('skulk_local_rooms', JSON.stringify(updatedLocal));
+      setRooms(prev => prev.filter(r => r.id !== rid));
 
       // 1. Delete the main room document (triggers snapshot callback on all clients to leave)
       await deleteDoc(doc(db, 'rooms', rid));
