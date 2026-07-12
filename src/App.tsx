@@ -1808,7 +1808,7 @@ function AppContent() {
   const [isCamOff, setIsCamOff] = useState(true);
   const [cameraError, setCameraError] = useState(false);
   const [micError, setMicError] = useState(false);
-  const [isGalleryView, setIsGalleryView] = useState(false);
+  const [isGalleryView, setIsGalleryView] = useState(true);
   const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   
   // Sidebar tabs in-call panel
@@ -2970,7 +2970,7 @@ function AppContent() {
     setCurrentRoom(normalizedRoom);
     setIsMicMuted(true);
     setIsCamOff(true);
-    setIsGalleryView(false);
+    setIsGalleryView(true);
     setCallTab('chat');
     setViewingShare(null);
     setChatMessages([]);
@@ -5252,10 +5252,12 @@ function AppContent() {
         onClick={() => {
           if (p.sharing) {
             handleViewParticipantShare(p);
+          } else if (!spotlightParticipantId) {
+            setSpotlightParticipantId(p.id);
           }
         }}
         style={{ 
-          cursor: p.sharing ? 'pointer' : 'default',
+          cursor: (p.sharing || !spotlightParticipantId) ? 'pointer' : 'default',
           // Show container border glow if they are sharing media
           ...p.sharing === 'youtube' ? {
             boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
@@ -8165,6 +8167,7 @@ function AppContent() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSpotlightParticipantId(null);
+                                  setIsGalleryView(true);
                                 }}
                               >
                                 Exit Spotlight
@@ -8190,11 +8193,12 @@ function AppContent() {
                   <p className="stage-caption" onClick={() => {
                     if (spotlightParticipantId) {
                       setSpotlightParticipantId(null);
+                      setIsGalleryView(true);
                     } else {
-                      setSpotlightParticipantId(callParticipants[0]?.id || getMyId());
+                      setIsGalleryView(!isGalleryView);
                     }
                   }}>
-                    Tap the grid icon to switch to {spotlightParticipantId ? 'compact grid' : 'focused spotlight'} view
+                    Tap the grid icon to switch to {spotlightParticipantId ? 'full gallery' : (isGalleryView ? 'compact grid' : 'full gallery')} view
                   </p>
                 </>
               )}
@@ -9190,14 +9194,15 @@ function AppContent() {
               onClick={() => {
                 if (spotlightParticipantId) {
                   setSpotlightParticipantId(null);
+                  setIsGalleryView(true);
                 } else {
-                  setSpotlightParticipantId(callParticipants[0]?.id || getMyId());
+                  setIsGalleryView(!isGalleryView);
                 }
               }} 
               className="dock-btn"
-              title={spotlightParticipantId ? 'Switch to Grid View' : 'Switch to Spotlight View'}
+              title={spotlightParticipantId ? 'Switch to Gallery View' : (isGalleryView ? 'Switch to Grid View' : 'Switch to Gallery View')}
             >
-              {spotlightParticipantId ? (
+              {spotlightParticipantId || isGalleryView ? (
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7"></rect>
                   <rect x="14" y="3" width="7" height="7"></rect>
