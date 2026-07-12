@@ -5298,36 +5298,22 @@ function AppContent() {
     return dateStr;
   };
 
-  const formatRoomCreatedAt = (createdAtStr?: string) => {
+
+
+  const formatFriendlyCreationTimeDate = (createdAtStr?: string) => {
     if (!createdAtStr) return '';
     try {
-      const date = new Date(createdAtStr);
-      if (isNaN(date.getTime())) return '';
-
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
-
-      if (diffMs < 0) {
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-
-      if (diffMins < 1) {
-        return 'Just now';
-      }
-      if (diffMins < 60) {
-        return `${diffMins}m ago`;
-      }
-      if (diffHours < 24) {
-        return `${diffHours}h ago`;
-      }
-      
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const d = new Date(createdAtStr);
+      if (isNaN(d.getTime())) return '';
+      const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `${dateStr} · ${timeStr}`;
     } catch (e) {
       return '';
     }
   };
+
+
 
 
   const getGalleryGridTemplate = (count: number) => {
@@ -7341,7 +7327,6 @@ function AppContent() {
                         ) : (
                           `Hosted by ${hostLabel}`
                         )}
-                        {room.createdAt && ` · ${formatRoomCreatedAt(room.createdAt)}`}
                       </p>
                       
                       {/* Participant Avatars Row */}
@@ -7425,7 +7410,14 @@ function AppContent() {
                       })()}
                       
                       {/* Room Footer */}
-                      <div className="room-footer">
+                      <div className="room-footer" style={{ justifyContent: 'space-between' }}>
+                        {room.createdAt ? (
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', opacity: 0.8 }}>
+                            {formatFriendlyCreationTimeDate(room.createdAt)}
+                          </span>
+                        ) : (
+                          <div></div>
+                        )}
                         <button 
                           onClick={() => handleJoinRoomClick(room)} 
                           className="btn-join"
