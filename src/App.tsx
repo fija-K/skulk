@@ -6441,7 +6441,8 @@ function AppContent() {
 
           {/* Rooms Tab Content */}
           {activeTab === 'rooms' ? (
-            <div>
+            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'start' }}>
+              <div style={{ flex: '2 1 600px', minWidth: '320px' }}>
               {isFirestoreBlocked && (
                 <div className="animate-fade-in" style={{
                   display: 'flex',
@@ -6674,6 +6675,140 @@ function AppContent() {
                   <p className="locked-text">
                     Private rooms don't show up here — share a link instead
                   </p>
+                </div>
+              </div>
+              </div>
+
+              {/* Right Column: Target Sessions Widget */}
+              <div className="targets-widget-container animate-fade-in" style={{
+                flex: '1 1 300px',
+                minWidth: '300px',
+                position: 'sticky',
+                top: '24px',
+                backgroundColor: 'var(--panel-bg)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--border-radius)',
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
+              }}>
+                <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
+                      <polyline points="9 11 12 14 22 4"></polyline>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                    Target Sessions
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Weekly checklist and progress tracker</span>
+                </div>
+
+                {!user && (
+                  <div style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '4px', padding: '10px', lineHeight: '1.4' }}>
+                    ⚠️ You are a guest. <strong>Sign in</strong> to save your targets permanently across devices, otherwise progress will be lost on page reload.
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>This week's targets</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary-color)' }}>
+                    {targetsList.filter(t => t.completed).length} / {targetsList.length} done
+                  </span>
+                </div>
+
+                {/* List of items */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '240px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {targetsList.map(item => (
+                    <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: item.completed ? 'var(--text-secondary)' : 'var(--text-primary)', padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={item.completed}
+                        onChange={() => handleToggleTarget(item.id)}
+                        style={{
+                          width: '16px',
+                          height: '16px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          accentColor: 'var(--primary-color)'
+                        }}
+                      />
+                      <span style={{ textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.text}
+                      </span>
+                    </label>
+                  ))}
+                  {targetsList.length === 0 && (
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', textAlign: 'center', display: 'block', padding: '20px 0' }}>
+                      No targets set for this week yet.
+                    </span>
+                  )}
+                </div>
+
+                {/* Add target form */}
+                <form onSubmit={handleAddTarget} style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    type="text"
+                    placeholder="Add a target for this week"
+                    className="search-input"
+                    style={{ paddingLeft: '12px', fontSize: '13px', height: '36px', flex: 1 }}
+                    value={targetInputText}
+                    onChange={(e) => setTargetInputText(e.target.value)}
+                    required
+                  />
+                  <button type="submit" className="btn-signin" style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }}>
+                    +
+                  </button>
+                </form>
+
+                {/* Progress History strip */}
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Progress History
+                    </span>
+                    <button 
+                      onClick={handleStartNewWeek} 
+                      className="btn-signin" 
+                      style={{ padding: '4px 8px', fontSize: '10px', height: 'auto', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+                      title="Archive current checklist and start a new week"
+                    >
+                      New Week
+                    </button>
+                  </div>
+
+                  {/* History Bars Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                    {targetsHistory.map((hist, idx) => {
+                      const fullyDone = hist.completedCount === hist.totalCount && hist.totalCount > 0;
+                      const barColor = fullyDone ? '#10b981' : '#f59e0b'; // Green vs Amber
+                      return (
+                        <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div 
+                            style={{ 
+                              height: '32px', 
+                              borderRadius: '4px', 
+                              backgroundColor: barColor, 
+                              opacity: 0.8,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '9px',
+                              fontWeight: 800,
+                              color: '#000000'
+                            }}
+                            title={`${hist.completedCount}/${hist.totalCount} completed`}
+                          >
+                            {hist.completedCount}/{hist.totalCount}
+                          </div>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                            {hist.date}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -7560,26 +7695,7 @@ function AppContent() {
                               </div>
                             </div>
 
-                            {/* Session Target Card */}
-                            <div 
-                              className={`tool-card ${targetsList.some(t => !t.completed) ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveToolDetail('targets');
-                                setActiveGameId(null);
-                              }}
-                              title="This week's target checklist"
-                            >
-                              <div className="tool-card-icon-wrapper">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="9 11 12 14 22 4"></polyline>
-                                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-                                </svg>
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Session Target</span>
-                                <span className="tool-card-desc">Weekly checklist and progress tracker.</span>
-                              </div>
-                            </div>
+
 
                             {/* Loose Timer Card */}
                             <div 
@@ -7886,133 +8002,7 @@ function AppContent() {
                       </div>
                     )}
 
-                    {/* Sub-panel View 4: Session Target checklist */}
-                    {activeToolDetail === 'targets' && (
-                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
-                        <div className="tools-sub-panel-header">
-                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="19" y1="12" x2="5" y2="12"></line>
-                              <polyline points="12 19 5 12 12 5"></polyline>
-                            </svg>
-                          </button>
-                          <span className="tools-sub-panel-title">Session Target</span>
-                        </div>
 
-                        {/* Checklist Container */}
-                        <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', padding: '16px', marginBottom: '16px' }}>
-                          {!user && (
-                            <div style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '4px', padding: '8px', marginBottom: '12px', lineHeight: '1.4' }}>
-                              ⚠️ You are a guest. <strong>Sign in</strong> to save your targets permanently across devices, otherwise progress will be lost on page reload.
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                            <div>
-                              <h5 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>This week's targets</h5>
-                              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Week of Jul 6 – Jul 12</span>
-                            </div>
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--primary-color)' }}>
-                              {targetsList.filter(t => t.completed).length} / {targetsList.length} done
-                            </span>
-                          </div>
-
-                          {/* List of items */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', margin: '16px 0' }}>
-                            {targetsList.map(item => (
-                              <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: item.completed ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={item.completed}
-                                  onChange={() => handleToggleTarget(item.id)}
-                                  style={{
-                                    width: '16px',
-                                    height: '16px',
-                                    borderRadius: '4px',
-                                    border: '1px solid var(--border-color)',
-                                    cursor: 'pointer',
-                                    accentColor: 'var(--primary-color)'
-                                  }}
-                                />
-                                <span style={{ textDecoration: item.completed ? 'line-through' : 'none' }}>
-                                  {item.text}
-                                </span>
-                              </label>
-                            ))}
-                            {targetsList.length === 0 && (
-                              <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', textAlign: 'center', display: 'block', padding: '12px 0' }}>
-                                No targets set for this week yet.
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Add target form */}
-                          <form onSubmit={handleAddTarget} style={{ display: 'flex', gap: '8px' }}>
-                            <input 
-                              type="text"
-                              placeholder="Add a target for this week"
-                              className="search-input"
-                              style={{ paddingLeft: '12px', fontSize: '13px', height: '36px' }}
-                              value={targetInputText}
-                              onChange={(e) => setTargetInputText(e.target.value)}
-                              required
-                            />
-                            <button type="submit" className="btn-signin" style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
-                              +
-                            </button>
-                          </form>
-                        </div>
-
-                        {/* Progress History strip */}
-                        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              Progress History
-                            </span>
-                            <button 
-                              onClick={handleStartNewWeek} 
-                              className="btn-signin" 
-                              style={{ padding: '4px 8px', fontSize: '10px', height: 'auto', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                              title="Archive current checklist and start a new week"
-                            >
-                              New Week
-                            </button>
-                          </div>
-
-                          {/* History Bars Row */}
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                            {targetsHistory.map((hist, idx) => {
-                              const fullyDone = hist.completedCount === hist.totalCount && hist.totalCount > 0;
-                              const barColor = fullyDone ? '#10b981' : '#f59e0b'; // Green vs Amber
-                              return (
-                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <div 
-                                    style={{ 
-                                      height: '32px', 
-                                      borderRadius: '4px', 
-                                      backgroundColor: barColor, 
-                                      opacity: 0.8,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '9px',
-                                      fontWeight: 800,
-                                      color: '#000000'
-                                    }}
-                                    title={`${hist.completedCount}/${hist.totalCount} completed`}
-                                  >
-                                    {hist.completedCount}/{hist.totalCount}
-                                  </div>
-                                  <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                                    {hist.date}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                      </div>
-                    )}
 
                     {/* Sub-panel View 5: Mini Deadline Clock */}
                     {activeToolDetail === 'deadline' && (
