@@ -1741,8 +1741,8 @@ function AppContent() {
   const [pendingJoinRoom, setPendingJoinRoom] = useState<Room | null>(null);
   
   // Call hardware controls state
-  const [isMicMuted, setIsMicMuted] = useState(false);
-  const [isCamOff, setIsCamOff] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(true);
+  const [isCamOff, setIsCamOff] = useState(true);
   const [cameraError, setCameraError] = useState(false);
   const [micError, setMicError] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(false);
@@ -1801,6 +1801,7 @@ function AppContent() {
 
   // Header popover states
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
+  const [maxPartInput, setMaxPartInput] = useState<number | ''>('');
   const roomSettingsRef = useRef<HTMLDivElement>(null);
   const isEvictedRef = useRef(false);
 
@@ -1835,6 +1836,13 @@ function AppContent() {
       document.title = 'Skulk';
     };
   }, [unreadChatCount, currentRoom]);
+
+  // Sync Room Settings input capacity when currentRoom updates
+  useEffect(() => {
+    if (currentRoom) {
+      setMaxPartInput(currentRoom.maxParticipants ?? 10);
+    }
+  }, [currentRoom?.maxParticipants]);
 
   // Local Full-size tool expand state
   const [expandedTool, setExpandedTool] = useState<'none' | 'pomodoro' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -2550,6 +2558,8 @@ function AppContent() {
           joinedAt: new Date().toISOString(),
           sharing: null,
           role: myRole,
+          isMuted: true,
+          isCamOff: true,
           mutedBy: myId,
           camOffBy: myId,
           sessionId: newSessionId
@@ -2565,8 +2575,8 @@ function AppContent() {
     }
 
     setCurrentRoom(normalizedRoom);
-    setIsMicMuted(false);
-    setIsCamOff(false);
+    setIsMicMuted(true);
+    setIsCamOff(true);
     setIsGalleryView(false);
     setCallTab('chat');
     setViewingShare(null);
@@ -2594,8 +2604,8 @@ function AppContent() {
     if (myId) {
       try {
         await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-          isMuted: false,
-          isCamOff: false,
+          isMuted: true,
+          isCamOff: true,
           mutedBy: myId,
           camOffBy: myId
         });
@@ -2656,30 +2666,43 @@ function AppContent() {
         isEnteringRoomRef.current = roomId;
 
         const match = rooms.find(r => getRoomIdFromLink(r.link) === roomId);
-        const roomObj = match || {
-          id: roomId,
-          name: `Room - ${roomId}`,
-          type: 'public',
-          buttonText: 'Join',
-          participants: [],
-          maxParticipants: 10,
-          link: `http://skulk.vercel.app/room/${roomId}`
-        };
-        
-        canJoin(roomObj).then(async (allowed) => {
+
+        const handleJoin = async () => {
+          let roomObj: Room | null = match || null;
+          if (!roomObj) {
+            try {
+              const docSnap = await getDoc(doc(db, 'rooms', roomId));
+              if (docSnap.exists()) {
+                roomObj = { id: docSnap.id, ...docSnap.data() } as Room;
+              }
+            } catch (err) {
+              console.warn("Direct document fetch failed, using local room representation:", err);
+            }
+          }
+          if (!roomObj) {
+            roomObj = {
+              id: roomId,
+              name: `Room - ${roomId}`,
+              type: 'public',
+              buttonText: 'Join',
+              participants: [],
+              maxParticipants: 10,
+              link: `http://skulk.vercel.app/room/${roomId}`
+            };
+          }
+
+          const allowed = await canJoin(roomObj);
           if (!allowed) {
             showToast(`This room is full (${roomObj.maxParticipants}/${roomObj.maxParticipants})`);
             isEnteringRoomRef.current = null;
             navigate('/');
             return;
           }
-          
+
           const myId = getMyId();
           const isCreator = roomObj.creatorId === myId;
-          
           const myRole = determineRole(roomObj.creatorId);
           if (roomObj.type === 'public-ask' && !isCreator && myRole !== 'admin') {
-            // Halt user and verify presence status in joinRequests document
             try {
               const reqDocRef = doc(db, 'rooms', roomObj.id, 'joinRequests', myId);
               const reqDocSnap = await getDoc(reqDocRef);
@@ -2693,10 +2716,12 @@ function AppContent() {
               console.warn("Direct link capacity verification failed, joining room.");
             }
           }
-          
+
           await enterCallRoom(roomObj);
           isEnteringRoomRef.current = null;
-        }).catch(() => {
+        };
+
+        handleJoin().catch(() => {
           isEnteringRoomRef.current = null;
         });
       }
@@ -2766,6 +2791,8 @@ function AppContent() {
         color: guestColor,
         joinedAt: new Date().toISOString(),
         role: myRole,
+        isMuted: isMicMutedRef.current,
+        isCamOff: isCamOffRef.current,
         mutedBy: myId,
         camOffBy: myId,
         sessionId: currentSessionIdRef.current
@@ -3277,11 +3304,36 @@ function AppContent() {
   }, [currentRoom]);
 
   // Auto-scroll chat to bottom
+  const prevMessagesLengthRef = useRef(0);
+  const hasScrolledForTabRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const currentLength = chatMessages.length + systemMessages.length;
+    const prevLength = prevMessagesLengthRef.current;
+    
+    if (callTab === 'chat' && chatEndRef.current) {
+      const container = chatEndRef.current.parentElement;
+      if (container) {
+        const isTabSwitch = hasScrolledForTabRef.current !== callTab;
+        const isNewMessage = currentLength > prevLength && prevLength > 0;
+        
+        if (isTabSwitch || prevLength === 0) {
+          hasScrolledForTabRef.current = callTab;
+          setTimeout(() => {
+            chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+          }, 50);
+        } else if (isNewMessage) {
+          const threshold = 150;
+          const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+          if (isNearBottom) {
+            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      }
     }
-  }, [chatMessages]);
+    
+    prevMessagesLengthRef.current = currentLength;
+  }, [chatMessages, systemMessages, callTab]);
 
   // Clean up screen presenting tracks when leaving call
   useEffect(() => {
@@ -3683,6 +3735,35 @@ function AppContent() {
       showToast(`Room topic updated to: ${newName.trim()}`);
     } catch (e) {
       console.warn("Failed to change room topic:", e);
+    }
+  };
+
+  const handleChangeMaxParticipants = async (newVal: number) => {
+    if (!currentRoom) return;
+    if (isNaN(newVal)) return;
+
+    if (newVal < 2 || newVal > 10) {
+      showToast("⚠️ Maximum participants must be between 2 and 10.");
+      setMaxPartInput(currentRoom.maxParticipants ?? 10);
+      return;
+    }
+
+    const activeCount = callParticipants.length;
+    if (newVal < activeCount) {
+      showToast(`⚠️ Cannot set maximum below the current active count of ${activeCount}.`);
+      setMaxPartInput(currentRoom.maxParticipants ?? 10);
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        maxParticipants: newVal
+      });
+      showToast(`Max participants updated to ${newVal}`);
+    } catch (e) {
+      console.warn("Failed to update maxParticipants in Firestore:", e);
+      showToast("⚠️ Failed to update maximum participants.");
+      setMaxPartInput(currentRoom.maxParticipants ?? 10);
     }
   };
 
@@ -5672,6 +5753,67 @@ function AppContent() {
           </div>
           <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can change room privacy in this room.</span>
         </div>
+
+        {/* Max Participants setting (Host/Cohost/Admin only) */}
+        {isHostOrAdmin && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Max Participants</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button 
+                type="button"
+                onClick={() => {
+                  const val = typeof maxPartInput === 'number' ? maxPartInput : 10;
+                  const nextVal = Math.max(2, val - 1);
+                  setMaxPartInput(nextVal);
+                  handleChangeMaxParticipants(nextVal);
+                }}
+                style={{ width: '36px', height: '36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <input 
+                type="number" 
+                min="2"
+                max="10"
+                className="room-input"
+                style={{ textAlign: 'center', width: '60px', padding: '8px 0', fontSize: '13px' }}
+                value={maxPartInput}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? '' : parseInt(e.target.value);
+                  setMaxPartInput(val);
+                }}
+                onBlur={() => {
+                  if (maxPartInput === '') {
+                    setMaxPartInput(currentRoom?.maxParticipants ?? 10);
+                  } else {
+                    handleChangeMaxParticipants(maxPartInput);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && maxPartInput !== '') {
+                    handleChangeMaxParticipants(maxPartInput);
+                  }
+                }}
+              />
+              <button 
+                type="button"
+                onClick={() => {
+                  const val = typeof maxPartInput === 'number' ? maxPartInput : 10;
+                  const nextVal = Math.min(10, val + 1);
+                  setMaxPartInput(nextVal);
+                  handleChangeMaxParticipants(nextVal);
+                }}
+                style={{ width: '36px', height: '36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Capacity cap (10 max)</span>
+            </div>
+            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
+              Current active participants: {callParticipants.length}
+            </span>
+          </div>
+        )}
 
         {/* Fun Tools setting (Host-only) */}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
