@@ -4321,30 +4321,35 @@ function AppContent() {
 
     try {
       const myId = getMyId();
+      let limitDocRef: any = null;
       if (myId) {
-        const limitDocRef = doc(db, 'users', myId);
+        limitDocRef = doc(db, 'users', myId);
         const limitSnap = await getDoc(limitDocRef);
         if (limitSnap.exists()) {
-          const limitData = limitSnap.data();
-          const lastCreated = limitData.lastRoomCreatedTime?.toDate?.()?.getTime() || 0;
+          const limitData = limitSnap.data() as any;
+          const lastCreated = limitData?.lastRoomCreatedTime?.toDate?.()?.getTime() || 0;
           if (Date.now() - lastCreated < 5000) {
             showToast("Slow down! Please wait a few seconds before creating another room.");
             return;
           }
         }
-        try {
-          await setDoc(limitDocRef, { lastRoomCreatedTime: serverTimestamp() }, { merge: true });
-        } catch (e: any) {
-          console.error("Rate-limit update failed:", e);
-          throw new Error(`Rate-limit update failed: ${e.message || 'Permission Denied'}`);
-        }
       }
 
+      // 1. Write the room document first
       try {
         await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
       } catch (e: any) {
         console.error("Room document write failed:", e);
         throw new Error(`Room persistence failed: ${e.message || 'Permission Denied'}`);
+      }
+
+      // 2. Update rate-limit user document second
+      if (limitDocRef) {
+        try {
+          await setDoc(limitDocRef, { lastRoomCreatedTime: serverTimestamp() }, { merge: true });
+        } catch (e: any) {
+          console.warn("Rate-limit update failed:", e);
+        }
       }
       
       setGeneratedRoomLink(roomLink);
