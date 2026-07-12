@@ -1682,6 +1682,7 @@ function AppContent() {
   
   // Real-time rooms state list
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
   // Map of participant lists for rooms: room.id -> Participant[]
   const [roomsParticipants, setRoomsParticipants] = useState<Record<string, any[]>>({});
 
@@ -1762,10 +1763,12 @@ function AppContent() {
         localStorage.setItem('skulk_local_rooms', JSON.stringify(updatedLocal));
         setRooms(merged);
       }
+      setRoomsLoaded(true);
     }, (error) => {
       console.warn("Firestore subscription failed, falling back to local mock data:", error);
       setIsFirestoreBlocked(true);
       setRooms(getLocalRooms());
+      setRoomsLoaded(true);
     });
     return () => unsubscribe();
   }, []);
@@ -2325,6 +2328,11 @@ function AppContent() {
   const hasSeenSelfInListRef = useRef(false);
   const currentSessionIdRef = useRef<string | null>(null);
   const isEnteringRoomRef = useRef<string | null>(null);
+
+  const isUserAdmin = (u: any) => {
+    const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
+    return !!(u && u.email && adminEmails.includes(u.email.toLowerCase()));
+  };
 
   // Helper to determine role dynamically based on auth email and room creator
   const determineRole = (roomCreatorId?: string): 'admin' | 'host' | 'cohost' | 'member' => {
@@ -2938,6 +2946,22 @@ function AppContent() {
 
   // Join Room Handlers (wiring direct vs pending status)
   const handleJoinRoomClick = async (room: Room) => {
+    const myId = getMyId();
+    const isAdmin = isUserAdmin(user);
+    if (!isAdmin && myId) {
+      const alreadyJoinedRoomId = Object.keys(roomsParticipants).find(rid => {
+        if (rid === room.id) return false;
+        const participants = roomsParticipants[rid] || [];
+        return participants.some(p => p.uid === myId);
+      });
+      if (alreadyJoinedRoomId) {
+        const otherRoom = rooms.find(r => r.id === alreadyJoinedRoomId);
+        const otherRoomName = otherRoom ? otherRoom.name : alreadyJoinedRoomId;
+        showToast(`⚠️ You are already in another active room: "${otherRoomName}". Please leave it before joining this one.`);
+        return;
+      }
+    }
+
     const id = getRoomIdFromLink(room.link);
     const allowed = await canJoin(room);
     if (!allowed) {
@@ -2945,7 +2969,6 @@ function AppContent() {
       return;
     }
 
-    const myId = getMyId();
     const isCreator = room.creatorId === myId;
 
     if (room.type === 'public') {
@@ -3169,6 +3192,30 @@ function AppContent() {
           const myId = getMyId();
           const isCreator = roomObj.creatorId === myId;
           const myRole = determineRole(roomObj.creatorId);
+
+          // If rooms list is still loading, wait a short moment for it to sync
+          if (!roomsLoaded) {
+            for (let i = 0; i < 10; i++) {
+              if (roomsLoaded) break;
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          }
+          const isAdmin = isUserAdmin(user);
+          if (!isAdmin && myId) {
+            const alreadyJoinedRoomId = Object.keys(roomsParticipants).find(rid => {
+              if (rid === roomObj!.id) return false;
+              const participants = roomsParticipants[rid] || [];
+              return participants.some(p => p.uid === myId);
+            });
+            if (alreadyJoinedRoomId) {
+              const otherRoom = rooms.find(r => r.id === alreadyJoinedRoomId);
+              const otherRoomName = otherRoom ? otherRoom.name : alreadyJoinedRoomId;
+              showToast(`⚠️ You are already in another active room: "${otherRoomName}". Please leave it before joining this one.`);
+              isEnteringRoomRef.current = null;
+              navigate('/');
+              return;
+            }
+          }
 
           if ((roomObj.type === 'public-ask' || roomObj.type === 'private') && !isCreator && myRole !== 'admin' && myRole !== 'cohost') {
             let isAlreadyApproved = false;
@@ -4920,9 +4967,30 @@ function AppContent() {
     showToast('Reset steps to default');
   };
 
-  // Submit Handler for modal creation
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const myId = getMyId();
+    const isAdmin = isUserAdmin(user);
+    if (!isAdmin && myId) {
+      const isLiveRoom = (r: Room) => {
+        if (r.scheduledDate && r.scheduledTime) {
+          try {
+            const start = new Date(`${r.scheduledDate}T${r.scheduledTime}`).getTime();
+            return start <= Date.now();
+          } catch (err) {
+            return true;
+          }
+        }
+        return true;
+      };
+
+      const activeCreatedRoom = rooms.find(r => r.creatorId === myId && isLiveRoom(r));
+      if (activeCreatedRoom) {
+        showToast(`⚠️ You already have an active room: "${activeCreatedRoom.name}". Please end it before creating a new one.`);
+        return;
+      }
+    }
 
     if (newMaxParticipants === 0) {
       showToast("At least 1 participant is required");
