@@ -3243,7 +3243,6 @@ function AppContent() {
 
 
 
-  // Update or migrate Firestore presence document when authentication state changes
   useEffect(() => {
     if (!currentRoom) return;
     
