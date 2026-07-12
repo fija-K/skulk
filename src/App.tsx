@@ -1851,6 +1851,7 @@ function AppContent() {
   // Watch Together (YouTube) States
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
   const [ytInputUrl, setYtInputUrl] = useState('');
+  const [watchTogetherPlatform, setWatchTogetherPlatform] = useState<'youtube' | 'vimeo' | 'dailymotion' | 'twitch'>('youtube');
 
   // Games Party States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -7444,13 +7445,52 @@ function AppContent() {
                           <span className="tools-sub-panel-title">Watch Together</span>
                         </div>
 
+                        {/* Platform Tabs Selection */}
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                          {(['youtube', 'vimeo', 'dailymotion', 'twitch'] as const).map((plat) => (
+                            <button
+                              key={plat}
+                              type="button"
+                              onClick={() => setWatchTogetherPlatform(plat)}
+                              style={{
+                                flex: 1,
+                                minWidth: '70px',
+                                padding: '8px 4px',
+                                fontSize: '11px',
+                                borderRadius: '6px',
+                                border: '1px solid',
+                                borderColor: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'rgba(255,255,255,0.08)',
+                                backgroundColor: watchTogetherPlatform === plat ? 'rgba(241, 196, 15, 0.1)' : 'var(--panel-bg)',
+                                color: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontWeight: watchTogetherPlatform === plat ? '700' : '500',
+                                textTransform: 'capitalize',
+                                transition: 'all 0.2s ease',
+                                textAlign: 'center'
+                              }}
+                            >
+                              {plat === 'youtube' ? 'YouTube' : plat === 'vimeo' ? 'Vimeo' : plat === 'dailymotion' ? 'Dailymotion' : 'Twitch'}
+                            </button>
+                          ))}
+                        </div>
+
                         <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           <div className="form-group">
-                            <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px' }}>YouTube URL or Video ID</label>
+                            <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                              {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
+                               watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
+                               watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
+                               'Twitch Channel or VOD URL'}
+                            </label>
                             <input 
                               type="text"
                               id="ytUrl"
-                              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                              placeholder={
+                                watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
+                                watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
+                                watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
+                                'e.g. https://www.twitch.tv/twitch'
+                              }
                               className="search-input"
                               style={{ paddingLeft: '12px', fontSize: '13px' }}
                               value={ytInputUrl}
@@ -7459,7 +7499,7 @@ function AppContent() {
                             />
                           </div>
                           <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
-                            Load Video
+                            Load Media
                           </button>
                         </form>
                         
