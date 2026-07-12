@@ -8464,7 +8464,7 @@ function AppContent() {
                               }
                             }} 
                             className="btn-create" 
-                            style={{ position: 'absolute', top: '12px', right: '12px', padding: '6px 12px', fontSize: '12px', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                            style={{ position: 'absolute', top: '12px', left: '50%', transform: 'translateX(-50%)', padding: '6px 12px', fontSize: '12px', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff', zIndex: 100, transition: 'all 0.2s ease' }}
                           >
                             {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
                           </button>
