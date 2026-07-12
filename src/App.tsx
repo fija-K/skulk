@@ -285,6 +285,33 @@ function loadPlatformScript(platform: string, src: string, callbackName?: string
       };
     }
 
+    // Polling fallbacks to resolve race conditions
+    if (platform === 'youtube') {
+      const interval = setInterval(() => {
+        if ((window as any).YT && (window as any).YT.Player) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+      setTimeout(() => clearInterval(interval), 10000);
+    } else if (platform === 'vimeo') {
+      const interval = setInterval(() => {
+        if ((window as any).Vimeo) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+      setTimeout(() => clearInterval(interval), 10000);
+    } else if (platform === 'twitch') {
+      const interval = setInterval(() => {
+        if ((window as any).Twitch) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 50);
+      setTimeout(() => clearInterval(interval), 10000);
+    }
+
     const tag = document.createElement('script');
     tag.src = src;
     if (!callbackName) {
