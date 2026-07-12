@@ -2416,7 +2416,8 @@ function AppContent() {
   // Helper to extract room identifier (e.g. ielts9 from skulk.app/room/ielts9)
   const getRoomIdFromLink = (link?: string) => {
     if (!link) return '';
-    const parts = link.split('/');
+    const cleanLink = link.split('?')[0];
+    const parts = cleanLink.split('/');
     return parts[parts.length - 1];
   };
 
