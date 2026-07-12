@@ -3077,7 +3077,8 @@ function AppContent() {
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
       console.log("[LEAVE EVENT] leavePresence triggered from handleLeaveCall, session:", currentSessionIdRef.current);
-      leavePresence(prevRoomId, currentSessionIdRef.current);
+      leavePresence(prevRoomId);
+      currentSessionIdRef.current = null;
       setCurrentRoom(null);
       setCallParticipants([]);
       setChatMessages([]);
@@ -3212,7 +3213,8 @@ function AppContent() {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         console.log("[LEAVE EVENT] leavePresence triggered from route sync useEffect else-block (dashboard route), session:", currentSessionIdRef.current);
-        leavePresence(prevRoomId, currentSessionIdRef.current);
+        leavePresence(prevRoomId);
+        currentSessionIdRef.current = null;
         setCurrentRoom(null);
         setCallParticipants([]);
         setChatMessages([]);
