@@ -41,6 +41,8 @@ interface Room {
   creatorId?: string; // Room creator is the Admin
   creatorName?: string;
   createdAt?: string;
+  currentHostId?: string;
+  currentHostName?: string;
 }
 
 interface Participant {
@@ -1640,16 +1642,7 @@ function AppContent() {
     }
   };
 
-  const saveLocalRoom = (room: Room) => {
-    try {
-      const existing = getLocalRooms();
-      if (!existing.some(r => r.id === room.id)) {
-        localStorage.setItem('skulk_local_rooms', JSON.stringify([...existing, room]));
-      }
-    } catch (e) {
-      console.error('Failed to save room to localStorage:', e);
-    }
-  };
+
   // Load and synchronize rooms list from Firestore in real time
   useEffect(() => {
     const roomsRef = collection(db, 'rooms');
@@ -4314,7 +4307,9 @@ function AppContent() {
       link: roomDetails.link,
       creatorId: getMyId(),
       creatorName: user ? user.displayName || 'Google User' : 'Unknown',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      currentHostId: getMyId(),
+      currentHostName: user ? user.displayName || 'Google User' : 'Unknown'
     };
 
     if (roomDetails.scheduledDate !== undefined) {
@@ -4343,17 +4338,9 @@ function AppContent() {
       await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
-    } catch (err) {
-      console.warn('Error saving room to Firestore, fallback to local creation:', err);
-      saveLocalRoom(newRoomObj); // Save to localStorage so it persists on refresh!
-      setRooms(prev => {
-        if (prev.some(r => r.id === newRoomObj.id)) return prev;
-        return [...prev, newRoomObj];
-      });
-      setGeneratedRoomLink(roomLink);
-      setModalStep('confirmation');
-      
-      showToast(`⚠️ Database Write Blocked (Permission Denied). Room created locally. Please enable read/write rules in your Firebase Console.`);
+    } catch (err: any) {
+      console.error('Failed to create room in Firestore:', err);
+      showToast(`⚠️ Failed to create room: ${err.message || 'Permission Denied'}`);
     }
   };
 
@@ -4489,10 +4476,45 @@ function AppContent() {
     if (!currentRoom) return;
     const rid = roomDocId(currentRoom);
     try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { role: newRole });
-      showToast(`Updated role to ${newRole}`);
-    } catch (e) {
+      if (newRole === 'host') {
+        // Atomic Host Transfer Transaction
+        await runTransaction(db, async (transaction) => {
+          const targetRef = doc(db, 'rooms', rid, 'participants', id);
+          const targetSnap = await transaction.get(targetRef);
+          if (!targetSnap.exists()) {
+            throw new Error("Target participant not found");
+          }
+          const targetData = targetSnap.data();
+          const targetName = targetData.name || 'Participant';
+
+          // Find current host to demote
+          const currentHost = callParticipants.find(p => p.role === 'host' && p.id !== id);
+
+          // Promote new host
+          transaction.update(targetRef, { role: 'host' });
+
+          // Demote old host to 'cohost' if exists
+          if (currentHost) {
+            const oldHostRef = doc(db, 'rooms', rid, 'participants', currentHost.id);
+            transaction.update(oldHostRef, { role: 'cohost' });
+          }
+
+          // Update room currentHostId and currentHostName
+          const roomRef = doc(db, 'rooms', rid);
+          transaction.update(roomRef, {
+            currentHostId: id,
+            currentHostName: targetName
+          });
+        });
+        showToast("Host role successfully transferred.");
+      } else {
+        // Standard role change
+        await updateDoc(doc(db, 'rooms', rid, 'participants', id), { role: newRole });
+        showToast(`Updated role to ${newRole}`);
+      }
+    } catch (e: any) {
       console.warn("Failed to update role in Firestore:", e);
+      showToast(`Failed to update role: ${e.message || e}`);
     }
     setActiveMenuParticipantId(null);
   };
@@ -4962,6 +4984,14 @@ function AppContent() {
   
                 {callParticipants.find(part => part.id === getMyId())?.role === 'host' && (
                   <>
+                    {p.role !== 'host' && (
+                      <button 
+                        onClick={() => handleParticipantRoleChange(p.id, 'host')} 
+                        className="tile-menu-item"
+                      >
+                        Make Host (Transfer)
+                      </button>
+                    )}
                     {p.role === 'member' && (
                       <button 
                         onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
@@ -6295,8 +6325,9 @@ function AppContent() {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
                   const currentRoomParticipants = roomsParticipants[room.id] || [];
                   const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
-                  const isCreatorAdmin = currentRoomParticipants.some(p => p.uid === room.creatorId && p.role === 'admin');
-                  const hostLabel = isCreatorAdmin ? 'Admin' : (room.creatorName || 'Unknown');
+                  const currentHostId = room.currentHostId || room.creatorId;
+                  const isAdminHost = currentRoomParticipants.some(p => p.uid === currentHostId && p.role === 'admin');
+                  const hostLabel = isAdminHost ? 'Admin' : (room.currentHostName || room.creatorName || 'Unknown');
                   
                   return (
                     <div className="room-card" key={room.id}>
@@ -7995,7 +8026,7 @@ function AppContent() {
             
             {/* End Room Button */}
             {(callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
-              (callParticipants.find(part => part.id === getMyId())?.role === 'host' && currentRoom && currentRoom.creatorId === getMyId())) && (
+              callParticipants.find(part => part.id === getMyId())?.role === 'host') && (
               <button 
                 onClick={handleEndRoom} 
                 className="dock-btn dock-btn-leave"
