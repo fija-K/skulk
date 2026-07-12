@@ -336,7 +336,7 @@ function createWrappedPlayer(
                 getCurrentTime: () => player.getCurrentTime() || 0,
                 getPlayerState: () => {
                   const s = player.getPlayerState();
-                  return s === 1 ? 1 : 2;
+                  return (s === 1 || s === 3) ? 1 : 2;
                 },
                 destroy: () => {
                   try {
@@ -348,7 +348,11 @@ function createWrappedPlayer(
             onStateChange: (event: any) => {
               const state = event.data;
               const time = player.getCurrentTime() || 0;
-              onStateChange(state === 1, time);
+              if (state === 1) {
+                onStateChange(true, time);
+              } else if (state === 2) {
+                onStateChange(false, time);
+              }
             }
           }
         });
@@ -669,13 +673,13 @@ function UniversalVideoPlayer({
     }
   };
 
-  // Host/Presenter playback tracking loop
+  // Host/Presenter playback tracking loop (detects seeks)
   useEffect(() => {
     if (!isPresenter || isLive) return;
 
     let lastState: number | null = null;
     let lastTime = 0;
-    let lastWriteTime = 0;
+    let lastCheck = Date.now();
 
     const interval = setInterval(async () => {
       if (playerRef.current) {
@@ -686,22 +690,23 @@ function UniversalVideoPlayer({
 
           const playing = state === 1;
           const stateChanged = state !== lastState;
-          
-          // Check if user seeked: time jumped by more than 1.5 seconds from expected time
-          const expectedTime = lastTime + (playing ? (now - lastWriteTime) / 1000 : 0);
-          const timeJumped = Math.abs(time - expectedTime) > 1.5;
 
-          if (stateChanged || timeJumped || (playing && now - lastWriteTime > 3000)) {
+          // Detect seek: time jumped by more than 2 seconds from expected elapsed time
+          const expectedTime = lastTime + (playing ? (now - lastCheck) / 1000 : 0);
+          const timeJumped = Math.abs(time - expectedTime) > 2.0;
+
+          if (stateChanged || timeJumped) {
             updateFirestorePlaybackState(playing, time);
             lastState = state;
             lastTime = time;
-            lastWriteTime = now;
+            lastCheck = now;
           } else {
             lastTime = time;
+            lastCheck = now;
           }
         } catch (e) {}
       }
-    }, 500);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
@@ -726,7 +731,7 @@ function UniversalVideoPlayer({
       if (playerRef.current && presenterData) {
         syncToPresenterState(presenterData, playerRef.current);
       }
-    }, 500);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive, participants, presenterId]);
