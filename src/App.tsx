@@ -74,6 +74,10 @@ interface Participant {
   todRequestedSpin?: number | null;
   todRequestedChoice?: 'Truth' | 'Dare' | null;
   todRequestedReset?: number | null;
+  ytPlaying?: boolean;
+  ytTime?: number;
+  ytUpdateTimestamp?: number;
+  ytSpeed?: number;
 }
 
 type ViewingShare = {
@@ -303,6 +307,8 @@ interface AbstractPlayer {
   seekTo(seconds: number): void;
   getCurrentTime(): Promise<number> | number;
   getPlayerState(): Promise<number> | number;
+  getPlaybackRate?(): Promise<number> | number;
+  setPlaybackRate?(rate: number): Promise<void> | void;
   destroy(): void;
 }
 
@@ -339,6 +345,8 @@ function createWrappedPlayer(
                   const s = player.getPlayerState();
                   return (s === 1 || s === 3) ? 1 : 2;
                 },
+                getPlaybackRate: () => player.getPlaybackRate() || 1,
+                setPlaybackRate: (rate) => player.setPlaybackRate(rate),
                 destroy: () => {
                   try {
                     player.destroy();
@@ -402,6 +410,8 @@ function createWrappedPlayer(
               const paused = await player.getPaused().catch(() => true);
               return paused ? 2 : 1;
             },
+            getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
+            setPlaybackRate: (rate) => player.setPlaybackRate(rate).catch(() => {}),
             destroy: () => {
               try {
                 player.unload();
@@ -451,6 +461,12 @@ function createWrappedPlayer(
             seekTo: (sec) => player.seek(sec),
             getCurrentTime: () => player.currentTime || 0,
             getPlayerState: () => player.paused ? 2 : 1,
+            getPlaybackRate: () => player.speed || (player.getPlaybackSpeed ? player.getPlaybackSpeed() : 1),
+            setPlaybackRate: (rate) => {
+              try {
+                player.setPlaybackSpeed(rate);
+              } catch (e) {}
+            },
             destroy: () => {
               try {
                 container.innerHTML = '';
@@ -549,11 +565,12 @@ function UniversalVideoPlayer({
     const targetPlaying = data.ytPlaying ?? false;
     const targetTime = data.ytTime ?? 0;
     const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
+    const targetSpeed = data.ytSpeed ?? 1;
     
     let correctedTime = targetTime;
     if (targetPlaying && targetTimestamp) {
       const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
-      correctedTime += elapsedSeconds;
+      correctedTime += elapsedSeconds * targetSpeed;
     }
 
     isLocalChangeRef.current = true;
@@ -563,6 +580,13 @@ function UniversalVideoPlayer({
         player.play();
       } else if (!targetPlaying && currentState === 1) {
         player.pause();
+      }
+
+      if (player.getPlaybackRate && player.setPlaybackRate) {
+        const currentSpeed = await player.getPlaybackRate();
+        if (Math.abs(currentSpeed - targetSpeed) > 0.05) {
+          player.setPlaybackRate(targetSpeed);
+        }
       }
 
       const currentTime = await player.getCurrentTime();
@@ -623,24 +647,27 @@ function UniversalVideoPlayer({
     };
   }, [videoId, platform, isPresenter, isLive]);
 
-  const updateFirestorePlaybackState = async (playing: boolean, time: number) => {
+  const updateFirestorePlaybackState = async (playing: boolean, time: number, speed?: number) => {
     try {
+      const resolvedSpeed = speed !== undefined ? speed : (playerRef.current?.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1);
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
         ytPlaying: playing,
         ytTime: time,
-        ytUpdateTimestamp: Date.now()
+        ytUpdateTimestamp: Date.now(),
+        ytSpeed: resolvedSpeed
       });
     } catch (e) {
       console.warn("Failed to update media playback in Firestore:", e);
     }
   };
 
-  // Host/Presenter playback tracking loop (detects seeks)
+  // Host/Presenter playback tracking loop (detects seeks and speed changes)
   useEffect(() => {
     if (!isPresenter || isLive) return;
 
     let lastState: number | null = null;
     let lastTime = 0;
+    let lastSpeed: number | null = null;
     let lastCheck = Date.now();
 
     const interval = setInterval(async () => {
@@ -648,19 +675,22 @@ function UniversalVideoPlayer({
         try {
           const state = await playerRef.current.getPlayerState(); // 1 = playing, 2 = paused
           const time = await playerRef.current.getCurrentTime();
+          const speed = playerRef.current.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1;
           const now = Date.now();
 
           const playing = state === 1;
           const stateChanged = state !== lastState;
+          const speedChanged = lastSpeed !== null && Math.abs(speed - lastSpeed) > 0.05;
 
-          // Detect seek: time jumped by more than 2 seconds from expected elapsed time
-          const expectedTime = lastTime + (playing ? (now - lastCheck) / 1000 : 0);
+          // Detect seek: time jumped by more than 2 seconds from expected elapsed time (scaled by speed)
+          const expectedTime = lastTime + (playing ? ((now - lastCheck) / 1000) * speed : 0);
           const timeJumped = Math.abs(time - expectedTime) > 2.0;
 
-          if (stateChanged || timeJumped) {
-            updateFirestorePlaybackState(playing, time);
+          if (stateChanged || timeJumped || speedChanged) {
+            updateFirestorePlaybackState(playing, time, speed);
             lastState = state;
             lastTime = time;
+            lastSpeed = speed;
             lastCheck = now;
           } else {
             lastTime = time;
@@ -3497,6 +3527,7 @@ function AppContent() {
           ytPlaying: data.ytPlaying,
           ytTime: data.ytTime,
           ytUpdateTimestamp: data.ytUpdateTimestamp,
+          ytSpeed: data.ytSpeed,
         } as Participant;
       });
 
