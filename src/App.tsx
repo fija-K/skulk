@@ -3283,7 +3283,7 @@ function AppContent() {
     };
     
     syncAuthPresence();
-  }, [user, currentRoom, guestName, guestInitials, guestColor, guestPhotoURL, guestId]);
+  }, [user, currentRoom ? roomDocId(currentRoom) : null, guestName, guestInitials, guestColor, guestPhotoURL, guestId]);
 
   // Clean up presence immediately on tab/browser close using fetch keepalive
   useEffect(() => {
@@ -6397,7 +6397,6 @@ function AppContent() {
 
     const activeIds = todActiveIds.filter(id => callParticipants.some(p => p.id === id));
     const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
-    const n = spinParticipants.length;
 
     const canDecide = todSelectedId === myId || isHostOrAdmin || todActiveIds.includes(myId);
 
@@ -6563,49 +6562,56 @@ function AppContent() {
               )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Joined ({n}/{callParticipants.length})
-              </span>
-              <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-                Pool: {todSpinPool.filter(id => activeIds.includes(id)).length} left
-              </span>
-            </div>
-
-            <div className="spinner-participants-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {callParticipants.map(p => {
-                const isActive = todActiveIds.includes(p.id);
-                const isPending = todPendingIds.includes(p.id);
-                
-                let statusText = '👁️ Spectating';
-                let statusColor = 'var(--text-secondary)';
-                if (isActive) {
-                  statusText = '🎮 In Game';
-                  statusColor = 'var(--primary-color)';
-                } else if (isPending) {
-                  statusText = '⏳ Pending Next';
-                  statusColor = '#f59e0b';
-                }
-
-                return (
-                  <div key={p.id} className="spinner-participant-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
-                        {p.name.replace(' (You)', '')}
-                      </span>
-                      {todSpinPool.includes(p.id) && isActive && (
-                        <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(241, 196, 15, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
-                          Pool
-                        </span>
-                      )}
-                    </div>
-                    <span style={{ fontSize: '10px', fontWeight: 600, color: statusColor }}>
-                      {statusText}
+            {(() => {
+              const joinedPlayers = callParticipants.filter(p => todActiveIds.includes(p.id) || todPendingIds.includes(p.id));
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                      Players ({joinedPlayers.length}/{callParticipants.length})
+                    </span>
+                    <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
+                      Pool: {todSpinPool.filter(id => activeIds.includes(id)).length} left
                     </span>
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="spinner-participants-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {joinedPlayers.map(p => {
+                      const isActive = todActiveIds.includes(p.id);
+                      const isPending = todPendingIds.includes(p.id);
+                      
+                      let statusText = '';
+                      let statusColor = '';
+                      if (isActive) {
+                        statusText = '🎮 In Game';
+                        statusColor = 'var(--primary-color)';
+                      } else if (isPending) {
+                        statusText = '⏳ Pending Next';
+                        statusColor = '#f59e0b';
+                      }
+
+                      return (
+                        <div key={p.id} className="spinner-participant-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                              {p.name.replace(' (You)', '')}
+                            </span>
+                            {todSpinPool.includes(p.id) && isActive && (
+                              <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(241, 196, 15, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
+                                Pool
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '10px', fontWeight: 600, color: statusColor }}>
+                            {statusText}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
