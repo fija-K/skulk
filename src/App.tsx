@@ -8308,7 +8308,28 @@ function AppContent() {
                               </div>
                             </div>
 
-                          </div>
+                             {/* Target Sessions Card */}
+                             <div 
+                               className="tool-card"
+                               onClick={() => {
+                                 setActiveToolDetail('targets');
+                                 setActiveGameId(null);
+                               }}
+                               title="Set and check off study session targets"
+                             >
+                               <div className="tool-card-icon-wrapper">
+                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                   <polyline points="9 11 12 14 22 4"></polyline>
+                                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                                 </svg>
+                               </div>
+                               <div className="tool-card-info">
+                                 <span className="tool-card-title">Target Sessions</span>
+                                 <span className="tool-card-desc">Set goals and check them off this week.</span>
+                               </div>
+                             </div>
+
+                           </div>
                         </div>
 
                         {/* Section 2: Fun Section (Disabled for everyone if toggle is OFF) */}
@@ -8382,6 +8403,73 @@ function AppContent() {
 
 
 
+                      </div>
+                    )}
+
+                    {/* Sub-panel View: Target Sessions */}
+                    {activeToolDetail === 'targets' && (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
+                        <div className="tools-sub-panel-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px', marginBottom: '4px' }}>
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back to tools list" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title" style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>Target Sessions</span>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>This week's targets</span>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary-color)' }}>
+                            {targetsList.filter(t => t.completed).length} / {targetsList.length} done
+                          </span>
+                        </div>
+
+                        {/* List of items */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, maxHeight: '320px', overflowY: 'auto', padding: '0 4px' }}>
+                          {targetsList.map(item => (
+                            <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: item.completed ? 'var(--text-secondary)' : 'var(--text-primary)', padding: '8px 10px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.02)' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={item.completed}
+                                onChange={() => handleToggleTarget(item.id)}
+                                style={{
+                                  width: '16px',
+                                  height: '16px',
+                                  borderRadius: '4px',
+                                  border: '1px solid var(--border-color)',
+                                  cursor: 'pointer',
+                                  accentColor: 'var(--primary-color)'
+                                }}
+                              />
+                              <span style={{ textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.text}
+                              </span>
+                            </label>
+                          ))}
+                          {targetsList.length === 0 && (
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', textAlign: 'center', display: 'block', padding: '32px 0' }}>
+                              No targets set for this week yet.
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Add target form */}
+                        <form onSubmit={handleAddTarget} style={{ display: 'flex', gap: '8px', padding: '0 4px' }}>
+                          <input 
+                            type="text"
+                            placeholder="Add a study target..."
+                            className="search-input"
+                            style={{ paddingLeft: '12px', fontSize: '13px', height: '36px', flex: 1 }}
+                            value={targetInputText}
+                            onChange={(e) => setTargetInputText(e.target.value)}
+                            required
+                          />
+                          <button type="submit" className="btn-signin" style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }}>
+                            +
+                          </button>
+                        </form>
                       </div>
                     )}
 
