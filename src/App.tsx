@@ -1816,6 +1816,7 @@ function AppContent() {
   // Active call view state
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [pendingJoinRoom, setPendingJoinRoom] = useState<Room | null>(null);
+  const [pendingSignInRoom, setPendingSignInRoom] = useState<Room | null>(null);
   
   // Call hardware controls state
   const [isMicMuted, setIsMicMuted] = useState(true);
@@ -2689,7 +2690,7 @@ function AppContent() {
 
   // Lock body scroll when modal is active
   useEffect(() => {
-    if (isModalOpen || pendingJoinRoom) {
+    if (isModalOpen || pendingJoinRoom || pendingSignInRoom) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
@@ -2697,7 +2698,7 @@ function AppContent() {
     return () => {
       document.body.style.overflow = '';
     };
-  }, [isModalOpen, pendingJoinRoom]);
+  }, [isModalOpen, pendingJoinRoom, pendingSignInRoom]);
 
   // Close modal on Escape key press
   useEffect(() => {
@@ -2990,7 +2991,11 @@ function AppContent() {
         if (room.type === 'private') {
           showToast("This room is private. You must use a direct invite link with a secret key to join.");
         } else {
-          setPendingJoinRoom(room);
+          if (user && user.isAnonymous) {
+            setPendingSignInRoom(room);
+          } else {
+            setPendingJoinRoom(room);
+          }
         }
       }
     }
@@ -3250,7 +3255,12 @@ function AppContent() {
                 showToast("❌ This room is private. You must use a valid direct invite link with a secret key to join.");
                 navigate('/');
               } else {
-                setPendingJoinRoom(roomObj);
+                if (user && user.isAnonymous) {
+                  setPendingSignInRoom(roomObj);
+                  navigate('/');
+                } else {
+                  setPendingJoinRoom(roomObj);
+                }
               }
               return;
             }
@@ -9650,6 +9660,49 @@ function AppContent() {
                   setTimeout(() => setIsModalOpen(true), 500);
                 });
               }} style={{ padding: '8px 16px' }}>Sign in</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Guest Ask to Join Sign In Modal */}
+      {pendingSignInRoom && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-container animate-fade-in" style={{ maxWidth: '400px', textAlign: 'center', padding: '32px' }}>
+            <h3 style={{ fontSize: '18px', marginBottom: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>
+              Sign in to request to join
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: '1.5' }}>
+              To ask to join **"{pendingSignInRoom.name}"**, please sign in. Guests are only allowed to join public rooms.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => setPendingSignInRoom(null)} 
+                style={{ padding: '8px 16px' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="btn-signin" 
+                onClick={async () => {
+                  const targetRoom = pendingSignInRoom;
+                  setPendingSignInRoom(null);
+                  try {
+                    await handleSignIn();
+                    setTimeout(() => {
+                      handleJoinRoomClick(targetRoom);
+                    }, 800);
+                  } catch (e) {
+                    console.error("Sign-in failed:", e);
+                  }
+                }} 
+                style={{ padding: '8px 16px' }}
+              >
+                Sign in
+              </button>
             </div>
           </div>
         </div>
