@@ -1662,11 +1662,36 @@ function AppContent() {
         snapshot.forEach(doc => {
           list.push({ id: doc.id, ...doc.data() } as Room);
         });
-        // Sort client-side by createdAt to ensure consistent ordering without index requirements
+        // Sort client-side by effective start time (createdAt for instant, scheduledDate/Time for scheduled)
         list.sort((a, b) => {
-          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return timeA - timeB;
+          const now = Date.now();
+          
+          const getStartTime = (r: Room) => {
+            if (r.scheduledDate && r.scheduledTime) {
+              try {
+                const dt = new Date(`${r.scheduledDate}T${r.scheduledTime}`);
+                if (!isNaN(dt.getTime())) return dt.getTime();
+              } catch (e) {}
+            }
+            return r.createdAt ? new Date(r.createdAt).getTime() : 0;
+          };
+
+          const startA = getStartTime(a);
+          const startB = getStartTime(b);
+
+          const isFutureA = startA > now;
+          const isFutureB = startB > now;
+
+          if (isFutureA && !isFutureB) return 1;  // Future goes after past/live
+          if (!isFutureA && isFutureB) return -1; // Past/live goes before future
+
+          if (isFutureA && isFutureB) {
+            // Both are future: sort ascending (soonest first)
+            return startA - startB;
+          } else {
+            // Both are past/live: sort descending (most recent first)
+            return startB - startA;
+          }
         });
         // Merge Firestore rooms with local rooms to make sure local creations are also visible on refresh!
         const local = getLocalRooms();
