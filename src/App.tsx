@@ -17,7 +17,8 @@ import {
   serverTimestamp,
   query,
   orderBy,
-  limit
+  limit,
+  where
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import {
@@ -1932,6 +1933,11 @@ function AppContent() {
   const [targetsHistory, setTargetsHistory] = useState<any[]>([]);
   const [userDataState, setUserDataState] = useState<any>(null);
   const [sessionLogs, setSessionLogs] = useState<any[]>([]);
+  const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [connectionsCount, setConnectionsCount] = useState(0);
+  const [communityUsers, setCommunityUsers] = useState<any[]>([]);
 
   const isRollingOverRef = useRef(false);
 
@@ -2066,6 +2072,99 @@ function AppContent() {
     });
     return () => unsubscribe();
   }, [user]);
+
+  // Listen to Follows system state, counts, and directory list for authenticated user
+  useEffect(() => {
+    if (!user) {
+      setFollowingUserIds([]);
+      setFollowersCount(0);
+      setFollowingCount(0);
+      setConnectionsCount(0);
+      return;
+    }
+
+    // 1. Followed UIDs list
+    const qFollows = query(collection(db, 'follows'), where('followerId', '==', user.uid));
+    const unsubFollows = onSnapshot(qFollows, (snap) => {
+      const ids = snap.docs.map(d => d.data().followingId);
+      setFollowingUserIds(ids);
+      setFollowingCount(snap.size);
+    }, (err) => {
+      console.warn("Failed to listen to follows list:", err);
+    });
+
+    // 2. Followers Count query
+    const qFollowers = query(collection(db, 'follows'), where('followingId', '==', user.uid));
+    const unsubFollowers = onSnapshot(qFollowers, (snap) => {
+      setFollowersCount(snap.size);
+    }, (err) => {
+      console.warn("Failed to listen to followers count:", err);
+    });
+
+    // 3. Mutual Connections Count query (subcollection under user doc)
+    const qConn = query(collection(db, 'users', user.uid, 'connections'), where('status', '==', 'accepted'));
+    const unsubConn = onSnapshot(qConn, (snap) => {
+      setConnectionsCount(snap.size);
+    }, (err) => {
+      console.warn("Failed to listen to connections count:", err);
+    });
+
+    return () => {
+      unsubFollows();
+      unsubFollowers();
+      unsubConn();
+    };
+  }, [user]);
+
+  // Real-time Community Directory Query
+  useEffect(() => {
+    if (!user || activeTab !== 'community') {
+      setCommunityUsers([]);
+      return;
+    }
+
+    const q = query(collection(db, 'users'), limit(50));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const list = snap.docs
+        .map(d => ({
+          id: d.id,
+          ...d.data()
+        }))
+        .filter(u => u.id !== user.uid); // Exclude current user
+      setCommunityUsers(list);
+    }, (err) => {
+      console.warn("Failed to listen to community directory users:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user, activeTab]);
+
+  const handleToggleFollow = async (targetUserId: string) => {
+    if (!user) {
+      showToast("Please sign in to follow community members.");
+      return;
+    }
+    const docId = `${user.uid}_${targetUserId}`;
+    const followDocRef = doc(db, 'follows', docId);
+    
+    const isFollowing = followingUserIds.includes(targetUserId);
+    try {
+      if (isFollowing) {
+        await deleteDoc(followDocRef);
+        showToast("Unfollowed successfully.");
+      } else {
+        await setDoc(followDocRef, {
+          followerId: user.uid,
+          followingId: targetUserId,
+          createdAt: new Date().toISOString()
+        });
+        showToast("Followed successfully!");
+      }
+    } catch (err: any) {
+      console.error("Failed to toggle follow status:", err);
+      showToast(`Action failed: ${err.message || 'Permission Denied'}`);
+    }
+  };
 
   // Mini Deadline Clock States
   const [deadlineNewStepName, setDeadlineNewStepName] = useState('');
@@ -2330,6 +2429,14 @@ function AppContent() {
         const name = currentUser.displayName || 'Google User';
         setGuestName(name);
         
+        // Sync profile fields to Firestore users doc for searchability in directory
+        setDoc(doc(db, 'users', currentUser.uid), {
+          displayName: name,
+          photoURL: currentUser.photoURL || ''
+        }, { merge: true }).catch(err => {
+          console.warn("Failed to sync profile fields to users doc:", err);
+        });
+
         // Generate initials
         const parts = name.trim().split(/\s+/);
         const initials = parts.length >= 2 
@@ -6644,8 +6751,7 @@ function AppContent() {
 
           {/* Rooms Tab Content */}
           {activeTab === 'rooms' ? (
-            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'start' }}>
-              <div style={{ flex: '2 1 600px', minWidth: '320px' }}>
+            <div style={{ width: '100%' }}>
               {isFirestoreBlocked && (
                 <div className="animate-fade-in" style={{
                   display: 'flex',
@@ -6880,140 +6986,6 @@ function AppContent() {
                   </p>
                 </div>
               </div>
-              </div>
-
-              {/* Right Column: Target Sessions Widget */}
-              <div className="targets-widget-container animate-fade-in" style={{
-                flex: '1 1 300px',
-                minWidth: '300px',
-                position: 'sticky',
-                top: '24px',
-                backgroundColor: 'var(--panel-bg)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--border-radius)',
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}>
-                <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px' }}>
-                  <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
-                      <polyline points="9 11 12 14 22 4"></polyline>
-                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-                    </svg>
-                    Target Sessions
-                  </h3>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Weekly checklist and progress tracker</span>
-                </div>
-
-                {!user && (
-                  <div style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '4px', padding: '10px', lineHeight: '1.4' }}>
-                    ⚠️ You are a guest. <strong>Sign in</strong> to save your targets permanently across devices, otherwise progress will be lost on page reload.
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>This week's targets</span>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary-color)' }}>
-                    {targetsList.filter(t => t.completed).length} / {targetsList.length} done
-                  </span>
-                </div>
-
-                {/* List of items */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '240px', overflowY: 'auto', paddingRight: '4px' }}>
-                  {targetsList.map(item => (
-                    <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: item.completed ? 'var(--text-secondary)' : 'var(--text-primary)', padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.02)' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={item.completed}
-                        onChange={() => handleToggleTarget(item.id)}
-                        style={{
-                          width: '16px',
-                          height: '16px',
-                          borderRadius: '4px',
-                          border: '1px solid var(--border-color)',
-                          cursor: 'pointer',
-                          accentColor: 'var(--primary-color)'
-                        }}
-                      />
-                      <span style={{ textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.text}
-                      </span>
-                    </label>
-                  ))}
-                  {targetsList.length === 0 && (
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', textAlign: 'center', display: 'block', padding: '20px 0' }}>
-                      No targets set for this week yet.
-                    </span>
-                  )}
-                </div>
-
-                {/* Add target form */}
-                <form onSubmit={handleAddTarget} style={{ display: 'flex', gap: '8px' }}>
-                  <input 
-                    type="text"
-                    placeholder="Add a target for this week"
-                    className="search-input"
-                    style={{ paddingLeft: '12px', fontSize: '13px', height: '36px', flex: 1 }}
-                    value={targetInputText}
-                    onChange={(e) => setTargetInputText(e.target.value)}
-                    required
-                  />
-                  <button type="submit" className="btn-signin" style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }}>
-                    +
-                  </button>
-                </form>
-
-                {/* Progress History strip */}
-                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px', marginTop: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Progress History
-                    </span>
-                    <button 
-                      onClick={handleStartNewWeek} 
-                      className="btn-signin" 
-                      style={{ padding: '4px 8px', fontSize: '10px', height: 'auto', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                      title="Archive current checklist and start a new week"
-                    >
-                      New Week
-                    </button>
-                  </div>
-
-                  {/* History Bars Row */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                    {targetsHistory.map((hist, idx) => {
-                      const fullyDone = hist.completedCount === hist.totalCount && hist.totalCount > 0;
-                      const barColor = fullyDone ? '#10b981' : '#f59e0b'; // Green vs Amber
-                      return (
-                        <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <div 
-                            style={{ 
-                              height: '32px', 
-                              borderRadius: '4px', 
-                              backgroundColor: barColor, 
-                              opacity: 0.8,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '9px',
-                              fontWeight: 800,
-                              color: '#000000'
-                            }}
-                            title={`${hist.completedCount}/${hist.totalCount} completed`}
-                          >
-                            {hist.completedCount}/{hist.totalCount}
-                          </div>
-                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                            {hist.date}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
             </div>
           ) : activeTab === 'reflect' ? (
             user ? (
@@ -7060,18 +7032,23 @@ function AppContent() {
                         <h2 style={{ fontSize: '20px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                           {user.displayName || 'Google User'}
                         </h2>
-                        <button 
-                          onClick={() => setIsProfileModalOpen(true)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
-                          title="Edit Profile"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
-                          </svg>
-                        </button>
                       </div>
-                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Weekly Self-Reflection</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>Weekly Self-Reflection</span>
+                      
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '6px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{connectionsCount}</span>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Connections</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{followersCount}</span>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Followers</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{followingCount}</span>
+                          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Following</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -7153,6 +7130,132 @@ function AppContent() {
 
                 </div>
 
+                {/* Target Sessions Checklist Widget */}
+                <div className="targets-widget-container animate-fade-in" style={{
+                  backgroundColor: 'var(--panel-bg)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius)',
+                  padding: '24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px'
+                }}>
+                  <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '12px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
+                        <polyline points="9 11 12 14 22 4"></polyline>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                      </svg>
+                      Target Sessions
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Weekly checklist and progress tracker</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>This week's targets</span>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary-color)' }}>
+                      {targetsList.filter(t => t.completed).length} / {targetsList.length} done
+                    </span>
+                  </div>
+
+                  {/* List of items */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '240px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {targetsList.map(item => (
+                      <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: item.completed ? 'var(--text-secondary)' : 'var(--text-primary)', padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.02)' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={item.completed}
+                          onChange={() => handleToggleTarget(item.id)}
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-color)',
+                            cursor: 'pointer',
+                            accentColor: 'var(--primary-color)'
+                          }}
+                        />
+                        <span style={{ textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.text}
+                        </span>
+                      </label>
+                    ))}
+                    {targetsList.length === 0 && (
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', textAlign: 'center', display: 'block', padding: '20px 0' }}>
+                        No targets set for this week yet.
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Add target form */}
+                  <form onSubmit={handleAddTarget} style={{ display: 'flex', gap: '8px' }}>
+                    <input 
+                      type="text"
+                      placeholder="Add a target for this week"
+                      className="search-input"
+                      style={{ paddingLeft: '12px', fontSize: '13px', height: '36px', flex: 1 }}
+                      value={targetInputText}
+                      onChange={(e) => setTargetInputText(e.target.value)}
+                      required
+                    />
+                    <button type="submit" className="btn-signin" style={{ width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }}>
+                      +
+                    </button>
+                  </form>
+
+                  {/* Progress History strip */}
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Progress History
+                      </span>
+                      <button 
+                        onClick={handleStartNewWeek} 
+                        className="btn-signin" 
+                        style={{ padding: '4px 8px', fontSize: '10px', height: 'auto', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
+                        title="Archive current checklist and start a new week"
+                      >
+                        New Week
+                      </button>
+                    </div>
+
+                    {/* History Bars Row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '10px' }}>
+                      {targetsHistory.map((hist, idx) => {
+                        const fullyDone = hist.completedCount === hist.totalCount && hist.totalCount > 0;
+                        const barColor = fullyDone ? '#10b981' : '#f59e0b'; // Green vs Amber
+                        return (
+                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div 
+                              style={{ 
+                                height: '32px', 
+                                borderRadius: '4px', 
+                                backgroundColor: barColor, 
+                                opacity: 0.8,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '9px',
+                                fontWeight: 800,
+                                color: '#000000'
+                              }}
+                              title={`${hist.completedCount}/${hist.totalCount} completed`}
+                            >
+                              {hist.completedCount}/{hist.totalCount}
+                            </div>
+                            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                              {hist.date}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {targetsHistory.length === 0 && (
+                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic', gridColumn: '1 / -1' }}>No progress history yet.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Sessions Details List */}
                 <div style={{
                   backgroundColor: 'var(--panel-bg)',
@@ -7214,27 +7317,90 @@ function AppContent() {
               </div>
             )
           ) : (
-            /* Community Tab Content Placeholder */
-            <div className="placeholder-container">
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width="48" 
-                height="48" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="1.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                style={{ marginBottom: '16px', opacity: 0.6 }}
-              >
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-              </svg>
-              <h3 className="placeholder-title">Community</h3>
-              <p>Coming soon</p>
+            /* Community Tab Content */
+            <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '800px', margin: '0 auto', paddingBottom: '48px', width: '100%' }}>
+              <div>
+                <h2 style={{ fontSize: '24px', fontWeight: 800, margin: '0 0 8px', color: 'var(--text-primary)' }}>Community Directory</h2>
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>Discover other learners and follow their weekly progress.</p>
+              </div>
+
+              {user ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+                  {communityUsers.map((u) => {
+                    const isFollowing = followingUserIds.includes(u.id);
+                    const userInitials = u.displayName ? u.displayName.substring(0, 2).toUpperCase() : 'U';
+                    return (
+                      <div key={u.id} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '16px',
+                        backgroundColor: 'var(--panel-bg)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--border-radius)',
+                        gap: '12px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {u.photoURL ? (
+                            <img 
+                              src={u.photoURL} 
+                              alt={u.displayName || 'User'} 
+                              style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '50%',
+                              backgroundColor: '#8b5cf6',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '14px',
+                              fontWeight: 700,
+                              color: '#ffffff'
+                            }}>
+                              {userInitials}
+                            </div>
+                          )}
+                          <div>
+                            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{u.displayName || 'Google User'}</div>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Member</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleToggleFollow(u.id)}
+                          className="btn-signin"
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            height: 'auto',
+                            width: 'auto',
+                            backgroundColor: isFollowing ? 'transparent' : 'var(--primary-color)',
+                            color: isFollowing ? 'var(--text-secondary)' : 'var(--primary-text)',
+                            border: isFollowing ? '1px solid var(--border-color)' : 'none',
+                            cursor: 'pointer',
+                            borderRadius: '6px',
+                            fontWeight: 700
+                          }}
+                        >
+                          {isFollowing ? 'Following' : 'Follow'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {communityUsers.length === 0 && (
+                    <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '48px', color: 'var(--text-secondary)', fontSize: '14px', fontStyle: 'italic' }}>
+                      No other users found in the directory yet.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="placeholder-container" style={{ padding: '48px' }}>
+                  <p style={{ color: 'var(--text-secondary)' }}>Please sign in to view and follow community members.</p>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -7948,7 +8114,28 @@ function AppContent() {
                               )}
                             </div>
                           </div>
-                          <div className="person-status-icons">
+                          <div className="person-status-icons" style={{ display: 'flex', alignItems: 'center' }}>
+                            {user && !isUser && (
+                              <button
+                                onClick={() => handleToggleFollow(p.id)}
+                                style={{
+                                  background: 'none',
+                                  border: followingUserIds.includes(p.id) ? '1px solid var(--border-color)' : '1px solid var(--primary-color)',
+                                  borderRadius: '4px',
+                                  padding: '2px 8px',
+                                  fontSize: '10px',
+                                  fontWeight: 'bold',
+                                  color: followingUserIds.includes(p.id) ? 'var(--text-secondary)' : 'var(--primary-color)',
+                                  cursor: 'pointer',
+                                  marginRight: '8px',
+                                  lineHeight: '1.2',
+                                  display: 'inline-flex',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                {followingUserIds.includes(p.id) ? 'Following' : 'Follow'}
+                              </button>
+                            )}
                             {/* mic icon status */}
                             <svg className={`person-status-icon ${showMuted ? 'muted' : ''}`} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               {showMuted ? (
