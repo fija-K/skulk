@@ -553,7 +553,7 @@ function UniversalVideoPlayer({
   platform,
   isLive,
   isPresenter, 
-  presenterId: _presenterId,
+  presenterId,
   roomId,
   myId,
   participants
@@ -572,26 +572,12 @@ function UniversalVideoPlayer({
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
 
-  const getLatestPlaybackState = () => {
-    let latestData: any = null;
-    let maxTimestamp = 0;
-
-    // Search for the latest update timestamp among all participants in call
-    participants.forEach((p: any) => {
-      // Access the raw participant fields from Firestore (p as any)
-      const raw = p as any;
-      if (raw.ytUpdateTimestamp && raw.ytUpdateTimestamp > maxTimestamp) {
-        maxTimestamp = raw.ytUpdateTimestamp;
-        latestData = raw;
-      }
-    });
-
-    return latestData;
+  const getPresenterState = () => {
+    return participants.find(p => p.id === presenterId) as any;
   };
 
   const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
-    if (isLive) return;
-    if (data.id === myId) return; // Prevent self-loop syncing!
+    if (isPresenter || isLive) return; // Viewers only sync to presenter!
 
     const targetPlaying = data.ytPlaying ?? false;
     const targetTime = data.ytTime ?? 0;
@@ -640,7 +626,7 @@ function UniversalVideoPlayer({
       isPresenter,
       isLive,
       (playing, time) => {
-        if (isLive) return;
+        if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
         if (!isLocalChangeRef.current) {
           updateFirestorePlaybackState(playing, time);
         }
@@ -652,10 +638,10 @@ function UniversalVideoPlayer({
       }
       playerRef.current = wrappedPlayer;
 
-      // Sync to latest playback state immediately when player mounts
-      const latestData = getLatestPlaybackState();
-      if (latestData) {
-        syncToPresenterState(latestData, wrappedPlayer);
+      // Sync to latest presenter state immediately when player mounts
+      const presenterData = getPresenterState();
+      if (presenterData) {
+        syncToPresenterState(presenterData, wrappedPlayer);
       }
     }).catch(err => {
       console.error("Failed to load player:", err);
@@ -719,30 +705,30 @@ function UniversalVideoPlayer({
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
 
-  // Synchronize player to latest active state in the room
+  // Synchronize player to presenter's active state in the room
   useEffect(() => {
-    if (isLive || !playerRef.current) return;
+    if (isLive || isPresenter || !playerRef.current) return;
 
-    const latestData = getLatestPlaybackState();
-    if (!latestData) return;
+    const presenterData = getPresenterState();
+    if (!presenterData) return;
 
-    lastPresenterDataRef.current = latestData;
-    syncToPresenterState(latestData, playerRef.current);
-  }, [participants, isLive]);
+    lastPresenterDataRef.current = presenterData;
+    syncToPresenterState(presenterData, playerRef.current);
+  }, [participants, isLive, presenterId]);
 
   // Viewer proactive local force sync interval
   useEffect(() => {
-    if (isLive) return;
+    if (isPresenter || isLive) return;
 
     const interval = setInterval(() => {
-      const latestData = getLatestPlaybackState();
-      if (playerRef.current && latestData) {
-        syncToPresenterState(latestData, playerRef.current);
+      const presenterData = getPresenterState();
+      if (playerRef.current && presenterData) {
+        syncToPresenterState(presenterData, playerRef.current);
       }
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isLive, participants]);
+  }, [isPresenter, isLive, participants, presenterId]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -756,6 +742,21 @@ function UniversalVideoPlayer({
           backgroundColor: '#000'
         }} 
       />
+      {/* Viewer pointer-events overlay to block clicks on video but allow bottom controls */}
+      {!isPresenter && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '82%', // Cover the video screen but leave bottom controls clickable!
+            backgroundColor: 'transparent',
+            zIndex: 10,
+            cursor: 'default'
+          }}
+        />
+      )}
     </div>
   );
 }
