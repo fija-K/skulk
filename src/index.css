@@ -2245,5 +2245,63 @@ input[type=number] {
   transform: translate(-50%, -50%) scale(0.95);
 }
 
+/* Gallery Pagination Styles */
+.gallery-pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+  margin-bottom: 8px;
+  z-index: 10;
+}
 
+.pagination-arrow-btn {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
 
+.pagination-arrow-btn:hover:not(:disabled) {
+  background-color: var(--primary-color);
+  color: var(--primary-text);
+  border-color: var(--primary-color);
+  transform: scale(1.05);
+}
+
+.pagination-arrow-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pagination-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+.pagination-dot:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+.pagination-dot.active {
+  background-color: var(--primary-color);
+  transform: scale(1.2);
+}

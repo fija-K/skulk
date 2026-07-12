@@ -1820,6 +1820,7 @@ function AppContent() {
   const [cameraError, setCameraError] = useState(false);
   const [micError, setMicError] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(true);
+  const [galleryPage, setGalleryPage] = useState(0);
   const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   
   // Sidebar tabs in-call panel
@@ -1840,10 +1841,19 @@ function AppContent() {
   useEffect(() => {
     isCamOffRef.current = isCamOff;
   }, [isCamOff]);
-  
+
   // In-call participants state
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
   const [activeMenuParticipantId, setActiveMenuParticipantId] = useState<string | null>(null);
+
+  // Reactive clamping for paginated gallery page index
+  useEffect(() => {
+    const maxPerPage = 4;
+    const totalPages = Math.ceil(callParticipants.length / maxPerPage) || 1;
+    if (galleryPage >= totalPages) {
+      setGalleryPage(Math.max(0, totalPages - 1));
+    }
+  }, [callParticipants.length, galleryPage]);
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -3088,6 +3098,7 @@ function AppContent() {
       setUnreadChatCount(0);
       setViewingShare(null);
       setLiveKitToken(null);
+      setGalleryPage(0);
     }
     navigate('/');
   };
@@ -3224,6 +3235,7 @@ function AppContent() {
         setUnreadChatCount(0);
         setViewingShare(null);
         setLiveKitToken(null);
+        setGalleryPage(0);
       }
     }
   }, [roomId, rooms, user, guestId, isAuthLoading, currentRoom ? roomDocId(currentRoom) : null]);
@@ -5469,7 +5481,7 @@ function AppContent() {
           } : {}
         }}
       >
-        {(!showCamOff || isGalleryView) && !isThumbnail ? (
+        {isGalleryView && !isThumbnail ? (
           // Gallery Layout or camera is ON: Full Card Video/Avatar
           showMediaTakeover ? (
             /* Takeover card for gallery layout - beautifully contained */
@@ -8414,17 +8426,62 @@ function AppContent() {
                         })()}
                       </div>
                     </div>
-                  ) : (
-                    <div 
-                      className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
-                      style={isGalleryView ? {
-                        gridTemplateColumns: getGalleryColumns(callParticipants.length),
-                        maxWidth: getGalleryMaxWidth(callParticipants.length)
-                      } : {}}
-                    >
-                      {callParticipants.map((p) => renderParticipantTile(p, false))}
-                    </div>
-                  )}
+                  ) : (() => {
+                    const maxPerPage = 4;
+                    const totalPages = Math.ceil(callParticipants.length / maxPerPage) || 1;
+                    const currentPage = Math.min(galleryPage, totalPages - 1);
+                    const displayedParticipants = callParticipants.slice(currentPage * maxPerPage, (currentPage + 1) * maxPerPage);
+
+                    return (
+                      <>
+                        <div 
+                          className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
+                          style={isGalleryView ? {
+                            gridTemplateColumns: getGalleryColumns(displayedParticipants.length),
+                            maxWidth: getGalleryMaxWidth(displayedParticipants.length)
+                          } : {}}
+                        >
+                          {displayedParticipants.map((p) => renderParticipantTile(p, false))}
+                        </div>
+
+                        {totalPages > 1 && (
+                          <div className="gallery-pagination-controls animate-fade-in">
+                            <button 
+                              className="pagination-arrow-btn" 
+                              disabled={currentPage === 0}
+                              onClick={() => setGalleryPage(prev => Math.max(0, prev - 1))}
+                              title="Previous Page"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="15 18 9 12 15 6"></polyline>
+                              </svg>
+                            </button>
+                            
+                            <div className="pagination-dots">
+                              {Array.from({ length: totalPages }).map((_, idx) => (
+                                <div 
+                                  key={idx}
+                                  className={`pagination-dot ${idx === currentPage ? 'active' : ''}`}
+                                  onClick={() => setGalleryPage(idx)}
+                                />
+                              ))}
+                            </div>
+
+                            <button 
+                              className="pagination-arrow-btn" 
+                              disabled={currentPage === totalPages - 1}
+                              onClick={() => setGalleryPage(prev => Math.min(totalPages - 1, prev + 1))}
+                              title="Next Page"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* Layout Caption toggle */}
                   <p className="stage-caption" onClick={() => {
