@@ -14,7 +14,10 @@ import {
   onSnapshot, 
   updateDoc,
   runTransaction,
-  serverTimestamp
+  serverTimestamp,
+  query,
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import {
@@ -1623,7 +1626,7 @@ function AppContent() {
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'rooms' | 'community'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'community' | 'reflect'>('rooms');
   
   // Real-time rooms state list
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -1927,6 +1930,18 @@ function AppContent() {
   const [targetInputText, setTargetInputText] = useState('');
   const [targetsList, setTargetsList] = useState<any[]>([]);
   const [targetsHistory, setTargetsHistory] = useState<any[]>([]);
+  const [userDataState, setUserDataState] = useState<any>(null);
+  const [sessionLogs, setSessionLogs] = useState<any[]>([]);
+
+  const isRollingOverRef = useRef(false);
+
+  const getStartOfWeekMondayKey = () => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    return monday.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  };
 
   // Listen to Firestore for user's targets list and history
   useEffect(() => {
@@ -1954,8 +1969,49 @@ function AppContent() {
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setTargetsList(data.targetsList || []);
-        setTargetsHistory(data.targetsHistory || []);
+        const targets = data.targetsList || [];
+        const history = data.targetsHistory || [];
+        
+        setTargetsList(targets);
+        setTargetsHistory(history);
+        setUserDataState(data);
+
+        // Automatic rollover check
+        const mondayKey = getStartOfWeekMondayKey();
+        const dbWeekKey = data.currentWeekKey;
+
+        if (dbWeekKey && dbWeekKey !== mondayKey && !isRollingOverRef.current) {
+          isRollingOverRef.current = true;
+          const incompleteTargets = targets.filter((t: any) => !t.completed);
+          const completedCount = targets.filter((t: any) => t.completed).length;
+          const totalCount = targets.length;
+
+          // Parse and format the old Monday week start date label for history strip
+          const oldMonday = new Date(dbWeekKey);
+          const formattedDate = oldMonday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+          const nextHistory = [
+            { date: formattedDate, completedCount, totalCount },
+            ...history
+          ];
+
+          setDoc(userDocRef, {
+            targetsList: incompleteTargets,
+            targetsHistory: nextHistory,
+            currentWeekKey: mondayKey
+          }, { merge: true })
+            .catch(err => console.error("Auto rollover failed:", err))
+            .finally(() => {
+              isRollingOverRef.current = false;
+            });
+        } else if (!dbWeekKey && !isRollingOverRef.current) {
+          isRollingOverRef.current = true;
+          setDoc(userDocRef, { currentWeekKey: mondayKey }, { merge: true })
+            .catch(err => console.error("Failed to initialize currentWeekKey:", err))
+            .finally(() => {
+              isRollingOverRef.current = false;
+            });
+        }
       } else {
         // Initialize new user document with default templates
         const initialList = [
@@ -1971,15 +2027,43 @@ function AppContent() {
           { date: 'Jun 15', completedCount: 2, totalCount: 5 },
           { date: 'Jun 8', completedCount: 6, totalCount: 6 }
         ];
+        const mondayKey = getStartOfWeekMondayKey();
+        
+        isRollingOverRef.current = true;
         setDoc(userDocRef, {
           targetsList: initialList,
-          targetsHistory: initialHistory
-        }, { merge: true }).catch(err => {
-          console.warn("Error initializing user targets in Firestore:", err);
-        });
+          targetsHistory: initialHistory,
+          currentWeekKey: mondayKey
+        }, { merge: true })
+          .catch(err => {
+            console.warn("Error initializing user targets in Firestore:", err);
+          })
+          .finally(() => {
+            isRollingOverRef.current = false;
+          });
       }
     });
 
+    return () => unsubscribe();
+  }, [user]);
+
+  // Listen to session logs for authenticated user
+  useEffect(() => {
+    if (!user) {
+      setSessionLogs([]);
+      return;
+    }
+    const logsRef = collection(db, 'users', user.uid, 'sessionLogs');
+    const q = query(logsRef, orderBy('joinedAt', 'desc'), limit(50));
+    const unsubscribe = onSnapshot(q, (snap: any) => {
+      const logs = snap.docs.map((doc: any) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSessionLogs(logs);
+    }, (err: any) => {
+      console.warn("Failed to listen to session logs:", err);
+    });
     return () => unsubscribe();
   }, [user]);
 
@@ -2496,6 +2580,64 @@ function AppContent() {
             if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
               console.log("leavePresence transaction deleting presence:", myId);
               transaction.delete(presenceDocRef);
+
+              // ONLY for authenticated users, log the session log and update streak!
+              if (user && user.uid === myId) {
+                // Get room details inside transaction
+                const roomRef = doc(db, 'rooms', roomIdToLeave);
+                const roomSnap = await transaction.get(roomRef);
+                const roomName = roomSnap.exists() ? (roomSnap.data().name || 'Room') : 'Room';
+
+                const joinedAtStr = data.joinedAt || new Date().toISOString();
+                const leftAtStr = new Date().toISOString();
+                const joinedTime = new Date(joinedAtStr).getTime();
+                const leftTime = new Date(leftAtStr).getTime();
+                const durationMinutes = Math.max(0, Math.round((leftTime - joinedTime) / 60000));
+                
+                // Write session log document
+                const logId = `${roomIdToLeave}_${joinedTime}`;
+                const logRef = doc(db, 'users', myId, 'sessionLogs', logId);
+                transaction.set(logRef, {
+                  roomId: roomIdToLeave,
+                  roomName,
+                  joinedAt: joinedAtStr,
+                  leftAt: leftAtStr,
+                  durationMinutes,
+                  role: data.role || 'member'
+                });
+
+                // Update activity streak on user document
+                const userRef = doc(db, 'users', myId);
+                const userSnap = await transaction.get(userRef);
+                let currentStreak = 0;
+                let lastActiveDate = '';
+                
+                if (userSnap.exists()) {
+                  const userData = userSnap.data();
+                  currentStreak = userData.currentStreak || 0;
+                  lastActiveDate = userData.lastActiveDate || '';
+                }
+
+                const today = new Date();
+                const todayStr = today.toLocaleDateString('en-CA');
+                const yesterday = new Date();
+                yesterday.setDate(today.getDate() - 1);
+                const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+
+                if (lastActiveDate !== todayStr) {
+                  if (lastActiveDate === yesterdayStr) {
+                    currentStreak += 1;
+                  } else {
+                    currentStreak = 1;
+                  }
+                  lastActiveDate = todayStr;
+                }
+
+                transaction.set(userRef, {
+                  currentStreak,
+                  lastActiveDate
+                }, { merge: true });
+              }
             } else {
               console.log('leavePresence bypassed: presence belongs to a newer session (transaction).');
             }
@@ -4065,70 +4207,90 @@ function AppContent() {
     if (!targetInputText.trim()) return;
     
     const nextItem = { id: Date.now().toString(), text: targetInputText.trim(), completed: false };
-    const nextList = [...targetsList, nextItem];
+    const prevList = targetsList;
+    const nextList = [...prevList, nextItem];
+    
+    // Optimistic Update
+    setTargetsList(nextList);
+    setTargetInputText('');
     
     if (user) {
       try {
         const userDocRef = doc(db, 'users', user.uid);
         await setDoc(userDocRef, { targetsList: nextList }, { merge: true });
-      } catch (err) {
+        showToast('Weekly target added!');
+      } catch (err: any) {
         console.error("Failed to add target to Firestore:", err);
+        setTargetsList(prevList);
+        showToast(`Failed to add target: ${err.message || 'Permission Denied'}`);
       }
     } else {
-      setTargetsList(nextList);
       localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
+      showToast('Weekly target added!');
     }
-    
-    setTargetInputText('');
-    showToast('Weekly target added!');
   };
 
   const handleToggleTarget = async (id: string) => {
-    const nextList = targetsList.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
+    const prevList = targetsList;
+    const nextList = prevList.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
+    
+    // Optimistic Update
+    setTargetsList(nextList);
     
     if (user) {
       try {
         const userDocRef = doc(db, 'users', user.uid);
         await setDoc(userDocRef, { targetsList: nextList }, { merge: true });
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to toggle target in Firestore:", err);
+        setTargetsList(prevList);
+        showToast(`Failed to update target: ${err.message || 'Permission Denied'}`);
       }
     } else {
-      setTargetsList(nextList);
       localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
     }
   };
 
   const handleStartNewWeek = async () => {
-    const totalCount = targetsList.length;
-    const completedCount = targetsList.filter(t => t.completed).length;
+    const prevList = targetsList;
+    const prevHistory = targetsHistory;
+    const totalCount = prevList.length;
+    const completedCount = prevList.filter(t => t.completed).length;
     const startOfWeek = new Date();
     const formattedDate = startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     
     const nextHistory = [
       { date: formattedDate, completedCount, totalCount },
-      ...targetsHistory
+      ...prevHistory
     ];
-    const nextList: any[] = [];
+    // Rollover incomplete targets
+    const nextList = prevList.filter(t => !t.completed);
+    const mondayKey = getStartOfWeekMondayKey();
+    
+    // Optimistic Update
+    setTargetsList(nextList);
+    setTargetsHistory(nextHistory);
     
     if (user) {
       try {
         const userDocRef = doc(db, 'users', user.uid);
         await setDoc(userDocRef, {
           targetsList: nextList,
-          targetsHistory: nextHistory
+          targetsHistory: nextHistory,
+          currentWeekKey: mondayKey
         }, { merge: true });
-      } catch (err) {
+        showToast('Started new week! Rolled over incomplete targets.');
+      } catch (err: any) {
         console.error("Failed to archive week in Firestore:", err);
+        setTargetsList(prevList);
+        setTargetsHistory(prevHistory);
+        showToast(`Failed to archive week: ${err.message || 'Permission Denied'}`);
       }
     } else {
-      setTargetsList(nextList);
-      setTargetsHistory(nextHistory);
       localStorage.setItem('skulk_guest_targets_list', JSON.stringify(nextList));
       localStorage.setItem('skulk_guest_targets_history', JSON.stringify(nextHistory));
+      showToast('Started new week! Rolled over incomplete targets.');
     }
-    
-    showToast('Started new week! Archived progress to history.');
   };
 
   // Mini Deadline Clock Timer Effect
@@ -6253,6 +6415,39 @@ function AppContent() {
     );
   };
 
+  // Reflect Calculations
+  const getStartOfWeekMondayDate = () => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+
+  const getDisplayStreak = (currentStreak: number, lastActiveDate: string) => {
+    if (!lastActiveDate) return 0;
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+
+    if (lastActiveDate === todayStr || lastActiveDate === yesterdayStr) {
+      return currentStreak;
+    }
+    return 0; // Missed a day!
+  };
+
+  const currentWeekMonday = getStartOfWeekMondayDate();
+  const thisWeekLogs = sessionLogs.filter(log => {
+    if (!log.joinedAt) return false;
+    const logDate = new Date(log.joinedAt);
+    return logDate >= currentWeekMonday;
+  });
+
+  const totalTimeThisWeek = thisWeekLogs.reduce((acc, log) => acc + (log.durationMinutes || 0), 0);
+  const sessionsCountThisWeek = thisWeekLogs.length;
+
   return (
     <div className="app-container">
       
@@ -6431,6 +6626,14 @@ function AppContent() {
             >
               Rooms
             </button>
+            {user && (
+              <button 
+                onClick={() => setActiveTab('reflect')} 
+                className={`tab-btn ${activeTab === 'reflect' ? 'active' : ''}`}
+              >
+                Reflect
+              </button>
+            )}
             <button 
               onClick={() => setActiveTab('community')} 
               className={`tab-btn ${activeTab === 'community' ? 'active' : ''}`}
@@ -6812,6 +7015,204 @@ function AppContent() {
                 </div>
               </div>
             </div>
+          ) : activeTab === 'reflect' ? (
+            user ? (
+              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px', maxWidth: '800px', margin: '0 auto', paddingBottom: '48px', width: '100%' }}>
+                
+                {/* Profile Header Card */}
+                <div className="profile-header-card" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '24px',
+                  backgroundColor: 'var(--panel-bg)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius)',
+                  gap: '20px',
+                  flexWrap: 'wrap'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    {user.photoURL ? (
+                      <img 
+                        src={user.photoURL} 
+                        alt={user.displayName || 'User'} 
+                        style={{ width: '64px', height: '64px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary-color)' }}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '50%',
+                        backgroundColor: guestColor || '#8b5cf6',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '24px',
+                        fontWeight: 700,
+                        color: '#ffffff',
+                        border: '2px solid var(--primary-color)'
+                      }}>
+                        {guestInitials || (user.displayName ? user.displayName.substring(0, 2).toUpperCase() : 'G')}
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h2 style={{ fontSize: '20px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                          {user.displayName || 'Google User'}
+                        </h2>
+                        <button 
+                          onClick={() => setIsProfileModalOpen(true)}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                          title="Edit Profile"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                          </svg>
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Weekly Self-Reflection</span>
+                    </div>
+                  </div>
+
+                  {/* Streak Badge */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.2)',
+                    borderRadius: '12px',
+                    padding: '12px 20px'
+                  }}>
+                    <div style={{ fontSize: '28px' }}>🔥</div>
+                    <div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: '#f59e0b', margin: 0 }}>
+                        {getDisplayStreak(userDataState?.currentStreak || 0, userDataState?.lastActiveDate || '')} Day Streak
+                      </div>
+                      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                        {userDataState?.lastActiveDate ? `Last active: ${userDataState.lastActiveDate}` : 'No activity logged yet'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Weekly Stats Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+                  
+                  {/* Time Spent Card */}
+                  <div style={{
+                    backgroundColor: 'var(--panel-bg)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--border-radius)',
+                    padding: '24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Time Spent</span>
+                    <div style={{ fontSize: '32px', fontWeight: 800, color: 'var(--primary-color)' }}>
+                      {totalTimeThisWeek} <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-secondary)' }}>mins</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Across all rooms this week</span>
+                  </div>
+
+                  {/* Targets Completed Card */}
+                  <div style={{
+                    backgroundColor: 'var(--panel-bg)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--border-radius)',
+                    padding: '24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Targets Completed</span>
+                    <div style={{ fontSize: '32px', fontWeight: 800, color: '#10b981' }}>
+                      {targetsList.filter(t => t.completed).length} / {targetsList.length}
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Weekly session targets completed</span>
+                  </div>
+
+                  {/* Sessions Attended Card */}
+                  <div style={{
+                    backgroundColor: 'var(--panel-bg)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--border-radius)',
+                    padding: '24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sessions Attended</span>
+                    <div style={{ fontSize: '32px', fontWeight: 800, color: '#3b82f6' }}>
+                      {sessionsCountThisWeek}
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Distinct calls joined this week</span>
+                  </div>
+
+                </div>
+
+                {/* Sessions Details List */}
+                <div style={{
+                  backgroundColor: 'var(--panel-bg)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius)',
+                  padding: '24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px'
+                }}>
+                  <div>
+                    <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>Session History (This Week)</h3>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Detail log of calls joined or hosted since Monday</span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {thisWeekLogs.map((log) => {
+                      const localDate = new Date(log.joinedAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <div key={log.id} style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px 16px',
+                          backgroundColor: 'rgba(255,255,255,0.01)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px'
+                        }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{log.roomName}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{localDate} • Role: {log.role}</span>
+                          </div>
+                          <div style={{
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            color: 'var(--text-secondary)',
+                            backgroundColor: 'rgba(255,255,255,0.02)',
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-color)'
+                          }}>
+                            {log.durationMinutes} min{log.durationMinutes !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {thisWeekLogs.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)', fontSize: '13px', fontStyle: 'italic' }}>
+                        No sessions recorded for this week yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            ) : (
+              <div className="placeholder-container">
+                <p>Please sign in to view your Reflect stats.</p>
+              </div>
+            )
           ) : (
             /* Community Tab Content Placeholder */
             <div className="placeholder-container">
