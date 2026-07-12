@@ -414,90 +414,51 @@ function createWrappedPlayer(
   }
 
   if (platform === 'dailymotion') {
-    const container = document.getElementById(elementId);
-    if (!container) throw new Error("Dailymotion container not found");
-    container.innerHTML = '';
+    return loadPlatformScript('dailymotion', 'https://api.dmcdn.net/all.js').then(() => {
+      const container = document.getElementById(elementId);
+      if (!container) throw new Error("Dailymotion container not found");
+      container.innerHTML = '';
 
-    const iframe = document.createElement('iframe');
-    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=1&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
-    iframe.style.width = '100%';
-    iframe.style.height = '100%';
-    iframe.style.border = 'none';
-    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    container.appendChild(iframe);
-
-    let playerState = 2; // 2 = paused, 1 = playing
-    let currentTime = 0;
-    
-    // Listen to messages from Dailymotion iframe
-    const messageListener = (event: MessageEvent) => {
-      if (!event.origin.includes('dailymotion.com')) return;
-      
-      try {
-        let eventName = '';
-        let timeVal = currentTime;
-        
-        if (typeof event.data === 'string') {
-          if (event.data.startsWith('event=')) {
-            const params = new URLSearchParams(event.data);
-            eventName = params.get('event') || '';
-            timeVal = parseFloat(params.get('time') || String(currentTime));
-          } else {
-            try {
-              const parsed = JSON.parse(event.data);
-              eventName = parsed.event || '';
-              timeVal = parsed.time !== undefined ? parsed.time : currentTime;
-            } catch (e) {}
-          }
-        } else if (event.data && typeof event.data === 'object') {
-          eventName = event.data.event || '';
-          timeVal = event.data.time !== undefined ? event.data.time : currentTime;
+      const player = (window as any).DM.player(container, {
+        video: videoId,
+        width: '100%',
+        height: '100%',
+        params: {
+          autoplay: true,
+          mute: !isPresenter,
+          controls: true,
+          "queue-enable": false
         }
-        
-        if (eventName) {
-          if (eventName === 'play') {
-            playerState = 1;
-            onStateChange(true, timeVal);
-          } else if (eventName === 'pause') {
-            playerState = 2;
-            onStateChange(false, timeVal);
-          } else if (eventName === 'timeupdate' || eventName === 'progress') {
-            currentTime = timeVal;
-          } else if (eventName === 'seeked') {
-            currentTime = timeVal;
-            onStateChange(playerState === 1, timeVal);
+      });
+
+      return new Promise<AbstractPlayer>((resolve) => {
+        player.addEventListener('apiready', () => {
+          if (isPresenter) {
+            player.addEventListener('play', () => {
+              onStateChange(true, player.currentTime || 0);
+            });
+            player.addEventListener('pause', () => {
+              onStateChange(false, player.currentTime || 0);
+            });
+            player.addEventListener('seeked', () => {
+              onStateChange(true, player.currentTime || 0);
+            });
           }
-        }
-      } catch (e) {}
-    };
 
-    window.addEventListener('message', messageListener);
-
-    return Promise.resolve({
-      play: () => {
-        try {
-          iframe.contentWindow?.postMessage('play', '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
-        } catch (e) {}
-      },
-      pause: () => {
-        try {
-          iframe.contentWindow?.postMessage('pause', '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
-        } catch (e) {}
-      },
-      seekTo: (sec) => {
-        try {
-          iframe.contentWindow?.postMessage(`seek=${sec}`, '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', value: sec }), '*');
-        } catch (e) {}
-      },
-      getCurrentTime: () => currentTime,
-      getPlayerState: () => playerState,
-      destroy: () => {
-        window.removeEventListener('message', messageListener);
-        container.innerHTML = '';
-      }
+          resolve({
+            play: () => player.play(),
+            pause: () => player.pause(),
+            seekTo: (sec) => player.seek(sec),
+            getCurrentTime: () => player.currentTime || 0,
+            getPlayerState: () => player.paused ? 2 : 1,
+            destroy: () => {
+              try {
+                container.innerHTML = '';
+              } catch (e) {}
+            }
+          });
+        });
+      });
     });
   }
 
