@@ -3782,7 +3782,7 @@ function AppContent() {
             const img = new Image();
             img.onload = () => {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             };
             img.src = data.whiteboardData;
           }
@@ -3918,17 +3918,32 @@ function AppContent() {
   // Resize canvas when whiteboard view opens or draw color changes
   useEffect(() => {
     if (viewingShare?.type === 'whiteboard' && canvasRef.current) {
-      const canvas = canvasRef.current;
-      canvas.width = canvas.parentElement?.clientWidth || 800;
-      canvas.height = canvas.parentElement?.clientHeight || 500;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.lineCap = 'round';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = drawColor;
-      }
+      const handleResize = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = canvas.parentElement?.clientWidth || 800;
+        canvas.height = canvas.parentElement?.clientHeight || 500;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = drawColor;
+        }
+      };
+
+      // Run immediately
+      handleResize();
+
+      // Run after a short delay to allow DOM transition/reflow to settle
+      const timer = setTimeout(handleResize, 100);
+
+      window.addEventListener('resize', handleResize);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', handleResize);
+      };
     }
-  }, [viewingShare?.type]);
+  }, [viewingShare?.type, drawColor]);
 
   // Mouse drawing handlers
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -8216,16 +8231,16 @@ function AppContent() {
           <div className="call-main-content">
             
             {/* Call Main Stage (Left) */}
-            <div className="call-stage">
+            <div className="call-stage" style={expandedTool !== 'none' || viewingShare ? { padding: 0, alignItems: 'stretch', justifyContent: 'stretch' } : undefined}>
               {expandedTool !== 'none' ? (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', flex: 1 }}>
                   <div className="expanded-tool-stage-wrapper animate-fade-in" style={{
                     display: 'flex',
                     flexDirection: 'column',
                     flex: 1,
                     backgroundColor: 'var(--card-bg)',
-                    borderRadius: 'var(--border-radius)',
-                    border: '1px solid var(--border-color)',
+                    borderRadius: 0,
+                    border: 'none',
                     overflow: 'hidden',
                     position: 'relative'
                   }}>
@@ -8293,20 +8308,20 @@ function AppContent() {
                     minHeight: '84px',
                     width: '100%',
                     alignItems: 'center',
-                    backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
-                    borderRadius: 'var(--border-radius)',
-                    border: '1px solid var(--border-color)',
-                    scrollbarWidth: 'thin',
+                    justifyContent: 'center',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    scrollbarWidth: 'none',
                     boxSizing: 'border-box'
                   }}>
                     {callParticipants.map((p) => renderParticipantTile(p, true))}
                   </div>
                 </div>
               ) : viewingShare ? (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', flex: 1 }}>
                   <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
                     {viewingShare.type === 'whiteboard' ? (
-                      <div className="whiteboard-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                      <div className="whiteboard-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', border: 'none', borderRadius: 0 }}>
                         <div className="whiteboard-toolbar">
                           <div className="whiteboard-tools-left">
                             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -8356,12 +8371,12 @@ function AppContent() {
                           onTouchStart={viewingShare.participantId === getMyId() ? startDrawingTouch : undefined}
                           onTouchMove={viewingShare.participantId === getMyId() ? drawTouch : undefined}
                           onTouchEnd={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                          style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default', flex: 1, height: 'auto' }}
+                          style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default', flex: 1, width: '100%', height: '100%', display: 'block' }}
                         />
                       </div>
                     ) : (
-                      <div className="screenshare-stage-layout animate-fade-in" style={{ height: '100%' }}>
-                        <div className="screenshare-video-wrapper">
+                      <div className="screenshare-stage-layout animate-fade-in" style={{ height: '100%', gap: 0 }}>
+                        <div className="screenshare-video-wrapper" style={{ border: 'none', borderRadius: 0 }}>
                           {viewingShare.type === 'screen' ? (
                             <ScreenShareVideo participantId={viewingShare.participantId} />
                           ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
@@ -8429,10 +8444,10 @@ function AppContent() {
                     minHeight: '84px',
                     width: '100%',
                     alignItems: 'center',
-                    backgroundColor: 'var(--panel-bg, rgba(26, 28, 35, 0.4))',
-                    borderRadius: 'var(--border-radius)',
-                    border: '1px solid var(--border-color)',
-                    scrollbarWidth: 'thin',
+                    justifyContent: 'center',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    scrollbarWidth: 'none',
                     boxSizing: 'border-box'
                   }}>
                     {callParticipants.map((p) => renderParticipantTile(p, true))}
