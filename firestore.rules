@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User documents
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Guest documents
+    match /guests/{guestId} {
+      allow read, write: if true;
+    }
+    
+    // Room documents
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        resource.data.creatorId == request.auth.uid ||
+        get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
+      );
+      
+      // Participants collection
+      match /participants/{participantId} {
+        allow read: if true;
+        allow create: if request.auth != null && participantId == request.auth.uid;
+        
+        // ALLOW update of participant presence/status document
+        allow update: if request.auth != null && request.auth.uid == participantId && (
+          // 1. If modifying roles, only host/cohost/admin can do it
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+           resource.data.role in ['admin', 'host', 'cohost']) &&
+          
+          // 2. Allow updating media playback state fields (ytPlaying, ytTime, ytSpeed, ytUpdateTimestamp)
+          // only if they are the current/new active presenter/sharer or a host/cohost/admin
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ytPlaying', 'ytTime', 'ytSpeed', 'ytUpdateTimestamp']) ||
+           resource.data.role in ['admin', 'host', 'cohost'] ||
+           resource.data.sharing == 'youtube' ||
+           request.resource.data.sharing == 'youtube')
+        );
+        
+        allow delete: if request.auth != null && (
+          request.auth.uid == participantId ||
+          get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
+        );
+      }
+      
+      // Messages collection
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if request.resource.data.senderId != null && 
+                      exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.resource.data.senderId));
+        allow update, delete: if false;
+      }
+    }
+  }
+}
