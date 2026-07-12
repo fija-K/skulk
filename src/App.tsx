@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { 
   collection, 
@@ -12,7 +12,8 @@ import {
   getDocs, 
   onSnapshot, 
   updateDoc,
-  runTransaction
+  runTransaction,
+  serverTimestamp
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import {
@@ -75,7 +76,7 @@ interface ChatMessage {
   createdAt?: string;
 }
 
-function ParticipantVideo({ participantId }: { participantId: string }) {
+const ParticipantVideo = memo(function ParticipantVideo({ participantId }: { participantId: string }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
 
@@ -96,7 +97,7 @@ function ParticipantVideo({ participantId }: { participantId: string }) {
       }} 
     />
   );
-}
+});
 
 
 function LocalScreenShareLinker({ screenShareStream }: { screenShareStream: MediaStream | null }) {
@@ -129,7 +130,7 @@ function LocalScreenShareLinker({ screenShareStream }: { screenShareStream: Medi
   return null;
 }
 
-function ScreenShareVideo({ participantId }: { participantId: string }) {
+const ScreenShareVideo = memo(function ScreenShareVideo({ participantId }: { participantId: string }) {
   const tracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
   const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
 
@@ -155,143 +156,440 @@ function ScreenShareVideo({ participantId }: { participantId: string }) {
       style={{ 
         width: '100%', 
         height: '100%', 
-        objectFit: 'contain',
+        objectFit: 'contain', 
         borderRadius: 'var(--border-radius)',
         backgroundColor: '#050505'
       }} 
     />
   );
+});
+
+
+
+interface ParsedMedia {
+  platform: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch';
+  videoId: string;
+  isLive?: boolean;
 }
 
-// Load the YouTube Iframe API script dynamically if not already loaded
-let ytApiPromise: Promise<void> | null = null;
-function loadYoutubeApi(): Promise<void> {
-  if (ytApiPromise) return ytApiPromise;
-  
-  ytApiPromise = new Promise((resolve) => {
-    if ((window as any).YT && (window as any).YT.Player) {
+function parseMediaUrl(url: string): ParsedMedia | null {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) return null;
+
+  // 1. YouTube
+  const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const ytMatch = cleanUrl.match(ytRegex);
+  if (ytMatch) {
+    return { platform: 'youtube', videoId: ytMatch[1] };
+  }
+  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) {
+    return { platform: 'youtube', videoId: cleanUrl };
+  }
+
+  // 2. Vimeo
+  const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/;
+  const vimeoMatch = cleanUrl.match(vimeoRegex);
+  if (vimeoMatch) {
+    return { platform: 'vimeo', videoId: vimeoMatch[1] };
+  }
+
+  // 3. Dailymotion
+  const dmRegex = /(?:dailymotion\.com\/(?:video|embed\/video)\/|dai\.ly\/)([a-zA-Z0-9]+)/;
+  const dmMatch = cleanUrl.match(dmRegex);
+  if (dmMatch) {
+    return { platform: 'dailymotion', videoId: dmMatch[1] };
+  }
+
+  // 4. Twitch
+  const twitchVodRegex = /twitch\.tv\/videos\/(\d+)/;
+  const twitchVodMatch = cleanUrl.match(twitchVodRegex);
+  if (twitchVodMatch) {
+    return { platform: 'twitch', videoId: twitchVodMatch[1], isLive: false };
+  }
+
+  const twitchChannelRegex = /twitch\.tv\/([a-zA-Z0-9_]+)/;
+  const twitchChannelMatch = cleanUrl.match(twitchChannelRegex);
+  if (twitchChannelMatch) {
+    const channel = twitchChannelMatch[1].toLowerCase();
+    const reservedWords = ['directory', 'videos', 'u', 'moderator', 'popout', 'search'];
+    if (!reservedWords.includes(channel)) {
+      return { platform: 'twitch', videoId: twitchChannelMatch[1], isLive: true };
+    }
+  }
+
+  return null;
+}
+
+function isDrmBlockedUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.includes('netflix.com') || 
+         lower.includes('disneyplus.com') || 
+         lower.includes('amazon.com/gp/video') || 
+         lower.includes('primevideo.com') ||
+         lower.includes('hulu.com') ||
+         lower.includes('max.com') ||
+         lower.includes('hbo.com');
+}
+
+const scriptLoadPromises: Record<string, Promise<void> | undefined> = {};
+
+function loadPlatformScript(platform: string, src: string, callbackName?: string): Promise<void> {
+  const existing = scriptLoadPromises[platform];
+  if (existing) return existing;
+
+  scriptLoadPromises[platform] = new Promise((resolve) => {
+    if (platform === 'youtube' && (window as any).YT && (window as any).YT.Player) {
       resolve();
       return;
     }
-    
-    // Define global callback that YouTube API calls when loaded
-    const prevCallback = (window as any).onYouTubeIframeAPIReady;
-    (window as any).onYouTubeIframeAPIReady = () => {
-      if (prevCallback) prevCallback();
+    if (platform === 'vimeo' && (window as any).Vimeo) {
       resolve();
-    };
-    
+      return;
+    }
+    if (platform === 'dailymotion' && (window as any).DM) {
+      resolve();
+      return;
+    }
+    if (platform === 'twitch' && (window as any).Twitch) {
+      resolve();
+      return;
+    }
+
+    if (callbackName) {
+      const prevCallback = (window as any)[callbackName];
+      (window as any)[callbackName] = () => {
+        if (prevCallback) prevCallback();
+        resolve();
+      };
+    }
+
     const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.src = src;
+    if (!callbackName) {
+      tag.onload = () => resolve();
+    }
     const firstScriptTag = document.getElementsByTagName('script')[0];
     firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
   });
-  
-  return ytApiPromise;
+
+  return scriptLoadPromises[platform];
 }
 
-function YouTubePlayer({ 
+interface AbstractPlayer {
+  play(): void;
+  pause(): void;
+  seekTo(seconds: number): void;
+  getCurrentTime(): Promise<number> | number;
+  getPlayerState(): Promise<number> | number;
+  destroy(): void;
+}
+
+function createWrappedPlayer(
+  platform: string,
+  elementId: string,
+  videoId: string,
+  isPresenter: boolean,
+  isLive: boolean,
+  onStateChange: (playing: boolean, time: number) => void
+): Promise<AbstractPlayer> {
+  if (platform === 'youtube') {
+    return loadPlatformScript('youtube', 'https://www.youtube.com/iframe_api', 'onYouTubeIframeAPIReady').then(() => {
+      return new Promise<AbstractPlayer>((resolve) => {
+        const player = new (window as any).YT.Player(elementId, {
+          videoId: videoId,
+          playerVars: {
+            autoplay: 1,
+            controls: isPresenter ? 1 : 0,
+            disablekb: isPresenter ? 0 : 1,
+            rel: 0,
+            modestbranding: 1
+          },
+          events: {
+            onReady: () => {
+              resolve({
+                play: () => player.playVideo(),
+                pause: () => player.pauseVideo(),
+                seekTo: (sec) => player.seekTo(sec, true),
+                getCurrentTime: () => player.getCurrentTime() || 0,
+                getPlayerState: () => {
+                  const s = player.getPlayerState();
+                  return s === 1 ? 1 : 2;
+                },
+                destroy: () => {
+                  try {
+                    player.destroy();
+                  } catch (e) {}
+                }
+              });
+            },
+            onStateChange: (event: any) => {
+              const state = event.data;
+              const time = player.getCurrentTime() || 0;
+              onStateChange(state === 1, time);
+            }
+          }
+        });
+      });
+    });
+  }
+
+  if (platform === 'vimeo') {
+    return loadPlatformScript('vimeo', 'https://player.vimeo.com/api/player.js').then(() => {
+      const container = document.getElementById(elementId);
+      if (!container) throw new Error("Vimeo container not found");
+      container.innerHTML = '';
+      
+      const iframe = document.createElement('iframe');
+      iframe.src = `https://player.vimeo.com/video/${videoId}?autoplay=1&background=${isPresenter ? 0 : 1}&muted=${isPresenter ? 0 : 1}`;
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = 'none';
+      container.appendChild(iframe);
+
+      const player = new (window as any).Vimeo.Player(iframe);
+      
+      return new Promise<AbstractPlayer>((resolve) => {
+        player.ready().then(() => {
+          if (isPresenter) {
+            player.on('play', async () => {
+              const time = await player.getCurrentTime();
+              onStateChange(true, time);
+            });
+            player.on('pause', async () => {
+              const time = await player.getCurrentTime();
+              onStateChange(false, time);
+            });
+            player.on('seeked', async () => {
+              const time = await player.getCurrentTime();
+              onStateChange(true, time);
+            });
+          }
+
+          resolve({
+            play: () => player.play().catch(() => {}),
+            pause: () => player.pause().catch(() => {}),
+            seekTo: (sec) => player.setCurrentTime(sec).catch(() => {}),
+            getCurrentTime: () => player.getCurrentTime().catch(() => 0),
+            getPlayerState: async () => {
+              const paused = await player.getPaused().catch(() => true);
+              return paused ? 2 : 1;
+            },
+            destroy: () => {
+              try {
+                player.unload();
+              } catch (e) {}
+            }
+          });
+        });
+      });
+    });
+  }
+
+  if (platform === 'dailymotion') {
+    return loadPlatformScript('dailymotion', 'https://api.dmcdn.net/all.js').then(() => {
+      const container = document.getElementById(elementId);
+      if (!container) throw new Error("Dailymotion container not found");
+      container.innerHTML = '';
+
+      const playerDiv = document.createElement('div');
+      playerDiv.id = `dm-player-inner-${Math.random().toString(36).substring(2, 9)}`;
+      playerDiv.style.width = '100%';
+      playerDiv.style.height = '100%';
+      container.appendChild(playerDiv);
+
+      const player = (window as any).DM.player(playerDiv, {
+        video: videoId,
+        width: '100%',
+        height: '100%',
+        params: {
+          autoplay: true,
+          controls: isPresenter,
+          mute: !isPresenter
+        }
+      });
+
+      return new Promise<AbstractPlayer>((resolve) => {
+        player.addEventListener('apiready', () => {
+          if (isPresenter) {
+            player.addEventListener('play', () => {
+              onStateChange(true, player.currentTime);
+            });
+            player.addEventListener('pause', () => {
+              onStateChange(false, player.currentTime);
+            });
+            player.addEventListener('seeked', () => {
+              onStateChange(true, player.currentTime);
+            });
+          }
+
+          resolve({
+            play: () => player.play(),
+            pause: () => player.pause(),
+            seekTo: (sec) => player.seek(sec),
+            getCurrentTime: () => player.currentTime || 0,
+            getPlayerState: () => player.paused ? 2 : 1,
+            destroy: () => {
+              container.innerHTML = '';
+            }
+          });
+        });
+      });
+    });
+  }
+
+  if (platform === 'twitch') {
+    return loadPlatformScript('twitch', 'https://embed.twitch.tv/v1/twitch.js').then(() => {
+      const container = document.getElementById(elementId);
+      if (!container) throw new Error("Twitch container not found");
+      container.innerHTML = '';
+
+      const options: any = {
+        width: '100%',
+        height: '100%',
+        autoplay: true,
+        muted: !isPresenter,
+        controls: isPresenter
+      };
+
+      if (isLive) {
+        options.channel = videoId;
+      } else {
+        options.video = videoId;
+      }
+
+      const player = new (window as any).Twitch.Player(elementId, options);
+
+      return new Promise<AbstractPlayer>((resolve) => {
+        player.addEventListener((window as any).Twitch.Player.READY, () => {
+          if (isPresenter && !isLive) {
+            player.addEventListener((window as any).Twitch.Player.PLAY, () => {
+              onStateChange(true, player.getCurrentTime());
+            });
+            player.addEventListener((window as any).Twitch.Player.PAUSE, () => {
+              onStateChange(false, player.getCurrentTime());
+            });
+          }
+
+          resolve({
+            play: () => player.play(),
+            pause: () => player.pause(),
+            seekTo: (sec) => {
+              if (!isLive) player.seek(sec);
+            },
+            getCurrentTime: () => isLive ? 0 : player.getCurrentTime(),
+            getPlayerState: () => player.isPaused() ? 2 : 1,
+            destroy: () => {
+              container.innerHTML = '';
+            }
+          });
+        });
+      });
+    });
+  }
+
+  throw new Error(`Unsupported platform: ${platform}`);
+}
+
+function UniversalVideoPlayer({ 
   videoId, 
+  platform,
+  isLive,
   isPresenter, 
   presenterId,
-  roomId
+  roomId,
+  myId
 }: { 
   videoId: string; 
+  platform: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch';
+  isLive: boolean;
   isPresenter: boolean; 
   presenterId: string;
   roomId: string;
+  myId: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<AbstractPlayer | null>(null);
   const isLocalChangeRef = useRef(false);
 
-  // Load API and instantiate player
   useEffect(() => {
     let active = true;
-    
-    loadYoutubeApi().then(() => {
-      if (!active || !containerRef.current) return;
-      
-      // Create a unique element ID for YouTube player to target
-      const divId = `yt-player-${Math.random().toString(36).substring(2, 9)}`;
+    const divId = `media-player-${Math.random().toString(36).substring(2, 9)}`;
+
+    if (containerRef.current) {
       const targetDiv = document.createElement('div');
       targetDiv.id = divId;
       targetDiv.style.width = '100%';
       targetDiv.style.height = '100%';
       containerRef.current.innerHTML = '';
       containerRef.current.appendChild(targetDiv);
+    }
 
-      playerRef.current = new (window as any).YT.Player(divId, {
-        videoId: videoId,
-        playerVars: {
-          autoplay: 1,
-          controls: isPresenter ? 1 : 0, // Presenter has controls, viewers have 0 controls!
-          disablekb: isPresenter ? 0 : 1, // Disable keyboard controls for viewers
-          rel: 0,
-          modestbranding: 1
-        },
-        events: {
-          onStateChange: (event: any) => {
-            if (!isPresenter) return;
-            // State: 1 = playing, 2 = paused
-            const state = event.data;
-            const time = playerRef.current?.getCurrentTime() || 0;
-            
-            // If it's a local user action, update Firestore!
-            if (!isLocalChangeRef.current) {
-              updateFirestorePlaybackState(state === 1, time);
-            }
-          }
+    createWrappedPlayer(
+      platform,
+      divId,
+      videoId,
+      isPresenter,
+      isLive,
+      (playing, time) => {
+        if (!isPresenter || isLive) return;
+        if (!isLocalChangeRef.current) {
+          updateFirestorePlaybackState(playing, time);
         }
-      });
+      }
+    ).then((wrappedPlayer) => {
+      if (!active) {
+        wrappedPlayer.destroy();
+        return;
+      }
+      playerRef.current = wrappedPlayer;
+    }).catch(err => {
+      console.error("Failed to load player:", err);
     });
 
     return () => {
       active = false;
-      if (playerRef.current && typeof playerRef.current.destroy === 'function') {
+      if (playerRef.current) {
         playerRef.current.destroy();
+        playerRef.current = null;
       }
     };
-  }, [videoId, isPresenter]);
+  }, [videoId, platform, isPresenter, isLive]);
 
-  // Firestore update helper
   const updateFirestorePlaybackState = async (playing: boolean, time: number) => {
     try {
-      const myId = getMyId();
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
         ytPlaying: playing,
         ytTime: time,
         ytUpdateTimestamp: Date.now()
       });
     } catch (e) {
-      console.warn("Failed to update YouTube playback in Firestore:", e);
+      console.warn("Failed to update media playback in Firestore:", e);
     }
   };
 
-  // Sync loop for presenter to broadcast seek/current time periodically
   useEffect(() => {
-    if (!isPresenter) return;
+    if (!isPresenter || isLive) return;
 
-    const interval = setInterval(() => {
-      if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
-        const state = playerRef.current.getPlayerState();
-        const time = playerRef.current.getCurrentTime();
-        // Periodically sync time if video is playing
-        if (state === 1) {
-          updateFirestorePlaybackState(true, time);
-        }
+    const interval = setInterval(async () => {
+      if (playerRef.current) {
+        try {
+          const state = await playerRef.current.getPlayerState();
+          const time = await playerRef.current.getCurrentTime();
+          if (state === 1) {
+            updateFirestorePlaybackState(true, time);
+          }
+        } catch (e) {}
       }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [isPresenter]);
+  }, [isPresenter, isLive]);
 
-  // Sync listener for viewers
   useEffect(() => {
-    if (isPresenter) return;
+    if (isPresenter || isLive) return;
 
     const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
-    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+    const unsubscribe = onSnapshot(partRef, async (snapshot) => {
       if (!snapshot.exists() || !playerRef.current) return;
       
       const data = snapshot.data();
@@ -299,7 +597,6 @@ function YouTubePlayer({
       const targetTime = data.ytTime ?? 0;
       const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
       
-      // Calculate latency correction: if video was playing, adjust target time by time elapsed since update
       let correctedTime = targetTime;
       if (targetPlaying && targetTimestamp) {
         const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
@@ -308,29 +605,25 @@ function YouTubePlayer({
 
       isLocalChangeRef.current = true;
 
-      // Sync play/pause
-      if (typeof playerRef.current.getPlayerState === 'function') {
-        const currentState = playerRef.current.getPlayerState();
+      try {
+        const currentState = await playerRef.current.getPlayerState();
         if (targetPlaying && currentState !== 1) {
-          playerRef.current.playVideo();
+          playerRef.current.play();
         } else if (!targetPlaying && currentState === 1) {
-          playerRef.current.pauseVideo();
+          playerRef.current.pause();
         }
-      }
 
-      // Sync seek (if drift is > 2 seconds)
-      if (typeof playerRef.current.getCurrentTime === 'function') {
-        const currentTime = playerRef.current.getCurrentTime();
+        const currentTime = await playerRef.current.getCurrentTime();
         if (Math.abs(currentTime - correctedTime) > 2) {
-          playerRef.current.seekTo(correctedTime, true);
+          playerRef.current.seekTo(correctedTime);
         }
-      }
+      } catch (e) {}
 
       isLocalChangeRef.current = false;
     });
 
     return () => unsubscribe();
-  }, [isPresenter, presenterId, roomId]);
+  }, [isPresenter, presenterId, roomId, isLive]);
 
   return (
     <div 
@@ -1336,15 +1629,6 @@ function AppContent() {
 
   // Persistent Guest ID
   const [guestId, setGuestId] = useState<string>('');
-
-  useEffect(() => {
-    let gid = localStorage.getItem('skulk_guest_id');
-    if (!gid) {
-      gid = 'guest_' + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem('skulk_guest_id', gid);
-    }
-    setGuestId(gid);
-  }, []);
   // Load local rooms from localStorage as a fallback when Firestore is blocked
   const getLocalRooms = (): Room[] => {
     try {
@@ -1873,11 +2157,23 @@ function AppContent() {
 
   // Listen to Firebase authentication status
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        setIsAuthLoading(true);
+        try {
+          await signInAnonymously(auth);
+        } catch (e) {
+          console.warn("Failed to sign in anonymously:", e);
+          setIsAuthLoading(false);
+        }
+        return;
+      }
+
       setUser(currentUser);
+      setGuestId(currentUser.uid);
       setIsAuthLoading(false);
       
-      if (currentUser) {
+      if (!currentUser.isAnonymous) {
         // Override guest identity with Google sign-in details
         const name = currentUser.displayName || 'Google User';
         setGuestName(name);
@@ -1903,7 +2199,7 @@ function AppContent() {
           return p;
         }));
       } else {
-        // Re-read local guest profile when logged out
+        // Re-read local guest profile when logged out / anonymous
         const stored = localStorage.getItem('skulk_guest_identity');
         if (stored) {
           try {
@@ -1941,7 +2237,7 @@ function AppContent() {
     let deletedGid = false;
 
     try {
-      if (rid && gid && gid.startsWith('guest_')) {
+      if (rid && gid && user && user.isAnonymous) {
         console.log("[AUTH TRANSITION] Deleting guest presence before sign-in:", gid);
         try {
           await deleteDoc(doc(db, 'rooms', rid, 'participants', gid));
@@ -1985,7 +2281,7 @@ function AppContent() {
   const handleSignOut = async () => {
     try {
       const myId = getMyId();
-      if (currentRoom && myId && !myId.startsWith('guest_')) {
+      if (currentRoom && myId && user && !user.isAnonymous) {
         const rid = roomDocId(currentRoom);
         console.log("[AUTH TRANSITION] Deleting logged-in presence before sign-out:", myId);
         try {
@@ -2871,7 +3167,13 @@ function AppContent() {
 
     const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
     const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) return;
+      if (!snapshot.exists()) {
+        if (viewingShare.participantId !== getMyId()) {
+          setViewingShare(null);
+          showToast('Whiteboard presenter has left. Ending session.');
+        }
+        return;
+      }
       const data = snapshot.data();
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -2905,11 +3207,38 @@ function AppContent() {
 
     const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
     const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) return;
+      if (!snapshot.exists()) {
+        if (viewingShare.participantId !== getMyId()) {
+          setViewingShare(null);
+          showToast('YouTube presenter has left. Ending session.');
+        }
+        return;
+      }
       const data = snapshot.data();
       if (data.sharingYoutubeId) {
         setViewingShare(prev => prev ? { ...prev, youtubeVideoId: data.sharingYoutubeId } : null);
       }
+      if (!data.sharing && viewingShare.participantId !== getMyId()) {
+        setViewingShare(null);
+      }
+    });
+    return () => unsubscribe();
+  }, [viewingShare?.participantId, viewingShare?.type, currentRoom, user, guestId]);
+
+  // Sync screen share state when viewing someone's share
+  useEffect(() => {
+    if (!viewingShare || viewingShare.type !== 'screen' || !currentRoom) return;
+
+    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
+    const unsubscribe = onSnapshot(partRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        if (viewingShare.participantId !== getMyId()) {
+          setViewingShare(null);
+          showToast('Screen presenter has left. Ending session.');
+        }
+        return;
+      }
+      const data = snapshot.data();
       if (!data.sharing && viewingShare.participantId !== getMyId()) {
         setViewingShare(null);
       }
@@ -3113,31 +3442,33 @@ function AppContent() {
     e.preventDefault();
     if (!ytInputUrl.trim() || !currentRoom) return;
 
-    const videoId = extractYoutubeVideoId(ytInputUrl.trim());
-    if (videoId) {
+    const input = ytInputUrl.trim();
+    if (isDrmBlockedUrl(input)) {
+      showToast("This platform can't be embedded — try Screen Share instead.");
+      return;
+    }
+
+    const parsed = parseMediaUrl(input);
+    if (parsed) {
       setYtInputUrl('');
       const myId = getMyId();
-      setYoutubeVideoId(videoId);
+      setYoutubeVideoId(input);
 
       try {
-        await updateMySharing({ sharing: 'youtube', sharingYoutubeId: videoId, whiteboardData: '' });
-        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: videoId });
-        showToast('YouTube video loaded — others can click your avatar to watch');
+        await updateMySharing({ sharing: 'youtube', sharingYoutubeId: input, whiteboardData: '' });
+        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: input });
+        showToast(`${parsed.platform.toUpperCase()} media loaded — others can click your avatar to watch`);
       } catch (err) {
-        console.warn("Failed to update YouTube sharing state:", err);
-        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: videoId });
-        showToast('YouTube video loaded locally!');
+        console.warn("Failed to update Watch Together sharing state:", err);
+        setViewingShare({ participantId: myId, type: 'youtube', youtubeVideoId: input });
+        showToast(`${parsed.platform.toUpperCase()} media loaded locally!`);
       }
     } else {
-      showToast('Invalid YouTube URL. Please paste a valid link.');
+      showToast("This platform can't be embedded — try Screen Share instead.");
     }
   };
 
-  const extractYoutubeVideoId = (url: string) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
-  };
+
 
   // Games Action Handlers
   const handleLaunchGame = (gameId: string) => {
@@ -3886,6 +4217,21 @@ function AppContent() {
     }
 
     try {
+      const myId = getMyId();
+      if (myId) {
+        const limitDocRef = doc(db, 'users', myId);
+        const limitSnap = await getDoc(limitDocRef);
+        if (limitSnap.exists()) {
+          const limitData = limitSnap.data();
+          const lastCreated = limitData.lastRoomCreatedTime?.toDate?.()?.getTime() || 0;
+          if (Date.now() - lastCreated < 5000) {
+            showToast("Slow down! Please wait a few seconds before creating another room.");
+            return;
+          }
+        }
+        await setDoc(limitDocRef, { lastRoomCreatedTime: serverTimestamp() }, { merge: true });
+      }
+
       await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
@@ -6295,12 +6641,28 @@ function AppContent() {
                     {viewingShare.type === 'screen' ? (
                       <ScreenShareVideo participantId={viewingShare.participantId} />
                     ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
-                      <YouTubePlayer
-                        videoId={viewingShare.youtubeVideoId}
-                        isPresenter={viewingShare.participantId === getMyId()}
-                        presenterId={viewingShare.participantId}
-                        roomId={roomDocId(currentRoom!)}
-                      />
+                      (() => {
+                        const parsed = parseMediaUrl(viewingShare.youtubeVideoId);
+                        if (parsed) {
+                          return (
+                            <UniversalVideoPlayer
+                              videoId={parsed.videoId}
+                              platform={parsed.platform}
+                              isLive={parsed.isLive ?? false}
+                              isPresenter={viewingShare.participantId === getMyId()}
+                              presenterId={viewingShare.participantId}
+                              roomId={roomDocId(currentRoom!)}
+                              myId={getMyId()}
+                            />
+                          );
+                        } else {
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                              Content unavailable
+                            </div>
+                          );
+                        }
+                      })()
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
                         Content unavailable
