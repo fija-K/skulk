@@ -424,57 +424,99 @@ function createWrappedPlayer(
   }
 
   if (platform === 'dailymotion') {
-    return loadPlatformScript('dailymotion', 'https://api.dmcdn.net/all.js').then(() => {
-      const container = document.getElementById(elementId);
-      if (!container) throw new Error("Dailymotion container not found");
-      container.innerHTML = '';
+    const container = document.getElementById(elementId);
+    if (!container) throw new Error("Dailymotion container not found");
+    container.innerHTML = '';
 
-      const player = (window as any).DM.player(container, {
-        video: videoId,
-        width: '100%',
-        height: '100%',
-        params: {
-          autoplay: true,
-          mute: !isPresenter,
-          controls: true,
-          "queue-enable": false
-        }
-      });
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=1&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+    container.appendChild(iframe);
 
-      return new Promise<AbstractPlayer>((resolve) => {
-        player.addEventListener('apiready', () => {
-          if (isPresenter) {
-            player.addEventListener('play', () => {
-              onStateChange(true, player.currentTime || 0);
-            });
-            player.addEventListener('pause', () => {
-              onStateChange(false, player.currentTime || 0);
-            });
-            player.addEventListener('seeked', () => {
-              onStateChange(true, player.currentTime || 0);
-            });
+    let playerState = 2; // 2 = paused, 1 = playing
+    let currentTime = 0;
+    let currentSpeed = 1;
+    
+    // Listen to messages from Dailymotion iframe
+    const messageListener = (event: MessageEvent) => {
+      if (!event.origin.includes('dailymotion.com')) return;
+      
+      try {
+        let eventName = '';
+        let timeVal = currentTime;
+        
+        if (typeof event.data === 'string') {
+          if (event.data.startsWith('event=')) {
+            const params = new URLSearchParams(event.data);
+            eventName = params.get('event') || '';
+            timeVal = parseFloat(params.get('time') || String(currentTime));
+          } else {
+            try {
+              const parsed = JSON.parse(event.data);
+              eventName = parsed.event || '';
+              timeVal = parsed.time !== undefined ? parsed.time : currentTime;
+            } catch (e) {}
           }
+        } else if (event.data && typeof event.data === 'object') {
+          eventName = event.data.event || '';
+          timeVal = event.data.time !== undefined ? event.data.time : currentTime;
+        }
+        
+        if (eventName) {
+          if (eventName === 'play') {
+            playerState = 1;
+            onStateChange(true, timeVal);
+          } else if (eventName === 'pause') {
+            playerState = 2;
+            onStateChange(false, timeVal);
+          } else if (eventName === 'timeupdate' || eventName === 'progress') {
+            currentTime = timeVal;
+          } else if (eventName === 'seeked') {
+            currentTime = timeVal;
+            onStateChange(playerState === 1, timeVal);
+          }
+        }
+      } catch (e) {}
+    };
 
-          resolve({
-            play: () => player.play(),
-            pause: () => player.pause(),
-            seekTo: (sec) => player.seek(sec),
-            getCurrentTime: () => player.currentTime || 0,
-            getPlayerState: () => player.paused ? 2 : 1,
-            getPlaybackRate: () => player.speed || (player.getPlaybackSpeed ? player.getPlaybackSpeed() : 1),
-            setPlaybackRate: (rate) => {
-              try {
-                player.setPlaybackSpeed(rate);
-              } catch (e) {}
-            },
-            destroy: () => {
-              try {
-                container.innerHTML = '';
-              } catch (e) {}
-            }
-          });
-        });
-      });
+    window.addEventListener('message', messageListener);
+
+    return Promise.resolve({
+      play: () => {
+        try {
+          iframe.contentWindow?.postMessage('play', '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
+        } catch (e) {}
+      },
+      pause: () => {
+        try {
+          iframe.contentWindow?.postMessage('pause', '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
+        } catch (e) {}
+      },
+      seekTo: (sec) => {
+        try {
+          iframe.contentWindow?.postMessage(`seek=${sec}`, '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', value: sec }), '*');
+        } catch (e) {}
+      },
+      getCurrentTime: () => currentTime,
+      getPlayerState: () => playerState,
+      getPlaybackRate: () => currentSpeed,
+      setPlaybackRate: (rate) => {
+        try {
+          currentSpeed = rate;
+          iframe.contentWindow?.postMessage(`speed=${rate}`, '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'speed', value: rate }), '*');
+        } catch (e) {}
+      },
+      destroy: () => {
+        window.removeEventListener('message', messageListener);
+        container.innerHTML = '';
+      }
     });
   }
 
@@ -574,6 +616,8 @@ function UniversalVideoPlayer({
     }
 
     isLocalChangeRef.current = true;
+    
+    // 1. Sync play/pause state
     try {
       const currentState = await player.getPlayerState();
       if (targetPlaying && currentState !== 1) {
@@ -581,19 +625,32 @@ function UniversalVideoPlayer({
       } else if (!targetPlaying && currentState === 1) {
         player.pause();
       }
+    } catch (e) {
+      console.warn("Failed to sync play/pause state:", e);
+    }
 
+    // 2. Sync playback rate (speed)
+    try {
       if (player.getPlaybackRate && player.setPlaybackRate) {
         const currentSpeed = await player.getPlaybackRate();
         if (Math.abs(currentSpeed - targetSpeed) > 0.05) {
           player.setPlaybackRate(targetSpeed);
         }
       }
+    } catch (e) {
+      console.warn("Failed to sync playback rate:", e);
+    }
 
+    // 3. Sync seek/current time
+    try {
       const currentTime = await player.getCurrentTime();
       if (Math.abs(currentTime - correctedTime) > 2) {
         player.seekTo(correctedTime);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Failed to sync seek/time:", e);
+    }
+    
     isLocalChangeRef.current = false;
   };
 
@@ -649,7 +706,17 @@ function UniversalVideoPlayer({
 
   const updateFirestorePlaybackState = async (playing: boolean, time: number, speed?: number) => {
     try {
-      const resolvedSpeed = speed !== undefined ? speed : (playerRef.current?.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1);
+      let resolvedSpeed = 1;
+      try {
+        if (speed !== undefined) {
+          resolvedSpeed = speed;
+        } else if (playerRef.current?.getPlaybackRate) {
+          resolvedSpeed = await playerRef.current.getPlaybackRate();
+        }
+      } catch (speedErr) {
+        console.warn("Failed to read playback speed:", speedErr);
+      }
+
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
         ytPlaying: playing,
         ytTime: time,
@@ -673,11 +740,28 @@ function UniversalVideoPlayer({
     const interval = setInterval(async () => {
       if (playerRef.current) {
         try {
-          const state = await playerRef.current.getPlayerState(); // 1 = playing, 2 = paused
-          const time = await playerRef.current.getCurrentTime();
-          const speed = playerRef.current.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1;
-          const now = Date.now();
+          let state = 2; // Default to paused
+          try {
+            state = await playerRef.current.getPlayerState();
+          } catch (err) {
+            console.warn("Tracking loop failed to get player state:", err);
+          }
 
+          let time = 0;
+          try {
+            time = await playerRef.current.getCurrentTime();
+          } catch (err) {
+            console.warn("Tracking loop failed to get current time:", err);
+          }
+
+          let speed = 1;
+          try {
+            speed = playerRef.current.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1;
+          } catch (err) {
+            console.warn("Tracking loop failed to get speed:", err);
+          }
+
+          const now = Date.now();
           const playing = state === 1;
           const stateChanged = state !== lastState;
           const speedChanged = lastSpeed !== null && Math.abs(speed - lastSpeed) > 0.05;
@@ -696,7 +780,9 @@ function UniversalVideoPlayer({
             lastTime = time;
             lastCheck = now;
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error("Tracking loop encountered error:", e);
+        }
       }
     }, 1000);
 
