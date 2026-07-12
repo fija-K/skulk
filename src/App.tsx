@@ -3739,7 +3739,7 @@ function AppContent() {
 
   // Auto-scroll chat to bottom
   const prevMessagesLengthRef = useRef(0);
-  const hasScrolledForTabRef = useRef<string | null>(null);
+  const prevTabRef = useRef<string | null>(null);
 
   useEffect(() => {
     const currentLength = chatMessages.length + systemMessages.length;
@@ -3748,11 +3748,10 @@ function AppContent() {
     if (callTab === 'chat' && chatEndRef.current) {
       const container = chatEndRef.current.parentElement;
       if (container) {
-        const isTabSwitch = hasScrolledForTabRef.current !== callTab;
+        const isTabSwitch = prevTabRef.current !== 'chat' && prevTabRef.current !== null;
         const isNewMessage = currentLength > prevLength && prevLength > 0;
         
         if (isTabSwitch || prevLength === 0) {
-          hasScrolledForTabRef.current = callTab;
           setTimeout(() => {
             chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
           }, 50);
@@ -3766,6 +3765,7 @@ function AppContent() {
       }
     }
     
+    prevTabRef.current = callTab;
     prevMessagesLengthRef.current = currentLength;
   }, [chatMessages, systemMessages, callTab]);
 
@@ -7939,8 +7939,8 @@ function AppContent() {
                       </button>
                     </div>
                     {/* Expanded Content Container */}
-                    <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <div style={{ width: '100%', maxWidth: '640px', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                         {expandedTool === 'pomodoro' && renderPomodoroUI(true)}
                         {expandedTool === 'deadline' && renderDeadlineUI(true)}
                         {expandedTool === 'loose' && renderLooseTimerUI(true)}
@@ -8968,7 +8968,15 @@ function AppContent() {
                             </svg>
                           </button>
                         </div>
-                        {renderPomodoroUI(false)}
+                        {expandedTool === 'pomodoro' ? (
+                          <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '28px' }}>⏱️</span>
+                            <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>Pomodoro Timer is Expanded</span>
+                            <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
+                          </div>
+                        ) : (
+                          renderPomodoroUI(false)
+                        )}
                       </div>
                     )}
 
@@ -8998,7 +9006,15 @@ function AppContent() {
                             </svg>
                           </button>
                         </div>
-                        {renderDeadlineUI(false)}
+                        {expandedTool === 'deadline' ? (
+                          <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '28px' }}>⏳</span>
+                            <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>Deadline Clock is Expanded</span>
+                            <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
+                          </div>
+                        ) : (
+                          renderDeadlineUI(false)
+                        )}
                       </div>
                     )}
 
@@ -9026,7 +9042,15 @@ function AppContent() {
                             </svg>
                           </button>
                         </div>
-                        {renderLooseTimerUI(false)}
+                        {expandedTool === 'loose' ? (
+                          <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '28px' }}>🔄</span>
+                            <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>Loose Timer is Expanded</span>
+                            <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
+                          </div>
+                        ) : (
+                          renderLooseTimerUI(false)
+                        )}
                       </div>
                     )}
 
@@ -9054,7 +9078,15 @@ function AppContent() {
                             </svg>
                           </button>
                         </div>
-                        {renderTruthOrDareUI(false)}
+                        {expandedTool === 'truthordare' ? (
+                          <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '28px' }}>🎲</span>
+                            <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>Truth or Dare is Expanded</span>
+                            <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
+                          </div>
+                        ) : (
+                          renderTruthOrDareUI(false)
+                        )}
                       </div>
                     )}
 
@@ -9082,7 +9114,15 @@ function AppContent() {
                             </svg>
                           </button>
                         </div>
-                        {renderSpinWheelUI(false)}
+                        {expandedTool === 'spin' ? (
+                          <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '28px' }}>🎡</span>
+                            <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>Spin the Wheel is Expanded</span>
+                            <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
+                          </div>
+                        ) : (
+                          renderSpinWheelUI(false)
+                        )}
                       </div>
                     )}
 
