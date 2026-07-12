@@ -1779,6 +1779,7 @@ function AppContent() {
   const isInitialLoadRef = useRef(true);
   const isChatInitialLoadRef = useRef(true);
   const localJoinTimeRef = useRef<number | null>(null);
+  const idTokenRef = useRef<string | null>(null);
 
   const isMicMutedRef = useRef(isMicMuted);
   const isCamOffRef = useRef(isCamOff);
@@ -2408,6 +2409,18 @@ function AppContent() {
 
   // Listen to Firebase authentication status
   useEffect(() => {
+    const tokenUnsubscribe = auth.onIdTokenChanged(async (u) => {
+      if (u) {
+        try {
+          idTokenRef.current = await u.getIdToken();
+        } catch (e) {
+          console.warn("Failed to update ID token:", e);
+        }
+      } else {
+        idTokenRef.current = null;
+      }
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
         setIsAuthLoading(true);
@@ -2487,7 +2500,10 @@ function AppContent() {
         }
       }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      tokenUnsubscribe();
+    };
   }, [currentRoom]);
 
   const handleSignIn = async () => {
@@ -3170,12 +3186,24 @@ function AppContent() {
         const rid = roomDocId(currentRoom);
         if (myId && rid) {
           const url = `https://firestore.googleapis.com/v1/projects/skulk-45c23/databases/(default)/documents/rooms/${rid}/participants/${myId}`;
-          fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+          const headers: HeadersInit = {};
+          if (idTokenRef.current) {
+            headers['Authorization'] = `Bearer ${idTokenRef.current}`;
+          }
+          fetch(url, { 
+            method: 'DELETE', 
+            headers,
+            keepalive: true 
+          }).catch(() => {});
         }
       }
     };
     window.addEventListener('beforeunload', handleUnload);
-    return () => window.removeEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
   }, [currentRoom, user, guestId]);
 
   // Evict this tab to homepage if the same user joins any room from another tab/window
