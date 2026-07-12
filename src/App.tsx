@@ -4332,10 +4332,21 @@ function AppContent() {
             return;
           }
         }
-        await setDoc(limitDocRef, { lastRoomCreatedTime: serverTimestamp() }, { merge: true });
+        try {
+          await setDoc(limitDocRef, { lastRoomCreatedTime: serverTimestamp() }, { merge: true });
+        } catch (e: any) {
+          console.error("Rate-limit update failed:", e);
+          throw new Error(`Rate-limit update failed: ${e.message || 'Permission Denied'}`);
+        }
       }
 
-      await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
+      try {
+        await setDoc(doc(db, 'rooms', newRoomObj.id), newRoomObj);
+      } catch (e: any) {
+        console.error("Room document write failed:", e);
+        throw new Error(`Room persistence failed: ${e.message || 'Permission Denied'}`);
+      }
+      
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
     } catch (err: any) {
