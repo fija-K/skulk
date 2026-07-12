@@ -737,16 +737,18 @@ function UniversalVideoPlayer({
   }, [isPresenter, isLive, participants, presenterId]);
 
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        borderRadius: 'var(--border-radius)', 
-        overflow: 'hidden',
-        backgroundColor: '#000'
-      }} 
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div 
+        ref={containerRef} 
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          borderRadius: 'var(--border-radius)', 
+          overflow: 'hidden',
+          backgroundColor: '#000'
+        }} 
+      />
+    </div>
   );
 }
 
