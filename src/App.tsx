@@ -1854,14 +1854,15 @@ function AppContent() {
 
   // Fun Tools toggle & Truth or Dare synced spinner states
   const [allowFunTools, setAllowFunTools] = useState(true);
-  const [todSpinResult, setTodSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
-  const [todSpinCheckedIds, setTodSpinCheckedIds] = useState<string[]>([]);
+  const [todSpinResult, setTodSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, spunById?: string, timestamp: number } | null>(null);
   const [todSpinPool, setTodSpinPool] = useState<string[]>([]);
   const [todState, setTodState] = useState<'idle' | 'spinning' | 'choice' | 'reveal'>('idle');
   const [todChoice, setTodChoice] = useState<'Truth' | 'Dare' | null>(null);
   const [todText, setTodText] = useState('');
   const [todSelectedId, setTodSelectedId] = useState('');
   const [todLocalSpinning, setTodLocalSpinning] = useState(false);
+  const [todActiveIds, setTodActiveIds] = useState<string[]>([]);
+  const [todPendingIds, setTodPendingIds] = useState<string[]>([]);
 
   // Spin the Wheel synced state
   const [spinResult, setSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
@@ -3594,14 +3595,17 @@ function AppContent() {
       if (data.todSpinResult !== undefined) {
         setTodSpinResult(data.todSpinResult);
       }
-      if (data.todSpinCheckedIds !== undefined) {
-        setTodSpinCheckedIds(data.todSpinCheckedIds);
-      }
       if (data.todSpinPool !== undefined) {
         setTodSpinPool(data.todSpinPool);
       }
       if (data.todState !== undefined) {
         setTodState(data.todState);
+      }
+      if (data.todActiveIds !== undefined) {
+        setTodActiveIds(data.todActiveIds || []);
+      }
+      if (data.todPendingIds !== undefined) {
+        setTodPendingIds(data.todPendingIds || []);
       }
       if (data.todChoice !== undefined) {
         setTodChoice(data.todChoice);
@@ -4067,7 +4071,6 @@ function AppContent() {
 
       // Reset Truth or Dare spinner states
       setTodSpinResult(null);
-      setTodSpinCheckedIds([]);
       setTodSpinPool([]);
       setTodState('idle');
       setTodChoice(null);
@@ -4075,6 +4078,8 @@ function AppContent() {
       setTodSelectedId('');
       setTodLocalSpinning(false);
       setSpinLocalSpinning(false);
+      setTodActiveIds([]);
+      setTodPendingIds([]);
     }
   }, [currentRoom, pomodoroFocusLength]);
 
@@ -4220,69 +4225,136 @@ function AppContent() {
     }
   };
 
-  const handleSpinTruthOrDare = async () => {
-    if (!currentRoom || callParticipants.length === 0) return;
-
-    const activeIds = todSpinCheckedIds.length > 0 
-      ? todSpinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
-      : callParticipants.map(p => p.id);
-      
-    if (activeIds.length === 0) return;
-
-    let candidates = todSpinPool.filter(id => activeIds.includes(id));
-    if (candidates.length === 0) {
-      candidates = [...activeIds];
-    }
-
-    const selectedId = candidates[Math.floor(Math.random() * candidates.length)];
-    const newPool = candidates.filter(id => id !== selectedId);
-
-    const idx = activeIds.indexOf(selectedId);
-    const segmentAngle = 360 / activeIds.length;
-    const targetAngle = 360 - (idx * segmentAngle + segmentAngle / 2);
-    
-    const prevAngle = todSpinResult ? todSpinResult.angle : 0;
-    const prevFullSpins = Math.floor(prevAngle / 360);
-    const newAngle = (prevFullSpins + 5) * 360 + targetAngle;
-
-    const spunBy = user ? user.displayName || 'Google User' : guestName;
-
+  const handleJoinTodGame = async () => {
+    if (!currentRoom) return;
+    const myId = getMyId();
     try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        todSpinResult: {
-          selectedId,
-          angle: newAngle,
-          spunBy,
-          timestamp: Date.now()
-        },
-        todSpinPool: newPool,
-        todSpinCheckedIds: activeIds,
-        todState: 'spinning',
-        todChoice: null,
-        todText: '',
-        todSelectedId: selectedId
+      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
+      await runTransaction(db, async (transaction) => {
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+        const data = roomSnap.data();
+        
+        const state = data.todState || 'idle';
+        const isSpinning = state !== 'idle';
+        
+        if (isSpinning) {
+          const pending = data.todPendingIds || [];
+          if (!pending.includes(myId)) {
+            transaction.update(roomRef, {
+              todPendingIds: [...pending, myId]
+            });
+          }
+        } else {
+          const active = data.todActiveIds || [];
+          const currentPool = data.todSpinPool || [];
+          if (!active.includes(myId)) {
+            transaction.update(roomRef, {
+              todActiveIds: [...active, myId],
+              todSpinPool: [...currentPool, myId]
+            });
+          }
+        }
       });
+      showToast("Joined Truth or Dare game!");
     } catch (e) {
-      console.warn("Failed to spin Truth or Dare:", e);
+      console.warn("Failed to join Truth or Dare game:", e);
     }
   };
 
-  const handleToggleTodSpinCheckedParticipant = async (id: string) => {
+  const handleLeaveTodGame = async () => {
     if (!currentRoom) return;
-    const defaultIds = callParticipants.map(p => p.id);
-    const activeIds = todSpinCheckedIds.length > 0 ? todSpinCheckedIds : defaultIds;
-    
-    const nextChecked = activeIds.includes(id)
-      ? activeIds.filter(x => x !== id)
-      : [...activeIds, id];
-      
+    const myId = getMyId();
     try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        todSpinCheckedIds: nextChecked,
-        todSpinPool: todSpinPool.filter(x => nextChecked.includes(x))
+      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
+      await runTransaction(db, async (transaction) => {
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+        const data = roomSnap.data();
+        
+        const active = data.todActiveIds || [];
+        const pending = data.todPendingIds || [];
+        const pool = data.todSpinPool || [];
+        
+        transaction.update(roomRef, {
+          todActiveIds: active.filter((id: string) => id !== myId),
+          todPendingIds: pending.filter((id: string) => id !== myId),
+          todSpinPool: pool.filter((id: string) => id !== myId)
+        });
       });
+      showToast("Left Truth or Dare game.");
     } catch (e) {
-      console.warn("Failed to toggle tod spin participant:", e);
+      console.warn("Failed to leave Truth or Dare game:", e);
+    }
+  };
+
+  const handleSpinTruthOrDare = async () => {
+    if (!currentRoom || callParticipants.length === 0) return;
+    const myId = getMyId();
+
+    try {
+      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
+      await runTransaction(db, async (transaction) => {
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+        const data = roomSnap.data();
+        
+        const state = data.todState || 'idle';
+        if (state !== 'idle' || data.todSpinInProgress) {
+          throw new Error("Spin in progress");
+        }
+        
+        const activeIds = (data.todActiveIds || [])
+          .filter((id: string) => callParticipants.some(p => p.id === id));
+          
+        if (activeIds.length === 0) {
+          throw new Error("No active participants in game");
+        }
+        
+        let candidates = (data.todSpinPool || [])
+          .filter((id: string) => activeIds.includes(id));
+        if (candidates.length === 0) {
+          candidates = [...activeIds];
+        }
+        
+        const selectedId = candidates[Math.floor(Math.random() * candidates.length)];
+        const newPool = candidates.filter((id: string) => id !== selectedId);
+        
+        const idx = activeIds.indexOf(selectedId);
+        const segmentAngle = 360 / activeIds.length;
+        const targetAngle = 360 - (idx * segmentAngle + segmentAngle / 2);
+        
+        const prevSpin = data.todSpinResult;
+        const prevAngle = prevSpin ? prevSpin.angle : 0;
+        const prevFullSpins = Math.floor(prevAngle / 360);
+        const newAngle = (prevFullSpins + 5) * 360 + targetAngle;
+        
+        const spunBy = user ? user.displayName || 'Google User' : guestName;
+        
+        transaction.update(roomRef, {
+          todSpinResult: {
+            selectedId,
+            angle: newAngle,
+            spunBy,
+            spunById: myId,
+            timestamp: Date.now()
+          },
+          todSpinPool: newPool,
+          todState: 'spinning',
+          todChoice: null,
+          todText: '',
+          todSelectedId: selectedId,
+          todSpinInProgress: true
+        });
+      });
+    } catch (e: any) {
+      if (e.message === "Spin in progress") {
+        showToast("⚠️ A spin is already in progress!");
+      } else if (e.message === "No active participants in game") {
+        showToast("⚠️ No joined participants are in the call!");
+      } else {
+        console.warn("Failed to spin Truth or Dare:", e);
+      }
     }
   };
 
@@ -4304,11 +4376,29 @@ function AppContent() {
   const handleResetTod = async () => {
     if (!currentRoom) return;
     try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        todState: 'idle',
-        todChoice: null,
-        todText: '',
-        todSelectedId: ''
+      const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
+      await runTransaction(db, async (transaction) => {
+        const roomSnap = await transaction.get(roomRef);
+        if (!roomSnap.exists()) return;
+        const data = roomSnap.data();
+        
+        const pending = data.todPendingIds || [];
+        const active = data.todActiveIds || [];
+        const newActive = [...new Set([...active, ...pending])];
+        
+        const currentPool = data.todSpinPool || [];
+        const newPool = [...new Set([...currentPool, ...pending])];
+        
+        transaction.update(roomRef, {
+          todState: 'idle',
+          todChoice: null,
+          todText: '',
+          todSelectedId: '',
+          todActiveIds: newActive,
+          todPendingIds: [],
+          todSpinPool: newPool,
+          todSpinInProgress: false
+        });
       });
     } catch (e) {
       console.warn("Failed to reset Truth or Dare:", e);
@@ -4625,24 +4715,33 @@ function AppContent() {
     }
   }, [spinResult?.timestamp]);
 
-  // Synchronize Truth or Dare spinning animation and host/admin state transition
+  // Synchronize Truth or Dare spinning animation and state transition
   useEffect(() => {
     if (todSpinResult && todState === 'spinning') {
       setTodLocalSpinning(true);
+      const elapsed = Date.now() - todSpinResult.timestamp;
+      const remainingTime = Math.max(0, 4000 - elapsed);
+
       const timer = setTimeout(() => {
         setTodLocalSpinning(false);
         const myId = getMyId();
-        const myPresence = callParticipants.find(p => p.id === myId);
-        const isHost = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
-        if (isHost && currentRoom) {
+        const wasSpunByMe = todSpinResult.spunById === myId;
+        
+        // If spun by me, OR if the spinner is not in the call anymore (fallback), transition to choice.
+        const spinnerStillPresent = callParticipants.some(p => p.id === todSpinResult.spunById);
+        const isFirstActiveParticipant = callParticipants
+          .filter(p => todActiveIds.includes(p.id))
+          .sort((a, b) => a.id.localeCompare(b.id))[0]?.id === myId;
+
+        if (currentRoom && (wasSpunByMe || (!spinnerStillPresent && isFirstActiveParticipant))) {
           updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
             todState: 'choice'
           }).catch((e) => console.warn("Failed to transition todState to choice:", e));
         }
-      }, 4000);
+      }, remainingTime);
       return () => clearTimeout(timer);
     }
-  }, [todSpinResult?.timestamp, todState]);
+  }, [todSpinResult?.timestamp, todState, callParticipants, todActiveIds]);
 
   const finishLooseStep = () => {
     setLooseSteps(prev => prev.map((step, idx) => 
@@ -6196,12 +6295,11 @@ function AppContent() {
     const myPresence = callParticipants.find(p => p.id === myId);
     const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
 
-    const activeIds = todSpinCheckedIds.length > 0 
-      ? todSpinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
-      : callParticipants.map(p => p.id);
-
+    const activeIds = todActiveIds.filter(id => callParticipants.some(p => p.id === id));
     const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
     const n = spinParticipants.length;
+
+    const canDecide = todSelectedId === myId || isHostOrAdmin || todActiveIds.includes(myId);
 
     return (
       <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
@@ -6245,10 +6343,10 @@ function AppContent() {
                     </div>
 
                     {/* Choice action buttons */}
-                    {isMeSelected || isHostOrAdmin ? (
+                    {canDecide ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
                         <span style={{ fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                          {isMeSelected ? "Choose your challenge:" : "Choose on behalf of participant (Host Admin Bypass):"}
+                          {isMeSelected ? "Choose your challenge:" : "Choose on behalf of participant:"}
                         </span>
                         <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: '240px' }}>
                           <button 
@@ -6275,7 +6373,7 @@ function AppContent() {
                       </span>
                     )}
 
-                    {isHostOrAdmin && (
+                    {canDecide && (
                       <button 
                         type="button"
                         onClick={handleResetTod} 
@@ -6296,7 +6394,6 @@ function AppContent() {
             <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px', padding: '16px 0' }}>
               {(() => {
                 const selectedUser = callParticipants.find(p => p.id === todSelectedId);
-                const isMeSelected = myId === todSelectedId;
                 
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px' }}>
@@ -6319,7 +6416,7 @@ function AppContent() {
                       </div>
                     </div>
 
-                    {(isMeSelected || isHostOrAdmin) ? (
+                    {canDecide ? (
                       <button 
                         type="button"
                         onClick={handleResetTod} 
@@ -6341,41 +6438,70 @@ function AppContent() {
 
         </div>
 
-        {/* Sidebar participant checkboxes list for the wheel */}
+        {/* Sidebar participant list for opt-in game model */}
         {(todState === 'idle' || todState === 'spinning') && (
           <div className="spinner-participants-sidebar">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+              {todActiveIds.includes(myId) || todPendingIds.includes(myId) ? (
+                <button 
+                  type="button" 
+                  onClick={handleLeaveTodGame} 
+                  className="btn-signin"
+                  style={{ width: '100%', padding: '8px', color: '#ef4444', borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.05)', fontWeight: 600 }}
+                >
+                  Leave Game
+                </button>
+              ) : (
+                <button 
+                  type="button" 
+                  onClick={handleJoinTodGame} 
+                  className="btn-create"
+                  style={{ width: '100%', padding: '8px', fontWeight: 600 }}
+                >
+                  Join Game
+                </button>
+              )}
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Checked ({n}/{callParticipants.length})
+                Joined ({n}/{callParticipants.length})
               </span>
               <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
                 Pool: {todSpinPool.length} left
               </span>
             </div>
 
-            <div className="spinner-participants-list">
+            <div className="spinner-participants-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {callParticipants.map(p => {
-                const isChecked = activeIds.includes(p.id);
+                const isActive = todActiveIds.includes(p.id);
+                const isPending = todPendingIds.includes(p.id);
+                
+                let statusText = '👁️ Spectating';
+                let statusColor = 'var(--text-secondary)';
+                if (isActive) {
+                  statusText = '🎮 In Game';
+                  statusColor = 'var(--primary-color)';
+                } else if (isPending) {
+                  statusText = '⏳ Pending Next';
+                  statusColor = '#f59e0b';
+                }
+
                 return (
-                  <div key={p.id} className="spinner-participant-row" onClick={() => isHostOrAdmin && handleToggleTodSpinCheckedParticipant(p.id)} style={{ cursor: isHostOrAdmin ? 'pointer' : 'default' }}>
-                    {isHostOrAdmin ? (
-                      <input 
-                        type="checkbox" 
-                        checked={isChecked} 
-                        onChange={() => {}} 
-                        style={{ cursor: 'pointer' }}
-                      />
-                    ) : (
-                      <span style={{ fontSize: '12px' }}>{isChecked ? '✅' : '⬜'}</span>
-                    )}
-                    <span style={{ fontSize: '12px', fontWeight: isChecked ? 600 : 400, color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)', flex: 1, marginLeft: '6px' }}>
-                      {p.name}
-                    </span>
-                    {todSpinPool.includes(p.id) && isChecked && (
-                      <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
-                        Pool
+                  <div key={p.id} className="spinner-participant-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                        {p.name.replace(' (You)', '')}
                       </span>
-                    )}
+                      {todSpinPool.includes(p.id) && isActive && (
+                        <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(241, 196, 15, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
+                          Pool
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: statusColor }}>
+                      {statusText}
+                    </span>
                   </div>
                 );
               })}
