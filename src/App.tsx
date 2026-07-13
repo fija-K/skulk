@@ -78,6 +78,7 @@ interface Participant {
   ytTime?: number;
   ytUpdateTimestamp?: number;
   ytSpeed?: number;
+  whiteboardEditAllowed?: boolean;
 }
 
 type ViewingShare = {
@@ -426,16 +427,22 @@ function createWrappedPlayer(
       }
       targetElement.innerHTML = '';
       
-      const iframe = document.createElement('iframe');
-      iframe.src = `https://player.vimeo.com/video/${videoId}?autoplay=1&controls=1&muted=${isPresenter ? 0 : 1}`;
-      iframe.style.width = '100%';
-      iframe.style.height = '100%';
-      iframe.style.border = 'none';
-      iframe.setAttribute('allow', 'autoplay; fullscreen');
-      targetElement.appendChild(iframe);
+      const player = new (window as any).Vimeo.Player(targetElement, {
+        id: parseInt(videoId, 10),
+        autoplay: true,
+        muted: !isPresenter,
+        controls: true,
+        loop: false
+      });
 
-      const player = new (window as any).Vimeo.Player(iframe);
-      
+      // style vimeo's auto-created iframe
+      const iframe = targetElement.querySelector('iframe');
+      if (iframe) {
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+      }
+
       if (isPresenter) {
         player.on('play', async () => {
           const time = await player.getCurrentTime().catch(() => 0);
@@ -493,21 +500,36 @@ function createWrappedPlayer(
         }
       }).then((player: any) => {
         const events = (window as any).dailymotion.events || {};
-        const playingEvent = events.VIDEO_PLAYING || 'play';
-        const pauseEvent = events.VIDEO_PAUSE || 'pause';
-        const seekEvent = events.VIDEO_SEEKEND || 'seekend';
+        const playingEvent = events.VIDEO_PLAYING || 'video_playing';
+        const pauseEvent = events.VIDEO_PAUSE || 'video_pause';
+        const seekEvent = events.VIDEO_SEEKEND || 'video_seekend';
+        const timechangeEvent = events.VIDEO_TIMECHANGE || 'video_timechange';
 
-        if (isPresenter) {
-          player.on(playingEvent, () => {
-            onStateChange(true, player.currentTime || 0);
-          });
-          player.on(pauseEvent, () => {
-            onStateChange(false, player.currentTime || 0);
-          });
-          player.on(seekEvent, () => {
-            onStateChange(!player.paused, player.currentTime || 0);
-          });
-        }
+        let localTime = 0;
+        let isPlaying = true; // autoplay is true by default
+
+        player.on(playingEvent, () => {
+          isPlaying = true;
+          if (isPresenter) {
+            onStateChange(true, localTime);
+          }
+        });
+        player.on(pauseEvent, () => {
+          isPlaying = false;
+          if (isPresenter) {
+            onStateChange(false, localTime);
+          }
+        });
+        player.on(seekEvent, () => {
+          if (isPresenter) {
+            onStateChange(isPlaying, localTime);
+          }
+        });
+        player.on(timechangeEvent, (e: any) => {
+          if (e && typeof e.videoTime === 'number') {
+            localTime = e.videoTime;
+          }
+        });
 
         return {
           play: () => {
@@ -525,8 +547,8 @@ function createWrappedPlayer(
               player.seek(sec).catch(() => {});
             } catch (e) {}
           },
-          getCurrentTime: () => player.currentTime || 0,
-          getPlayerState: () => player.paused ? 2 : 1,
+          getCurrentTime: () => localTime,
+          getPlayerState: () => isPlaying ? 1 : 2,
           getPlaybackRate: () => 1,
           setPlaybackRate: () => {},
           destroy: () => {
@@ -566,15 +588,25 @@ function createWrappedPlayer(
 
       return new Promise<AbstractPlayer>((resolve) => {
         player.addEventListener((window as any).Twitch.Player.READY, () => {
-          if (isPresenter && !isLive) {
-            player.addEventListener((window as any).Twitch.Player.PLAY, () => {
+          let isPaused = true; // Will be set to false when play event fires
+
+          player.addEventListener((window as any).Twitch.Player.PLAY, () => {
+            isPaused = false;
+            if (isPresenter && !isLive) {
               onStateChange(true, player.getCurrentTime());
-            });
-            player.addEventListener((window as any).Twitch.Player.PAUSE, () => {
+            }
+          });
+
+          player.addEventListener((window as any).Twitch.Player.PAUSE, () => {
+            isPaused = true;
+            if (isPresenter && !isLive) {
               onStateChange(false, player.getCurrentTime());
-            });
+            }
+          });
+
+          if (isPresenter && !isLive) {
             player.addEventListener((window as any).Twitch.Player.SEEK, () => {
-              onStateChange(!player.isPaused(), player.getCurrentTime());
+              onStateChange(!isPaused, player.getCurrentTime());
             });
           }
 
@@ -585,7 +617,7 @@ function createWrappedPlayer(
               if (!isLive) player.seek(sec);
             },
             getCurrentTime: () => isLive ? 0 : player.getCurrentTime(),
-            getPlayerState: () => player.isPaused() ? 2 : 1,
+            getPlayerState: () => isPaused ? 2 : 1,
             destroy: () => {
               targetElement.innerHTML = '';
             }
@@ -2970,7 +3002,7 @@ function AppContent() {
   };
 
   const clearMySharing = async () => {
-    await updateMySharing({ sharing: null, sharingYoutubeId: null, whiteboardData: '' });
+    await updateMySharing({ sharing: null, sharingYoutubeId: null, whiteboardData: '', whiteboardEditAllowed: false });
   };
 
   const handleViewParticipantShare = (p: Participant) => {
@@ -3704,6 +3736,7 @@ function AppContent() {
           ytTime: data.ytTime,
           ytUpdateTimestamp: data.ytUpdateTimestamp,
           ytSpeed: data.ytSpeed,
+          whiteboardEditAllowed: data.whiteboardEditAllowed ?? false,
         } as Participant;
       });
 
@@ -4174,11 +4207,10 @@ function AppContent() {
   const stopDrawing = async () => {
     setIsDrawing(false);
     const canvas = canvasRef.current;
-    const myId = getMyId();
-    if (canvas && currentRoom && viewingShare?.participantId === myId && viewingShare?.type === 'whiteboard') {
+    if (canvas && currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
       const dataUrl = canvas.toDataURL();
       try {
-        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId), { whiteboardData: dataUrl });
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { whiteboardData: dataUrl });
       } catch (e) {
         console.warn("Failed to sync whiteboard to Firestore:", e);
       }
@@ -4223,10 +4255,9 @@ function AppContent() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     showToast('Whiteboard cleared');
-    if (currentRoom) {
-      const myId = getMyId();
+    if (currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
       try {
-        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', myId), { whiteboardData: '' });
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { whiteboardData: '' });
       } catch (e) {
         console.warn("Failed to clear whiteboard in Firestore:", e);
       }
@@ -6198,6 +6229,11 @@ function AppContent() {
       </div>
     );
   };
+
+  const myId = getMyId();
+  const whiteboardPresenter = (viewingShare && viewingShare.type === 'whiteboard') ? callParticipants.find(p => p.id === viewingShare.participantId) : null;
+  const isWhiteboardPresenter = (viewingShare && viewingShare.type === 'whiteboard') && viewingShare.participantId === myId;
+  const canDrawOnWhiteboard = isWhiteboardPresenter || (whiteboardPresenter?.whiteboardEditAllowed ?? false);
 
   // Filtered rooms based on name search
   const filteredRooms = rooms.filter(room => {
@@ -8535,7 +8571,23 @@ function AppContent() {
                             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                               Whiteboard {viewingShare.participantId !== getMyId() ? `(viewing ${callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'participant'})` : '(You)'}
                             </span>
-                            {viewingShare.participantId === getMyId() && (
+                            {viewingShare.participantId !== getMyId() && (
+                              <span 
+                                style={{ 
+                                  fontSize: '11px', 
+                                  padding: '2px 8px', 
+                                  borderRadius: '12px', 
+                                  backgroundColor: whiteboardPresenter?.whiteboardEditAllowed ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)', 
+                                  color: whiteboardPresenter?.whiteboardEditAllowed ? '#10b981' : 'var(--text-secondary)',
+                                  border: `1px solid ${whiteboardPresenter?.whiteboardEditAllowed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                                  fontWeight: 600,
+                                  marginLeft: '8px'
+                                }}
+                              >
+                                {whiteboardPresenter?.whiteboardEditAllowed ? 'Collaborative' : 'View Only'}
+                              </span>
+                            )}
+                            {canDrawOnWhiteboard && (
                             <div className="whiteboard-color-pickers">
                               {['#f1c40f', '#ef4444', '#10b981', '#3b82f6', '#ffffff'].map(color => (
                                 <div 
@@ -8547,6 +8599,21 @@ function AppContent() {
                                 />
                               ))}
                             </div>
+                            )}
+                            {viewingShare.participantId === getMyId() && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px' }}>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Allow members to edit</span>
+                                <label className="switch-toggle">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={whiteboardPresenter?.whiteboardEditAllowed ?? false} 
+                                    onChange={async (e) => {
+                                      await updateMySharing({ whiteboardEditAllowed: e.target.checked });
+                                    }} 
+                                  />
+                                  <span className="switch-slider"></span>
+                                </label>
+                              </div>
                             )}
                           </div>
                           <div style={{ display: 'flex', gap: '8px' }}>
@@ -8572,14 +8639,14 @@ function AppContent() {
                         <canvas 
                           ref={canvasRef}
                           className="whiteboard-canvas"
-                          onMouseDown={viewingShare.participantId === getMyId() ? startDrawing : undefined}
-                          onMouseMove={viewingShare.participantId === getMyId() ? draw : undefined}
-                          onMouseUp={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                          onMouseLeave={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                          onTouchStart={viewingShare.participantId === getMyId() ? startDrawingTouch : undefined}
-                          onTouchMove={viewingShare.participantId === getMyId() ? drawTouch : undefined}
-                          onTouchEnd={viewingShare.participantId === getMyId() ? stopDrawing : undefined}
-                          style={{ cursor: viewingShare.participantId === getMyId() ? 'crosshair' : 'default', flex: 1, width: '100%', height: '100%', display: 'block' }}
+                          onMouseDown={canDrawOnWhiteboard ? startDrawing : undefined}
+                          onMouseMove={canDrawOnWhiteboard ? draw : undefined}
+                          onMouseUp={canDrawOnWhiteboard ? stopDrawing : undefined}
+                          onMouseLeave={canDrawOnWhiteboard ? stopDrawing : undefined}
+                          onTouchStart={canDrawOnWhiteboard ? startDrawingTouch : undefined}
+                          onTouchMove={canDrawOnWhiteboard ? drawTouch : undefined}
+                          onTouchEnd={canDrawOnWhiteboard ? stopDrawing : undefined}
+                          style={{ cursor: canDrawOnWhiteboard ? 'crosshair' : 'default', flex: 1, width: '100%', height: '100%', display: 'block' }}
                         />
                       </div>
                     ) : (
@@ -9073,7 +9140,7 @@ function AppContent() {
                                   setViewingShare(null);
                                   showToast('Whiteboard sharing stopped');
                                 } else {
-                                  await updateMySharing({ sharing: 'whiteboard', whiteboardData: '' });
+                                  await updateMySharing({ sharing: 'whiteboard', whiteboardData: '', whiteboardEditAllowed: false });
                                   setViewingShare({ participantId: myId, type: 'whiteboard' });
                                   showToast('Whiteboard sharing started — click your avatar to view');
                                 }
