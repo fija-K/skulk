@@ -141,6 +141,11 @@ export function usePresence(
         }
         if (change.type === 'removed') {
           onParticipantRemoved(docId, data.name || 'Someone');
+          if (docId === myId) {
+            console.log("[PRESENCE] Local participant document removed by server. Triggering eviction.");
+            onEvicted();
+            return;
+          }
         }
       });
 
@@ -177,11 +182,6 @@ export function usePresence(
         hasSeenSelfInListRef.current = true;
       }
       
-      if (myId && hasSeenSelfInListRef.current && !meStillInRoom) {
-        onEvicted();
-        return;
-      }
-
       setCallParticipants(list);
     }, (error) => {
       console.warn("Firestore call presence subscription failed, falling back to local user presence:", error);
