@@ -79,6 +79,10 @@ interface Participant {
   ytUpdateTimestamp?: number;
   ytSpeed?: number;
   whiteboardEditAllowed?: boolean;
+  micOn?: boolean;
+  camOn?: boolean;
+  micRestricted?: boolean;
+  camRestricted?: boolean;
 }
 
 type ViewingShare = {
@@ -3315,7 +3319,11 @@ function AppContent() {
           isCamOff: true,
           mutedBy: myId,
           camOffBy: myId,
-          sessionId: newSessionId
+          sessionId: newSessionId,
+          micOn: false,
+          camOn: false,
+          micRestricted: false,
+          camRestricted: false
         });
         localStorage.setItem('skulk_active_session', JSON.stringify({
           roomId: normalizedRoom.id,
@@ -3360,7 +3368,11 @@ function AppContent() {
           isMuted: true,
           isCamOff: true,
           mutedBy: myId,
-          camOffBy: myId
+          camOffBy: myId,
+          micOn: false,
+          camOn: false,
+          micRestricted: false,
+          camRestricted: false
         });
       } catch (e) {}
     }
@@ -3618,7 +3630,9 @@ function AppContent() {
         isCamOff: isCamOffRef.current,
         mutedBy: myId,
         camOffBy: myId,
-        sessionId: currentSessionIdRef.current
+        sessionId: currentSessionIdRef.current,
+        micOn: !isMicMutedRef.current,
+        camOn: !isCamOffRef.current
       }, { merge: true });
     };
     
@@ -3785,6 +3799,10 @@ function AppContent() {
           ytUpdateTimestamp: data.ytUpdateTimestamp,
           ytSpeed: data.ytSpeed,
           whiteboardEditAllowed: data.whiteboardEditAllowed ?? false,
+          micOn: data.micOn ?? true,
+          camOn: data.camOn ?? true,
+          micRestricted: data.micRestricted ?? false,
+          camRestricted: data.camRestricted ?? false
         } as Participant;
       });
 
@@ -3823,7 +3841,11 @@ function AppContent() {
           isCamOff: isCamOffRef.current,
           isSpeaking: false,
           isPinned: false,
-          role: determineRole(currentRoom.creatorId)
+          role: determineRole(currentRoom.creatorId),
+          micOn: !isMicMutedRef.current,
+          camOn: !isCamOffRef.current,
+          micRestricted: false,
+          camRestricted: false
         }
       ]);
     });
@@ -5618,12 +5640,19 @@ function AppContent() {
     const rid = roomDocId(currentRoom);
     const target = callParticipants.find(p => p.id === id);
     if (!target) return;
-    const nextMute = !target.isMuted;
+    const nextRestricted = !target.micRestricted;
+    const updateData: any = {
+      micRestricted: nextRestricted,
+      mutedBy: nextRestricted ? getMyId() : null
+    };
+    if (nextRestricted) {
+      updateData.micOn = false;
+    }
     try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isMuted: nextMute, mutedBy: getMyId() });
-      showToast(nextMute ? `Muted ${name}` : `Unmuted ${name}`);
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), updateData);
+      showToast(nextRestricted ? `Restricted mic for ${name}` : `Allowed unmute for ${name}`);
     } catch (e) {
-      console.warn("Failed to toggle remote mute in Firestore:", e);
+      console.warn("Failed to toggle remote mic restriction in Firestore:", e);
     }
     setActiveMenuParticipantId(null);
   };
@@ -5742,12 +5771,19 @@ function AppContent() {
     const target = callParticipants.find(p => p.id === id);
     if (!target) return;
     
-    const nextVal = !target.isCamOff;
+    const nextRestricted = !target.camRestricted;
+    const updateData: any = {
+      camRestricted: nextRestricted,
+      camOffBy: nextRestricted ? getMyId() : null
+    };
+    if (nextRestricted) {
+      updateData.camOn = false;
+    }
     try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', id), { isCamOff: nextVal, camOffBy: getMyId() });
-      showToast(`${nextVal ? 'Disabled' : 'Enabled'} camera for ${name}`);
+      await updateDoc(doc(db, 'rooms', rid, 'participants', id), updateData);
+      showToast(nextRestricted ? `Restricted camera for ${name}` : `Allowed camera for ${name}`);
     } catch (e) {
-      console.warn("Failed to toggle remote camera in Firestore:", e);
+      console.warn("Failed to toggle remote camera restriction in Firestore:", e);
     }
     setActiveMenuParticipantId(null);
   };
