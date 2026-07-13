@@ -41,6 +41,7 @@ import { LocalScreenShareLinker } from './components/call/LocalScreenShareLinker
 import { DeviceRecoveryManager } from './components/call/DeviceRecoveryManager';
 import { usePresence } from './hooks/usePresence';
 import { useRoomState } from './hooks/useRoomState';
+import { UserProfileCard } from './components/social/UserProfileCard';
 
 export interface Room {
   id: string;
@@ -1123,6 +1124,13 @@ function AppContent() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<{
+    id: string;
+    name: string;
+    initials: string;
+    color: string;
+    photoURL?: string | null;
+  } | null>(null);
 
   // Local game/truth or dare/spin states
   const [todLocalSpinning, setTodLocalSpinning] = useState(false);
@@ -1255,9 +1263,13 @@ function AppContent() {
       }
     },
     // onEvicted callback
-    () => {
-      console.log("Kicking user out! meStillInRoom is false, hasSeenSelf is true.");
-      showToast("❌ You have been removed from the room by a host.");
+    (reason) => {
+      console.log("Kicking user out! Reason:", reason);
+      if (reason === 'new_room') {
+        showToast("Joined another room in a different tab.");
+      } else {
+        showToast("❌ You have been removed from the room by a host.");
+      }
       handleLeaveCall();
     }
   );
@@ -6191,6 +6203,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                   </div>
@@ -6295,6 +6308,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                   </div>
@@ -6366,6 +6380,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                       </div>
@@ -6395,6 +6410,7 @@ function AppContent() {
                                   handleParticipantRoleChange={handleParticipantRoleChange}
                                   checkCanKick={checkCanKick}
                                   handleParticipantRemove={handleParticipantRemove}
+                                  onOpenProfile={(profile) => setSelectedProfile(profile)}
                                 />
                               )}
                               <button 
@@ -6474,6 +6490,7 @@ function AppContent() {
                             handleParticipantRoleChange={handleParticipantRoleChange}
                             checkCanKick={checkCanKick}
                             handleParticipantRemove={handleParticipantRemove}
+                            onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                       </div>
@@ -6549,13 +6566,17 @@ function AppContent() {
                               style={{ 
                                 backgroundColor: p.color, 
                                 position: 'relative',
-                                cursor: p.sharing ? 'pointer' : 'default',
+                                cursor: 'pointer',
                                 border: p.sharing ? '1px solid var(--primary-color)' : 'none'
                               }}
                               onClick={() => {
-                                if (p.sharing) {
-                                  handleViewParticipantShare(p);
-                                }
+                                setSelectedProfile({
+                                  id: p.id,
+                                  name: p.name.replace(' (You)', ''),
+                                  initials: p.initials,
+                                  color: p.color,
+                                  photoURL: p.photoURL || null
+                                });
                               }}
                             >
                               {p.initials}
@@ -6581,7 +6602,21 @@ function AppContent() {
                               )}
                             </div>
                             <div className="person-name-wrapper" style={{ display: 'flex', alignItems: 'center' }}>
-                              <span className="person-name">{p.name}</span>
+                              <span 
+                                className="person-name"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => {
+                                  setSelectedProfile({
+                                    id: p.id,
+                                    name: p.name.replace(' (You)', ''),
+                                    initials: p.initials,
+                                    color: p.color,
+                                    photoURL: p.photoURL || null
+                                  });
+                                }}
+                              >
+                                {p.name}
+                              </span>
                               {p.role && p.role !== 'member' && (
                                 <span className={`role-badge-${p.role}`} style={{
                                   fontSize: '9px',
@@ -7954,6 +7989,17 @@ function AppContent() {
           </svg>
           <span>{toastMessage}</span>
         </div>
+      )}
+
+      {selectedProfile && (
+        <UserProfileCard
+          currentUserId={getMyId()}
+          targetUser={selectedProfile}
+          callParticipants={callParticipants}
+          onClose={() => setSelectedProfile(null)}
+          onSelectUser={(profile) => setSelectedProfile(profile)}
+          showToast={showToast}
+        />
       )}
 
       {/* 6. Guest Profile Editor Modal */}

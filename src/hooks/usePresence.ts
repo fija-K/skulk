@@ -26,7 +26,7 @@ export function usePresence(
   creatorId: string | null,
   onParticipantAdded: (docId: string, name: string, joinedAt: string | null) => void,
   onParticipantRemoved: (docId: string, name: string) => void,
-  onEvicted: () => void
+  onEvicted: (reason: 'new_room' | 'kicked') => void
 ) {
   const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
   const [activeMenuParticipantId, setActiveMenuParticipantId] = useState<string | null>(null);
@@ -143,7 +143,17 @@ export function usePresence(
           onParticipantRemoved(docId, data.name || 'Someone');
           if (docId === myId) {
             console.log("[PRESENCE] Local participant document removed by server. Triggering eviction.");
-            onEvicted();
+            let reason: 'new_room' | 'kicked' = 'kicked';
+            try {
+              const activeSessionStr = localStorage.getItem('skulk_active_session');
+              if (activeSessionStr) {
+                const activeSession = JSON.parse(activeSessionStr);
+                if (activeSession.roomId && activeSession.roomId !== roomId) {
+                  reason = 'new_room';
+                }
+              }
+            } catch (e) {}
+            onEvicted(reason);
             return;
           }
         }
