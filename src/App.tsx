@@ -3331,6 +3331,7 @@ function AppContent() {
           timestamp: Date.now()
         }));
       } catch (err) {
+        console.error('[DISCONNECT-DEBUG] enterCallRoom setDoc error:', err);
         console.warn("Failed to set presence in Firestore, joining locally:", err);
       }
     }
@@ -3374,7 +3375,9 @@ function AppContent() {
           micRestricted: false,
           camRestricted: false
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error('[DISCONNECT-DEBUG] enterCallRoom updateDoc error:', e);
+      }
     }
   };
 
