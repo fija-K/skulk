@@ -362,6 +362,9 @@ function createWrappedPlayer(
 ): Promise<AbstractPlayer> {
   if (platform === 'youtube') {
     return loadYoutubeApi().then(() => {
+      if (!document.body.contains(targetElement)) {
+        throw new Error("Element detached before YouTube Player could load");
+      }
       return new Promise<AbstractPlayer>((resolve) => {
         const player = new (window as any).YT.Player(targetElement, {
           width: '100%',
@@ -416,6 +419,9 @@ function createWrappedPlayer(
 
   if (platform === 'vimeo') {
     return loadVimeoApi().then(() => {
+      if (!document.body.contains(targetElement)) {
+        throw new Error("Element detached before Vimeo Player could load");
+      }
       targetElement.innerHTML = '';
       
       const iframe = document.createElement('iframe');
@@ -465,6 +471,9 @@ function createWrappedPlayer(
 
   if (platform === 'dailymotion') {
     return loadDailymotionApi().then(() => {
+      if (!document.body.contains(targetElement)) {
+        throw new Error("Element detached before Dailymotion Player could load");
+      }
       targetElement.innerHTML = '';
       
       const playerDiv = document.createElement('div');
@@ -531,6 +540,9 @@ function createWrappedPlayer(
 
   if (platform === 'twitch') {
     return loadTwitchApi().then(() => {
+      if (!document.body.contains(targetElement)) {
+        throw new Error("Element detached before Twitch Player could load");
+      }
       targetElement.innerHTML = '';
 
       const options: any = {
@@ -673,6 +685,7 @@ function UniversalVideoPlayer({
     // Clear and restore a clean div inside the container to receive the player
     containerRef.current.innerHTML = '';
     const targetDiv = document.createElement('div');
+    targetDiv.id = `skulk-media-player-${platform}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     targetDiv.style.width = '100%';
     targetDiv.style.height = '100%';
     containerRef.current.appendChild(targetDiv);
