@@ -1029,7 +1029,8 @@ function AppContent() {
                 initials: data.initials || '',
                 color: data.color || '',
                 photoURL: data.photoURL || null,
-                role: data.role || ''
+                role: data.role || '',
+                joinedAt: data.joinedAt || null
               };
             });
 
@@ -1044,7 +1045,8 @@ function AppContent() {
                 initials: p.initials || '',
                 color: p.color || '',
                 photoURL: p.photoURL || null,
-                role: p.role || ''
+                role: p.role || '',
+                joinedAt: p.joinedAt || null
               }));
 
               if (JSON.stringify(currentListCompared) === JSON.stringify(participantsList)) {
@@ -5196,7 +5198,22 @@ function AppContent() {
               <div className="rooms-grid">
                 {filteredRooms.map((room) => {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
-                  const currentRoomParticipants = roomsParticipants[room.id] || [];
+                  const rawParticipants = roomsParticipants[room.id] || [];
+                  const currentRoomParticipants = [...rawParticipants].sort((a, b) => {
+                    const aIsAdmin = a.role === 'admin';
+                    const bIsAdmin = b.role === 'admin';
+                    if (aIsAdmin && !bIsAdmin) return -1;
+                    if (!aIsAdmin && bIsAdmin) return 1;
+
+                    const aIsHost = a.role === 'host';
+                    const bIsHost = b.role === 'host';
+                    if (aIsHost && !bIsHost) return -1;
+                    if (!aIsHost && bIsHost) return 1;
+
+                    const aTime = a.joinedAt ? new Date(a.joinedAt).getTime() : Infinity;
+                    const bTime = b.joinedAt ? new Date(b.joinedAt).getTime() : Infinity;
+                    return aTime - bTime;
+                  });
                   const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
                   const currentHostId = room.currentHostId || room.creatorId;
                   const isCreatorAdmin = (room.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') || 
