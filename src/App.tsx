@@ -408,41 +408,37 @@ function createWrappedPlayer(
 
       const player = new (window as any).Vimeo.Player(iframe);
       
-      return new Promise<AbstractPlayer>((resolve) => {
-        player.ready().then(() => {
-          if (isPresenter) {
-            player.on('play', async () => {
-              const time = await player.getCurrentTime();
-              onStateChange(true, time);
-            });
-            player.on('pause', async () => {
-              const time = await player.getCurrentTime();
-              onStateChange(false, time);
-            });
-            player.on('seeked', async () => {
-              const time = await player.getCurrentTime();
-              onStateChange(true, time);
-            });
-          }
-
-          resolve({
-            play: () => player.play().catch(() => {}),
-            pause: () => player.pause().catch(() => {}),
-            seekTo: (sec) => player.setCurrentTime(sec).catch(() => {}),
-            getCurrentTime: () => player.getCurrentTime().catch(() => 0),
-            getPlayerState: async () => {
-              const paused = await player.getPaused().catch(() => true);
-              return paused ? 2 : 1;
-            },
-            getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
-            setPlaybackRate: (rate) => player.setPlaybackRate(rate).catch(() => {}),
-            destroy: () => {
-              try {
-                player.unload();
-              } catch (e) {}
-            }
-          });
+      if (isPresenter) {
+        player.on('play', async () => {
+          const time = await player.getCurrentTime().catch(() => 0);
+          onStateChange(true, time);
         });
+        player.on('pause', async () => {
+          const time = await player.getCurrentTime().catch(() => 0);
+          onStateChange(false, time);
+        });
+        player.on('seeked', async () => {
+          const time = await player.getCurrentTime().catch(() => 0);
+          onStateChange(true, time);
+        });
+      }
+
+      return Promise.resolve({
+        play: () => player.play().catch(() => {}),
+        pause: () => player.pause().catch(() => {}),
+        seekTo: (sec) => player.setCurrentTime(sec).catch(() => {}),
+        getCurrentTime: () => player.getCurrentTime().catch(() => 0),
+        getPlayerState: async () => {
+          const paused = await player.getPaused().catch(() => true);
+          return paused ? 2 : 1;
+        },
+        getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
+        setPlaybackRate: (rate) => player.setPlaybackRate(rate).catch(() => {}),
+        destroy: () => {
+          try {
+            player.unload();
+          } catch (e) {}
+        }
       });
     });
   }
@@ -522,7 +518,7 @@ function createWrappedPlayer(
       seekTo: (sec) => {
         try {
           iframe.contentWindow?.postMessage(`seek=${sec}`, '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', value: sec }), '*');
+          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', parameters: [sec] }), '*');
         } catch (e) {}
       },
       getCurrentTime: () => currentTime,
@@ -551,7 +547,8 @@ function createWrappedPlayer(
         height: '100%',
         autoplay: true,
         muted: !isPresenter,
-        controls: true
+        controls: true,
+        parent: [window.location.hostname]
       };
 
       if (isLive) {
@@ -570,6 +567,9 @@ function createWrappedPlayer(
             });
             player.addEventListener((window as any).Twitch.Player.PAUSE, () => {
               onStateChange(false, player.getCurrentTime());
+            });
+            player.addEventListener((window as any).Twitch.Player.SEEK, () => {
+              onStateChange(!player.isPaused(), player.getCurrentTime());
             });
           }
 
