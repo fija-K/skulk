@@ -1696,70 +1696,97 @@ function PipWindowContent({
         zIndex: 20
       }}>
         {/* Mute Mic control */}
-        <button 
-          onClick={toggleMic}
-          style={{
-            background: isMicMuted ? '#ef4444' : '#2d3139',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#ffffff',
-            width: '28px',
-            height: '28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer'
-          }}
-          title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {isMicMuted ? (
-              <>
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-              </>
-            ) : (
-              <>
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-              </>
-            )}
-          </svg>
-        </button>
+        {(() => {
+          const myPresence = callParticipants.find(p => p.id === myId);
+          const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
+          const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
+          
+          return (
+            <>
+              <button 
+                onClick={toggleMic}
+                style={{
+                  background: isMutedByHost ? '#ef4444' : isMicMuted ? '#ef4444' : '#2d3139',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  opacity: isMutedByHost ? 0.7 : 1
+                }}
+                title={isMutedByHost ? 'Muted by Host (Locked)' : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+              >
+                {isMutedByHost ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    {isMicMuted ? (
+                      <>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                      </>
+                    ) : (
+                      <>
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                      </>
+                    )}
+                  </svg>
+                )}
+              </button>
 
-        {/* Camera toggle control */}
-        <button 
-          onClick={toggleCamera}
-          style={{
-            background: isCamOff ? '#ef4444' : '#2d3139',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#ffffff',
-            width: '28px',
-            height: '28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer'
-          }}
-          title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {isCamOff ? (
-              <>
-                <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10l-2.18-1.63"></path>
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-              </>
-            ) : (
-              <>
-                <path d="M23 7l-7 5 7 5V7z"></path>
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-              </>
-            )}
-          </svg>
-        </button>
+              {/* Camera toggle control */}
+              <button 
+                onClick={toggleCamera}
+                style={{
+                  background: isCamDisabledByHost ? '#ef4444' : isCamOff ? '#ef4444' : '#2d3139',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  opacity: isCamDisabledByHost ? 0.7 : 1
+                }}
+                title={isCamDisabledByHost ? 'Camera Disabled by Host (Locked)' : isCamOff ? 'Turn camera on' : 'Turn camera off'}
+              >
+                {isCamDisabledByHost ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                    <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8c0 .28-.06.55-.18.8l-4-4"></path>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    {isCamOff ? (
+                      <>
+                        <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10l-2.18-1.63"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </>
+                    ) : (
+                      <>
+                        <path d="M23 7l-7 5 7 5V7z"></path>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </>
+                    )}
+                  </svg>
+                )}
+              </button>
+            </>
+          );
+        })()}
 
         {/* Restore / Expand to original size */}
         <button 
@@ -9923,49 +9950,75 @@ function AppContent() {
           <div className="call-bottom-dock">
             
             {/* Mic Toggle Button */}
-            <button 
-              onClick={toggleMic} 
-              className={`dock-btn ${isMicMuted ? 'active-off' : ''}`}
-              title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                {isMicMuted ? (
-                  <>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                  </>
-                ) : (
-                  <>
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                  </>
-                )}
-              </svg>
-            </button>
-            
-            {/* Camera Toggle Button */}
-            <button 
-              onClick={toggleCamera} 
-              className={`dock-btn ${isCamOff ? 'active-off' : ''}`}
-              title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                {isCamOff ? (
-                  <>
-                    <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3m-2.11-.11l3.44-5.16a1 1 0 0 1 1.67 1.1l-2.22 3.34"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                  </>
-                ) : (
-                  <>
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                    <circle cx="12" cy="13" r="4"></circle>
-                  </>
-                )}
-              </svg>
-            </button>
+            {(() => {
+              const myId = getMyId();
+              const myPresence = callParticipants.find(p => p.id === myId);
+              const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
+              const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
+              
+              return (
+                <>
+                  <button 
+                    onClick={toggleMic} 
+                    className={`dock-btn ${isMicMuted ? 'active-off' : ''} ${isMutedByHost ? 'host-locked' : ''}`}
+                    title={isMutedByHost ? 'Muted by Host (Locked)' : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  >
+                    {isMutedByHost ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        {isMicMuted ? (
+                          <>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                            <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                          </>
+                        ) : (
+                          <>
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                          </>
+                        )}
+                      </svg>
+                    )}
+                  </button>
+                  
+                  {/* Camera Toggle Button */}
+                  <button 
+                    onClick={toggleCamera} 
+                    className={`dock-btn ${isCamOff ? 'active-off' : ''} ${isCamDisabledByHost ? 'host-locked' : ''}`}
+                    title={isCamDisabledByHost ? 'Camera Disabled by Host (Locked)' : isCamOff ? 'Turn camera on' : 'Turn camera off'}
+                  >
+                    {isCamDisabledByHost ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                        <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8c0 .28-.06.55-.18.8l-4-4"></path>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        {isCamOff ? (
+                          <>
+                            <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3m-2.11-.11l3.44-5.16a1 1 0 0 1 1.67 1.1l-2.22 3.34"></path>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                          </>
+                        ) : (
+                          <>
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                            <circle cx="12" cy="13" r="4"></circle>
+                          </>
+                        )}
+                      </svg>
+                    )}
+                  </button>
+                </>
+              );
+            })()}
             
             {/* Layout Toggle Button */}
             <button 
