@@ -306,13 +306,13 @@ function loadTwitchApi(): Promise<void> {
   if (twitchApiPromise) return twitchApiPromise;
   
   twitchApiPromise = new Promise((resolve) => {
-    if ((window as any).Twitch) {
+    if ((window as any).Twitch && (window as any).Twitch.Player) {
       resolve();
       return;
     }
     
     const tag = document.createElement('script');
-    tag.src = 'https://embed.twitch.tv/v1/twitch.js';
+    tag.src = 'https://player.twitch.tv/js/embed/v1.js';
     tag.onload = () => resolve();
     tag.onerror = () => resolve();
     document.head.appendChild(tag);
