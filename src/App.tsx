@@ -3218,23 +3218,31 @@ function AppContent() {
         });
 
         // Delete any signals associated with this user
-        const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
-        const snapshot = await getDocs(signalsRef);
-        for (const docSnap of snapshot.docs) {
-          if (docSnap.id.includes(myId)) {
-            try {
-              // Delete candidates subcollection first
-              const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
-              const candSnap = await getDocs(candidatesRef);
-              for (const d of candSnap.docs) {
-                try { await deleteDoc(d.ref); } catch (e) {}
-              }
-              await deleteDoc(docSnap.ref);
-            } catch (e) {}
+        try {
+          const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
+          const snapshot = await getDocs(signalsRef);
+          for (const docSnap of snapshot.docs) {
+            if (docSnap.id.includes(myId)) {
+              try {
+                // Delete candidates subcollection first
+                const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
+                const candSnap = await getDocs(candidatesRef);
+                for (const d of candSnap.docs) {
+                  try { await deleteDoc(d.ref); } catch (e) {}
+                }
+                await deleteDoc(docSnap.ref);
+              } catch (e) {}
+            }
           }
+        } catch (e) {
+          console.warn("Skipping WebRTC signals cleanup (optional/absent):", e);
         }
         // Delete my join request doc if any exists
-        await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
+        try {
+          await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
+        } catch (e) {
+          console.warn("Failed to delete join request (optional/absent):", e);
+        }
       } catch (e) {
         console.error('Error removing presence document:', e);
       }
@@ -3535,7 +3543,7 @@ function AppContent() {
               buttonText: 'Join',
               participants: [],
               maxParticipants: 10,
-              link: `http://skulk.vercel.app/room/${roomId}`
+              link: `${window.location.origin}/room/${roomId}`
             };
           }
 
@@ -3784,6 +3792,10 @@ function AppContent() {
     const presenceRef = collection(db, 'rooms', rid, 'participants');
     const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
       const myId = listenerMyId;
+      if (myId !== getMyId()) {
+        console.log("Stale snapshot listener: ignoring participant update for old ID", { listenerMyId, currentMyId: getMyId() });
+        return;
+      }
       
       snapshot.docChanges().forEach((change) => {
         const docId = change.doc.id;
