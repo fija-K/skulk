@@ -1132,6 +1132,8 @@ function AppContent() {
     photoURL?: string | null;
   } | null>(null);
 
+
+
   // Local game/truth or dare/spin states
   const [todLocalSpinning, setTodLocalSpinning] = useState(false);
   const [todActiveIds, setTodActiveIds] = useState<string[]>([]);
@@ -1456,6 +1458,15 @@ function AppContent() {
   const [targetsHistory, setTargetsHistory] = useState<any[]>([]);
   const [userDataState, setUserDataState] = useState<any>(null);
   const [sessionLogs, setSessionLogs] = useState<any[]>([]);
+
+  const [isEditingBio, setIsEditingBio] = useState(false);
+  const [bioInput, setBioInput] = useState('');
+
+  useEffect(() => {
+    if (userDataState && !isEditingBio) {
+      setBioInput(userDataState.bio || '');
+    }
+  }, [userDataState, isEditingBio]);
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -5276,14 +5287,32 @@ function AppContent() {
                                     src={participant.photoURL}
                                     alt={participant.name}
                                     className="avatar-slot avatar-filled"
-                                    style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                                    style={{ objectFit: 'cover', border: '1px solid var(--border-color)', cursor: 'pointer' }}
                                     referrerPolicy="no-referrer"
+                                    onClick={() => {
+                                      setSelectedProfile({
+                                        id: participant.uid || participant.id,
+                                        name: participant.name.replace(' (You)', ''),
+                                        initials: participant.initials,
+                                        color: participant.color || '#3b82f6',
+                                        photoURL: participant.photoURL
+                                      });
+                                    }}
                                   />
                                 ) : (
                                   <div 
                                     key={index} 
                                     className="avatar-slot avatar-filled"
-                                    style={{ backgroundColor: participant.color || '#8b5cf6' }}
+                                    style={{ backgroundColor: participant.color || '#8b5cf6', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      setSelectedProfile({
+                                        id: participant.uid || participant.id,
+                                        name: participant.name.replace(' (You)', ''),
+                                        initials: participant.initials,
+                                        color: participant.color || '#8b5cf6',
+                                        photoURL: null
+                                      });
+                                    }}
                                   >
                                     {participant.initials}
                                   </div>
@@ -5316,14 +5345,32 @@ function AppContent() {
                                       src={participant.photoURL}
                                       alt={participant.name}
                                       className="avatar-slot avatar-filled"
-                                      style={{ objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                                      style={{ objectFit: 'cover', border: '1px solid var(--border-color)', cursor: 'pointer' }}
                                       referrerPolicy="no-referrer"
+                                      onClick={() => {
+                                        setSelectedProfile({
+                                          id: participant.uid || participant.id,
+                                          name: participant.name.replace(' (You)', ''),
+                                          initials: participant.initials,
+                                          color: participant.color || '#3b82f6',
+                                          photoURL: participant.photoURL
+                                        });
+                                      }}
                                     />
                                   ) : (
                                     <div 
                                       key={index} 
                                       className="avatar-slot avatar-filled"
-                                      style={{ backgroundColor: participant.color || '#8b5cf6' }}
+                                      style={{ backgroundColor: participant.color || '#8b5cf6', cursor: 'pointer' }}
+                                      onClick={() => {
+                                        setSelectedProfile({
+                                          id: participant.uid || participant.id,
+                                          name: participant.name.replace(' (You)', ''),
+                                          initials: participant.initials,
+                                          color: participant.color || '#8b5cf6',
+                                          photoURL: null
+                                        });
+                                      }}
                                     >
                                       {participant.initials}
                                     </div>
@@ -5454,6 +5501,96 @@ function AppContent() {
                           <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{followingCount}</span>
                           <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Following</span>
                         </div>
+                      </div>
+
+                      {/* Bio Edit Section */}
+                      <div style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', minWidth: '240px' }}>
+                        {isEditingBio ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <textarea
+                              value={bioInput}
+                              onChange={(e) => setBioInput(e.target.value)}
+                              maxLength={160}
+                              placeholder="Tell others about yourself..."
+                              className="search-input"
+                              style={{
+                                width: '100%',
+                                minHeight: '60px',
+                                fontSize: '13px',
+                                padding: '8px 12px',
+                                backgroundColor: 'var(--input-bg, #1a1c23)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                color: 'var(--text-primary)',
+                                outline: 'none',
+                                resize: 'none'
+                              }}
+                            />
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => {
+                                  setIsEditingBio(false);
+                                  setBioInput(userDataState?.bio || '');
+                                }}
+                                className="btn-signin"
+                                style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '4px' }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (user) {
+                                    try {
+                                      const userRef = doc(db, 'users', user.uid);
+                                      await setDoc(userRef, { bio: bioInput }, { merge: true });
+                                      setIsEditingBio(false);
+                                      showToast("Bio updated successfully!");
+                                    } catch (e) {
+                                      console.error("Failed to update bio:", e);
+                                      showToast("Failed to update bio.");
+                                    }
+                                  }
+                                }}
+                                className="btn-create"
+                                style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '4px' }}
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+                            <p style={{
+                              fontSize: '13px',
+                              color: userDataState?.bio ? 'var(--text-primary)' : 'var(--text-secondary)',
+                              fontStyle: userDataState?.bio ? 'normal' : 'italic',
+                              margin: 0,
+                              flexGrow: 1,
+                              wordBreak: 'break-word',
+                              lineHeight: '1.4'
+                            }}>
+                              {userDataState?.bio || "No bio added yet."}
+                            </p>
+                            <button
+                              onClick={() => {
+                                setBioInput(userDataState?.bio || '');
+                                setIsEditingBio(true);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--primary-color)',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              ✏️ Edit Bio
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -37,6 +37,24 @@ export function UserProfileCard({
   const [reportDetails, setReportDetails] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
+  const [bio, setBio] = useState('');
+
+  // Sync bio in real time
+  useEffect(() => {
+    if (!targetUser.id) return;
+    const userRef = doc(db, 'users', targetUser.id);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setBio(docSnap.data().bio || '');
+      } else {
+        setBio('');
+      }
+    }, (err) => {
+      console.warn("Failed to listen to profile bio:", err);
+    });
+    return () => unsubscribe();
+  }, [targetUser.id]);
+
   // Hook for follows relationships
   const { isFollowing, followersCount, followingCount, toggleFollow } = useFollow(
     currentUserId,
@@ -183,9 +201,22 @@ export function UserProfileCard({
             </div>
 
             {/* Name */}
-            <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0 0 16px 0', color: 'var(--text-primary, #ffffff)' }}>
+            <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0 0 4px 0', color: 'var(--text-primary, #ffffff)' }}>
               {targetUser.name}
             </h3>
+
+            {/* Bio */}
+            <p style={{
+              fontSize: '13px',
+              color: 'var(--text-secondary, #94a3b8)',
+              margin: '0 0 16px 0',
+              padding: '0 16px',
+              fontStyle: bio ? 'normal' : 'italic',
+              wordBreak: 'break-word',
+              lineHeight: '1.4'
+            }}>
+              {bio ? bio : (currentUserId === targetUser.id ? "No bio yet. Edit your bio in the Reflect tab." : "No bio yet.")}
+            </p>
 
             {/* Followers / Following Counts Row */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: '32px', marginBottom: '24px' }}>
