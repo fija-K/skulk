@@ -3361,12 +3361,30 @@ function AppContent() {
   };
 
   const toggleMic = async () => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isMutedByHost = myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId;
+    
+    if (isMicMuted && isMutedByHost) {
+      showToast("❌ You cannot unmute because the host has muted you.");
+      return;
+    }
+
     const nextVal = !isMicMuted;
     setIsMicMuted(nextVal);
     await updateMySharing({ isMuted: nextVal, mutedBy: getMyId() });
   };
 
   const toggleCamera = async () => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isCamDisabledByHost = myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId;
+    
+    if (isCamOff && isCamDisabledByHost) {
+      showToast("❌ You cannot turn on camera because the host has disabled it.");
+      return;
+    }
+
     const nextVal = !isCamOff;
     setIsCamOff(nextVal);
     await updateMySharing({ isCamOff: nextVal, camOffBy: getMyId() });
