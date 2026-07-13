@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
@@ -24,16 +24,25 @@ import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import tdData from '../td.json';
 import {
   LiveKitRoom,
-  VideoTrack,
-  useTracks,
   RoomAudioRenderer,
   useLocalParticipant,
   useParticipants
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, ParticipantEvent } from 'livekit-client';
 
-interface Room {
+import { parseMediaUrl, isDrmBlockedUrl } from './utils/helpers';
+import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
+import { ChatPanel } from './components/chat/ChatPanel';
+import { WhiteboardView } from './components/whiteboard/WhiteboardView';
+import { TruthOrDareUI, SpinWheelUI } from './components/games/GamesView';
+import { ParticipantTile } from './components/call/ParticipantTile';
+import { ParticipantVideo, ScreenShareVideo } from './components/call/ParticipantVideo';
+import { LocalScreenShareLinker } from './components/call/LocalScreenShareLinker';
+import { DeviceRecoveryManager } from './components/call/DeviceRecoveryManager';
+import { usePresence } from './hooks/usePresence';
+import { useRoomState } from './hooks/useRoomState';
+
+export interface Room {
   id: string;
   name: string;
   type: 'private' | 'public-ask' | 'public';
@@ -52,7 +61,7 @@ interface Room {
   isLocalOnly?: boolean;
 }
 
-interface Participant {
+export interface Participant {
   id: string;
   name: string;
   initials: string;
@@ -83,15 +92,18 @@ interface Participant {
   camOn?: boolean;
   micRestricted?: boolean;
   camRestricted?: boolean;
+  uid?: string;
+  joinedAt?: string | null;
+  sessionId?: string | null;
 }
 
-type ViewingShare = {
+export type ViewingShare = {
   participantId: string;
   type: 'youtube' | 'whiteboard' | 'screen';
   youtubeVideoId?: string;
 };
 
-interface ChatMessage {
+export interface ChatMessage {
   id: string;
   sender: string;
   senderId?: string;
@@ -100,1067 +112,6 @@ interface ChatMessage {
   createdAt?: string;
 }
 
-const ParticipantVideo = memo(function ParticipantVideo({ 
-  participantId, 
-  objectFit = 'contain' 
-}: { 
-  participantId: string; 
-  objectFit?: 'contain' | 'cover';
-}) {
-  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
-  const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
-
-  if (!trackRef) return null;
-
-  return (
-    <VideoTrack 
-      trackRef={trackRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        objectFit: objectFit, 
-        borderRadius: '8px',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        zIndex: 1,
-        backgroundColor: '#0f1013'
-      }} 
-    />
-  );
-});
-
-
-function LocalScreenShareLinker({ screenShareStream }: { screenShareStream: MediaStream | null }) {
-  const { localParticipant } = useLocalParticipant();
-
-  useEffect(() => {
-    if (!localParticipant) return;
-
-    if (screenShareStream) {
-      const videoTrack = screenShareStream.getVideoTracks()[0];
-      if (videoTrack) {
-        console.log("Publishing local screen share track to LiveKit:", videoTrack);
-        localParticipant.publishTrack(videoTrack, { source: Track.Source.ScreenShare }).then((publication) => {
-          console.log("Successfully published screen share track:", publication);
-        }).catch((err) => {
-          console.error("Failed to publish screen share track:", err);
-        });
-      }
-    } else {
-      const publications = localParticipant.getTrackPublications();
-      publications.forEach(pub => {
-        if (pub.source === Track.Source.ScreenShare && pub.track) {
-          console.log("Unpublishing local screen share track from LiveKit:", pub.track);
-          localParticipant.unpublishTrack(pub.track as any);
-        }
-      });
-    }
-  }, [screenShareStream, localParticipant]);
-
-  return null;
-}
-
-const ScreenShareVideo = memo(function ScreenShareVideo({ participantId }: { participantId: string }) {
-  const tracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
-  const trackRef = tracks.find(t => t.participant.identity === participantId) as any;
-
-  if (!trackRef) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        height: '100%', 
-        color: 'var(--text-secondary)',
-        gap: '12px'
-      }}>
-        <span>Connecting to screen presentation...</span>
-      </div>
-    );
-  }
-
-  return (
-    <VideoTrack 
-      trackRef={trackRef} 
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        objectFit: 'contain', 
-        borderRadius: 'var(--border-radius)',
-        backgroundColor: '#050505'
-      }} 
-    />
-  );
-});
-
-
-
-interface ParsedMedia {
-  platform: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch';
-  videoId: string;
-  isLive?: boolean;
-}
-
-function parseMediaUrl(url: string): ParsedMedia | null {
-  const cleanUrl = url.trim();
-  if (!cleanUrl) return null;
-
-  // 1. YouTube
-  const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-  const ytMatch = cleanUrl.match(ytRegex);
-  if (ytMatch) {
-    return { platform: 'youtube', videoId: ytMatch[1] };
-  }
-  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) {
-    return { platform: 'youtube', videoId: cleanUrl };
-  }
-
-  // 2. Vimeo
-  const vimeoRegex = /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)(\d+)/;
-  const vimeoMatch = cleanUrl.match(vimeoRegex);
-  if (vimeoMatch) {
-    return { platform: 'vimeo', videoId: vimeoMatch[1] };
-  }
-
-  // 3. Dailymotion
-  const dmRegex = /(?:dailymotion\.com\/(?:video|embed\/video)\/|dai\.ly\/)([a-zA-Z0-9]+)/;
-  const dmMatch = cleanUrl.match(dmRegex);
-  if (dmMatch) {
-    return { platform: 'dailymotion', videoId: dmMatch[1] };
-  }
-
-  // 4. Twitch
-  const twitchVodRegex = /twitch\.tv\/videos\/(\d+)/;
-  const twitchVodMatch = cleanUrl.match(twitchVodRegex);
-  if (twitchVodMatch) {
-    return { platform: 'twitch', videoId: twitchVodMatch[1], isLive: false };
-  }
-
-  const twitchChannelRegex = /twitch\.tv\/([a-zA-Z0-9_]+)/;
-  const twitchChannelMatch = cleanUrl.match(twitchChannelRegex);
-  if (twitchChannelMatch) {
-    const channel = twitchChannelMatch[1].toLowerCase();
-    const reservedWords = ['directory', 'videos', 'u', 'moderator', 'popout', 'search'];
-    if (!reservedWords.includes(channel)) {
-      return { platform: 'twitch', videoId: twitchChannelMatch[1], isLive: true };
-    }
-  }
-
-  return null;
-}
-
-function isDrmBlockedUrl(url: string): boolean {
-  const lower = url.toLowerCase();
-  return lower.includes('netflix.com') || 
-         lower.includes('disneyplus.com') || 
-         lower.includes('amazon.com/gp/video') || 
-         lower.includes('primevideo.com') ||
-         lower.includes('hulu.com') ||
-         lower.includes('max.com') ||
-         lower.includes('hbo.com');
-}
-
-let ytApiPromise: Promise<void> | null = null;
-function loadYoutubeApi(): Promise<void> {
-  if (ytApiPromise) return ytApiPromise;
-  
-  ytApiPromise = new Promise((resolve) => {
-    if ((window as any).YT && (window as any).YT.Player) {
-      resolve();
-      return;
-    }
-    
-    const prevCallback = (window as any).onYouTubeIframeAPIReady;
-    (window as any).onYouTubeIframeAPIReady = () => {
-      if (prevCallback) prevCallback();
-      resolve();
-    };
-    
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-  });
-  
-  return ytApiPromise;
-}
-
-let vimeoApiPromise: Promise<void> | null = null;
-function loadVimeoApi(): Promise<void> {
-  if (vimeoApiPromise) return vimeoApiPromise;
-  
-  vimeoApiPromise = new Promise((resolve) => {
-    if ((window as any).Vimeo) {
-      resolve();
-      return;
-    }
-    
-    const tag = document.createElement('script');
-    tag.src = 'https://player.vimeo.com/api/player.js';
-    tag.onload = () => resolve();
-    tag.onerror = () => resolve();
-    document.head.appendChild(tag);
-  });
-  
-  return vimeoApiPromise;
-}
-
-let twitchApiPromise: Promise<void> | null = null;
-function loadTwitchApi(): Promise<void> {
-  if (twitchApiPromise) return twitchApiPromise;
-  
-  twitchApiPromise = new Promise((resolve) => {
-    if ((window as any).Twitch && (window as any).Twitch.Player) {
-      resolve();
-      return;
-    }
-    
-    const tag = document.createElement('script');
-    tag.src = 'https://player.twitch.tv/js/embed/v1.js';
-    tag.onload = () => resolve();
-    tag.onerror = () => resolve();
-    document.head.appendChild(tag);
-  });
-  
-  return twitchApiPromise;
-}
-
-let dailymotionApiPromise: Promise<void> | null = null;
-function loadDailymotionApi(): Promise<void> {
-  if (dailymotionApiPromise) return dailymotionApiPromise;
-  
-  dailymotionApiPromise = new Promise((resolve) => {
-    if ((window as any).dailymotion) {
-      resolve();
-      return;
-    }
-    
-    const tag = document.createElement('script');
-    tag.src = 'https://geo.dailymotion.com/libs/player/x508t.js';
-    tag.onload = () => resolve();
-    tag.onerror = () => resolve();
-    document.head.appendChild(tag);
-  });
-  
-  return dailymotionApiPromise;
-}
-
-interface AbstractPlayer {
-  play(): void;
-  pause(): void;
-  seekTo(seconds: number): void;
-  getCurrentTime(): Promise<number> | number;
-  getPlayerState(): Promise<number> | number;
-  getPlaybackRate?(): Promise<number> | number;
-  setPlaybackRate?(rate: number): Promise<void> | void;
-  destroy(): void;
-}
-
-function createWrappedPlayer(
-  platform: string,
-  targetElement: HTMLElement,
-  videoId: string,
-  isPresenter: boolean,
-  isLive: boolean,
-  onStateChange: (playing: boolean, time: number) => void
-): Promise<AbstractPlayer> {
-  if (platform === 'youtube') {
-    return loadYoutubeApi().then(() => {
-      if (!targetElement || !targetElement.parentNode) {
-        throw new Error("Element detached before YouTube Player could load");
-      }
-      return new Promise<AbstractPlayer>((resolve) => {
-        const player = new (window as any).YT.Player(targetElement, {
-          width: '100%',
-          height: '100%',
-          videoId: videoId,
-          playerVars: {
-            autoplay: 1,
-            controls: 1,
-            disablekb: 0,
-            rel: 0,
-            mute: isPresenter ? 0 : 1,
-            origin: window.location.origin,
-            enablejsapi: 1
-          },
-          events: {
-            onReady: () => {
-              if (!isPresenter) {
-                try {
-                  player.mute();
-                } catch (e) {}
-              }
-              resolve({
-                play: () => player.playVideo(),
-                pause: () => player.pauseVideo(),
-                seekTo: (sec) => player.seekTo(sec, true),
-                getCurrentTime: () => player.getCurrentTime() || 0,
-                getPlayerState: () => {
-                  const s = player.getPlayerState();
-                  return (s === 1 || s === 3) ? 1 : 2;
-                },
-                getPlaybackRate: () => player.getPlaybackRate() || 1,
-                setPlaybackRate: (rate) => player.setPlaybackRate(rate),
-                destroy: () => {
-                  try {
-                    player.destroy();
-                  } catch (e) {}
-                }
-              });
-            },
-            onStateChange: (event: any) => {
-              const state = event.data;
-              const time = player.getCurrentTime() || 0;
-              if (state === 1) {
-                onStateChange(true, time);
-              } else if (state === 2) {
-                onStateChange(false, time);
-              }
-            }
-          }
-        });
-      });
-    });
-  }
-
-  if (platform === 'vimeo') {
-    return loadVimeoApi().then(() => {
-      if (!targetElement || !targetElement.parentNode) {
-        throw new Error("Element detached before Vimeo Player could load");
-      }
-      targetElement.innerHTML = '';
-      
-      const player = new (window as any).Vimeo.Player(targetElement, {
-        id: parseInt(videoId, 10),
-        autoplay: isPresenter,
-        muted: !isPresenter,
-        controls: true,
-        loop: false
-      });
-
-      return player.ready().then(() => {
-        // style vimeo's auto-created iframe
-        const iframe = targetElement.querySelector('iframe');
-        if (iframe) {
-          iframe.style.width = '100%';
-          iframe.style.height = '100%';
-          iframe.style.border = 'none';
-        }
-
-        if (isPresenter) {
-          player.on('play', async () => {
-            const time = await player.getCurrentTime().catch(() => 0);
-            onStateChange(true, time);
-          });
-          player.on('pause', async () => {
-            const time = await player.getCurrentTime().catch(() => 0);
-            onStateChange(false, time);
-          });
-          player.on('seeked', async () => {
-            const time = await player.getCurrentTime().catch(() => 0);
-            const paused = await player.getPaused().catch(() => true);
-            onStateChange(!paused, time);
-          });
-        }
-
-        return {
-          play: () => player.play().catch(() => {}),
-          pause: () => player.pause().catch(() => {}),
-          seekTo: (sec: number) => player.setCurrentTime(sec).catch(() => {}),
-          getCurrentTime: () => player.getCurrentTime().catch(() => 0),
-          getPlayerState: async () => {
-            const paused = await player.getPaused().catch(() => true);
-            return paused ? 2 : 1;
-          },
-          getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
-          setPlaybackRate: (rate: number) => player.setPlaybackRate(rate).catch(() => {}),
-          destroy: () => {
-            try {
-              player.unload();
-            } catch (e) {}
-            targetElement.innerHTML = '';
-          }
-        };
-      });
-    });
-  }
-
-  if (platform === 'dailymotion') {
-    return loadDailymotionApi().then(() => {
-      if (!targetElement || !targetElement.parentNode) {
-        throw new Error("Element detached before Dailymotion Player could load");
-      }
-      targetElement.innerHTML = '';
-      
-      const playerDiv = document.createElement('div');
-      playerDiv.id = 'dailymotion-player-' + Date.now();
-      playerDiv.style.width = '100%';
-      playerDiv.style.height = '100%';
-      targetElement.appendChild(playerDiv);
-
-      return (window as any).dailymotion.createPlayer(playerDiv.id, {
-        video: videoId,
-        params: {
-          autoplay: isPresenter,
-          mute: !isPresenter,
-          controls: true
-        }
-      }).then((player: any) => {
-        let localTime = 0;
-        let isPlaying = isPresenter;
-
-        player.on('play', () => {
-          isPlaying = true;
-          if (isPresenter) {
-            onStateChange(true, localTime);
-          }
-        });
-
-        player.on('pause', () => {
-          isPlaying = false;
-          if (isPresenter) {
-            onStateChange(false, localTime);
-          }
-        });
-
-        player.on('seeked', (e: any) => {
-          if (e && typeof e.time === 'number') {
-            localTime = e.time;
-          } else if (e && typeof e.videoTime === 'number') {
-            localTime = e.videoTime;
-          }
-          if (isPresenter) {
-            onStateChange(isPlaying, localTime);
-          }
-        });
-
-        player.on('timeupdate', (e: any) => {
-          if (e && typeof e.time === 'number') {
-            localTime = e.time;
-          } else if (e && typeof e.videoTime === 'number') {
-            localTime = e.videoTime;
-          }
-        });
-
-        return {
-          play: () => {
-            try {
-              player.play();
-            } catch (e) {
-              console.warn("Dailymotion play failed:", e);
-            }
-          },
-          pause: () => {
-            try {
-              player.pause();
-            } catch (e) {
-              console.warn("Dailymotion pause failed:", e);
-            }
-          },
-          seekTo: (sec: number) => {
-            try {
-              player.seek(sec);
-            } catch (e) {
-              console.warn("Dailymotion seek failed:", e);
-            }
-          },
-          getCurrentTime: async () => {
-            try {
-              const state = await player.getState();
-              if (state && typeof state.videoTime === 'number') {
-                localTime = state.videoTime;
-              }
-            } catch (e) {}
-            return localTime;
-          },
-          getPlayerState: async () => {
-            try {
-              const state = await player.getState();
-              if (state && typeof state.playerIsPlaying === 'boolean') {
-                isPlaying = state.playerIsPlaying;
-              }
-            } catch (e) {}
-            return isPlaying ? 1 : 2;
-          },
-          getPlaybackRate: () => 1,
-          setPlaybackRate: () => {},
-          destroy: () => {
-            try {
-              player.destroy();
-            } catch (e) {}
-            try {
-              (window as any).dailymotion.destroy(playerDiv.id);
-            } catch (e) {}
-            targetElement.innerHTML = '';
-          }
-        };
-      });
-    });
-  }
-
-  if (platform === 'twitch') {
-    return loadTwitchApi().then(() => {
-      if (!targetElement || !targetElement.parentNode) {
-        throw new Error("Element detached before Twitch Player could load");
-      }
-      targetElement.innerHTML = '';
-
-      const options: any = {
-        width: '100%',
-        height: '100%',
-        autoplay: isPresenter,
-        muted: !isPresenter,
-        controls: true,
-        parent: [window.location.hostname]
-      };
-
-      if (isLive) {
-        options.channel = videoId;
-      } else {
-        options.video = videoId;
-      }
-
-      const player = new (window as any).Twitch.Player(targetElement, options);
-
-      return new Promise<AbstractPlayer>((resolve) => {
-        player.addEventListener((window as any).Twitch.Player.READY, () => {
-          let isPaused = !isPresenter;
-
-          player.addEventListener((window as any).Twitch.Player.PLAY, () => {
-            isPaused = false;
-            if (isPresenter && !isLive) {
-              onStateChange(true, player.getCurrentTime());
-            }
-          });
-
-          player.addEventListener((window as any).Twitch.Player.PAUSE, () => {
-            isPaused = true;
-            if (isPresenter && !isLive) {
-              onStateChange(false, player.getCurrentTime());
-            }
-          });
-
-          if (isPresenter && !isLive) {
-            player.addEventListener((window as any).Twitch.Player.SEEK, () => {
-              onStateChange(!isPaused, player.getCurrentTime());
-            });
-          }
-
-          resolve({
-            play: () => {
-              try {
-                player.play();
-              } catch (e) {
-                console.warn("Twitch play failed:", e);
-              }
-            },
-            pause: () => {
-              try {
-                player.pause();
-              } catch (e) {
-                console.warn("Twitch pause failed:", e);
-              }
-            },
-            seekTo: (sec) => {
-              try {
-                if (!isLive) player.seek(sec);
-              } catch (e) {
-                console.warn("Twitch seek failed:", e);
-              }
-            },
-            getCurrentTime: () => {
-              if (isLive) return 0;
-              try {
-                return player.getCurrentTime();
-              } catch (e) {
-                return 0;
-              }
-            },
-            getPlayerState: () => {
-              try {
-                return player.isPaused() ? 2 : 1;
-              } catch (e) {
-                return isPaused ? 2 : 1;
-              }
-            },
-            destroy: () => {
-              targetElement.innerHTML = '';
-            }
-          });
-        });
-      });
-    });
-  }
-
-  throw new Error(`Unsupported platform: ${platform}`);
-}
-
-function UniversalVideoPlayer({ 
-  videoId, 
-  platform,
-  isLive,
-  isPresenter, 
-  presenterId,
-  roomId,
-  myId,
-  participants
-}: { 
-  videoId: string; 
-  platform: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch';
-  isLive: boolean;
-  isPresenter: boolean; 
-  presenterId: string;
-  roomId: string;
-  myId: string;
-  participants: Participant[];
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<AbstractPlayer | null>(null);
-  const isLocalChangeRef = useRef(false);
-  const lastPresenterDataRef = useRef<any>(null);
-
-  const getPresenterState = () => {
-    return participants.find(p => p.id === presenterId) as any;
-  };
-
-  const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
-    if (isPresenter || isLive) return; // Viewers only sync to presenter!
-
-    const targetPlaying = data.ytPlaying ?? false;
-    const targetTime = data.ytTime ?? 0;
-    const targetTimestamp = data.ytUpdateTimestamp ?? Date.now();
-    const targetSpeed = data.ytSpeed ?? 1;
-    
-    let correctedTime = targetTime;
-    if (targetPlaying && targetTimestamp) {
-      const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
-      correctedTime += elapsedSeconds * targetSpeed;
-    }
-
-    isLocalChangeRef.current = true;
-    
-    // 1. Sync play/pause state
-    try {
-      const currentState = await player.getPlayerState();
-      if (targetPlaying && currentState !== 1) {
-        player.play();
-      } else if (!targetPlaying && currentState === 1) {
-        player.pause();
-      }
-    } catch (e) {
-      console.warn("Failed to sync play/pause state:", e);
-    }
-
-    // 2. Sync playback rate (speed)
-    try {
-      if (player.getPlaybackRate && player.setPlaybackRate) {
-        const currentSpeed = await player.getPlaybackRate();
-        if (Math.abs(currentSpeed - targetSpeed) > 0.05) {
-          player.setPlaybackRate(targetSpeed);
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to sync playback rate:", e);
-    }
-
-    // 3. Sync seek/current time
-    try {
-      const currentTime = await player.getCurrentTime();
-      if (Math.abs(currentTime - correctedTime) > 2) {
-        player.seekTo(correctedTime);
-      }
-    } catch (e) {
-      console.warn("Failed to sync seek/time:", e);
-    }
-    
-    isLocalChangeRef.current = false;
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    if (!containerRef.current) return;
-    
-    // Clear and restore a clean div inside the container to receive the player
-    containerRef.current.innerHTML = '';
-    const targetDiv = document.createElement('div');
-    targetDiv.id = `skulk-media-player-${platform}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    targetDiv.style.width = '100%';
-    targetDiv.style.height = '100%';
-    containerRef.current.appendChild(targetDiv);
-
-    createWrappedPlayer(
-      platform,
-      targetDiv,
-      videoId,
-      isPresenter,
-      isLive,
-      (playing, time) => {
-        if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
-        if (!isLocalChangeRef.current) {
-          updateFirestorePlaybackState(playing, time);
-        }
-      }
-    ).then((wrappedPlayer) => {
-      if (!active) {
-        wrappedPlayer.destroy();
-        return;
-      }
-      playerRef.current = wrappedPlayer;
-
-      // Sync to latest presenter state immediately when player mounts
-      const presenterData = getPresenterState();
-      if (presenterData) {
-        syncToPresenterState(presenterData, wrappedPlayer);
-      }
-    }).catch(err => {
-      console.error("Failed to load player:", err);
-    });
-
-    return () => {
-      active = false;
-      if (playerRef.current) {
-        playerRef.current.destroy();
-        playerRef.current = null;
-      }
-    };
-  }, [videoId, platform, isPresenter, isLive]);
-
-  const updateFirestorePlaybackState = async (playing: boolean, time: number, speed?: number) => {
-    try {
-      let resolvedSpeed = 1;
-      try {
-        if (speed !== undefined) {
-          resolvedSpeed = speed;
-        } else if (playerRef.current?.getPlaybackRate) {
-          resolvedSpeed = await playerRef.current.getPlaybackRate();
-        }
-      } catch (speedErr) {
-        console.warn("Failed to read playback speed:", speedErr);
-      }
-
-      await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
-        ytPlaying: playing,
-        ytTime: time,
-        ytUpdateTimestamp: Date.now(),
-        ytSpeed: resolvedSpeed
-      });
-    } catch (e) {
-      console.warn("Failed to update media playback in Firestore:", e);
-    }
-  };
-
-  // Host/Presenter playback tracking loop (detects seeks and speed changes)
-  useEffect(() => {
-    if (!isPresenter || isLive) return;
-
-    let lastState: number | null = null;
-    let lastTime = 0;
-    let lastSpeed: number | null = null;
-    let lastCheck = Date.now();
-
-    const interval = setInterval(async () => {
-      if (playerRef.current) {
-        try {
-          let state = 2; // Default to paused
-          try {
-            state = await playerRef.current.getPlayerState();
-          } catch (err) {
-            console.warn("Tracking loop failed to get player state:", err);
-          }
-
-          let time = 0;
-          try {
-            time = await playerRef.current.getCurrentTime();
-          } catch (err) {
-            console.warn("Tracking loop failed to get current time:", err);
-          }
-
-          let speed = 1;
-          try {
-            speed = playerRef.current.getPlaybackRate ? await playerRef.current.getPlaybackRate() : 1;
-          } catch (err) {
-            console.warn("Tracking loop failed to get speed:", err);
-          }
-
-          const now = Date.now();
-          const playing = state === 1;
-          const stateChanged = state !== lastState;
-          const speedChanged = lastSpeed !== null && Math.abs(speed - lastSpeed) > 0.05;
-
-          // Detect seek: time jumped by more than 2 seconds from expected elapsed time (scaled by speed)
-          const expectedTime = lastTime + (playing ? ((now - lastCheck) / 1000) * speed : 0);
-          const timeJumped = Math.abs(time - expectedTime) > 2.0;
-
-          if (stateChanged || timeJumped || speedChanged) {
-            updateFirestorePlaybackState(playing, time, speed);
-            lastState = state;
-            lastTime = time;
-            lastSpeed = speed;
-            lastCheck = now;
-          } else {
-            lastTime = time;
-            lastCheck = now;
-          }
-        } catch (e) {
-          console.error("Tracking loop encountered error:", e);
-        }
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [isPresenter, isLive]);
-
-  // Synchronize player to presenter's active state in the room via direct document subscription
-  useEffect(() => {
-    if (isPresenter || isLive || !roomId || !presenterId) return;
-
-    const partRef = doc(db, 'rooms', roomId, 'participants', presenterId);
-    const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) return;
-      const data = snapshot.data();
-      lastPresenterDataRef.current = data;
-      if (playerRef.current) {
-        syncToPresenterState(data, playerRef.current);
-      }
-    }, (err) => {
-      console.warn("Failed to subscribe to presenter changes:", err);
-    });
-
-    return () => unsubscribe();
-  }, [isPresenter, isLive, presenterId, roomId]);
-
-  // Viewer proactive local force sync interval
-  useEffect(() => {
-    if (isPresenter || isLive) return;
-
-    const interval = setInterval(() => {
-      if (playerRef.current && lastPresenterDataRef.current) {
-        syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isPresenter, isLive]);
-
-  return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <div 
-        ref={containerRef} 
-        style={{ 
-          width: '100%', 
-          height: '100%', 
-          borderRadius: 'var(--border-radius)', 
-          overflow: 'hidden',
-          backgroundColor: '#000'
-        }} 
-      />
-    </div>
-  );
-}
-
-function DeviceRecoveryManager({ 
-  isCamOff, 
-  isMicMuted,
-  onErrorChange 
-}: { 
-  isCamOff: boolean; 
-  isMicMuted: boolean;
-  onErrorChange: (camErr: boolean, micErr: boolean) => void;
-}) {
-  const { localParticipant } = useLocalParticipant();
-
-  useEffect(() => {
-    if (!localParticipant) return;
-
-    let currentCamErr = false;
-    let currentMicErr = false;
-    const reportErrors = () => onErrorChange(currentCamErr, currentMicErr);
-
-    // Sync active enabled states dynamically with local participant tracks
-    localParticipant.setCameraEnabled(!isCamOff).catch((err) => {
-      console.warn("Failed to sync camera state", err);
-      currentCamErr = true;
-      reportErrors();
-    });
-    localParticipant.setMicrophoneEnabled(!isMicMuted).catch((err) => {
-      console.warn("Failed to sync mic state", err);
-      currentMicErr = true;
-      reportErrors();
-    });
-
-    const handleCameraRecovery = async () => {
-      if (isCamOff) {
-        currentCamErr = false;
-        reportErrors();
-        return;
-      }
-      try {
-        await localParticipant.setCameraEnabled(true);
-        currentCamErr = false;
-        reportErrors();
-      } catch (err) {
-        console.warn("Camera auto-recovery failed", err);
-        currentCamErr = true;
-        reportErrors();
-      }
-    };
-
-    const handleMicRecovery = async () => {
-      if (isMicMuted) {
-        currentMicErr = false;
-        reportErrors();
-        return;
-      }
-      try {
-        await localParticipant.setMicrophoneEnabled(true);
-        currentMicErr = false;
-        reportErrors();
-      } catch (err) {
-        console.warn("Mic auto-recovery failed", err);
-        currentMicErr = true;
-        reportErrors();
-      }
-    };
-
-    // 1. Permissions API listener
-    const setupPermissions = async () => {
-      try {
-        const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        camStatus.onchange = () => {
-          if (camStatus.state === 'granted') handleCameraRecovery();
-        };
-      } catch (e) { /* ignore */ }
-
-      try {
-        const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-        micStatus.onchange = () => {
-          if (micStatus.state === 'granted') handleMicRecovery();
-        };
-      } catch (e) { /* ignore */ }
-    };
-
-    setupPermissions();
-
-    // 2. Track onended listener
-    const checkTracks = () => {
-      const camTrack = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack?.mediaStreamTrack;
-      if (camTrack) {
-        camTrack.onended = () => {
-          console.warn("Camera track unexpectedly ended (hardware switch?)");
-          handleCameraRecovery();
-        };
-        if (currentCamErr) {
-          currentCamErr = false;
-          reportErrors();
-        }
-      }
-
-      const micTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack;
-      if (micTrack) {
-        micTrack.onended = () => {
-          console.warn("Mic track unexpectedly ended");
-          handleMicRecovery();
-        };
-        if (currentMicErr) {
-          currentMicErr = false;
-          reportErrors();
-        }
-      }
-    };
-
-    checkTracks();
-
-    const onMediaError = async (error: Error) => {
-      console.warn("Media devices error:", error);
-      const errMsg = (error?.message || '').toLowerCase();
-      const errName = (error?.name || '').toLowerCase();
-      const errKind = (error as any).kind || '';
-
-      const isAudio = errKind === 'audio' || 
-                      errMsg.includes('audio') || 
-                      errMsg.includes('mic') || 
-                      errMsg.includes('microphone') || 
-                      errName.includes('audio') || 
-                      errName.includes('mic') ||
-                      errName.includes('input');
-                      
-      const isVideo = errKind === 'video' || 
-                      errMsg.includes('video') || 
-                      errMsg.includes('camera') || 
-                      errMsg.includes('cam') || 
-                      errName.includes('video') || 
-                      errName.includes('camera');
-
-      if (isAudio && !isVideo) {
-        currentMicErr = true;
-        reportErrors();
-        return;
-      } 
-      
-      if (isVideo && !isAudio) {
-        currentCamErr = true;
-        reportErrors();
-        return;
-      }
-
-      // Fallback for generic/combined error events (e.g. NotAllowedError / Permission denied)
-      let micDenied = false;
-      let camDenied = false;
-      try {
-        const micPerm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-        if (micPerm.state === 'denied') micDenied = true;
-      } catch (e) {}
-      try {
-        const camPerm = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        if (camPerm.state === 'denied') camDenied = true;
-      } catch (e) {}
-
-      if (camDenied) {
-        currentCamErr = true;
-      }
-      if (micDenied) {
-        currentMicErr = true;
-      }
-
-      // If neither is explicitly blocked, fallback only if the requested track is missing
-      if (!micDenied && !camDenied) {
-        const hasVideoTrack = !!localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
-        if (!isCamOff && !hasVideoTrack) {
-          currentCamErr = true;
-        }
-        const hasAudioTrack = !!localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
-        if (!isMicMuted && !hasAudioTrack) {
-          currentMicErr = true;
-        }
-      }
-      reportErrors();
-    };
-    
-    localParticipant.on(ParticipantEvent.LocalTrackPublished, checkTracks);
-    localParticipant.on(ParticipantEvent.LocalTrackUnpublished, checkTracks);
-    localParticipant.on(ParticipantEvent.MediaDevicesError, onMediaError);
-
-    const onRetryDevice = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail === 'camera') handleCameraRecovery();
-      if (customEvent.detail === 'mic') handleMicRecovery();
-    };
-    window.addEventListener('retry-device', onRetryDevice);
-    
-    return () => {
-      localParticipant.off(ParticipantEvent.LocalTrackPublished, checkTracks);
-      localParticipant.off(ParticipantEvent.LocalTrackUnpublished, checkTracks);
-      localParticipant.off(ParticipantEvent.MediaDevicesError, onMediaError);
-      window.removeEventListener('retry-device', onRetryDevice);
-    };
-  }, [localParticipant, isCamOff, isMicMuted, onErrorChange]);
-
-  return null;
-}
-
-// Export the global app wrapper
 export default function App() {
   return <AppContent />;
 }
@@ -2136,10 +1087,19 @@ function AppContent() {
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
 
   // Active call view state
-  const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [pendingJoinRoom, setPendingJoinRoom] = useState<Room | null>(null);
   const [pendingSignInRoom, setPendingSignInRoom] = useState<Room | null>(null);
   
+  // Guest Profile Identity State
+  const [guestName, setGuestName] = useState('');
+  const [guestColor, setGuestColor] = useState('');
+  const [guestInitials, setGuestInitials] = useState('');
+  const [guestPhotoURL, setGuestPhotoURL] = useState<string | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileEditName, setProfileEditName] = useState('');
+  const [profileEditColor, setProfileEditColor] = useState('');
+  const [profileEditPhotoURL, setProfileEditPhotoURL] = useState('');
+
   // Call hardware controls state
   const [isMicMuted, setIsMicMuted] = useState(true);
   const [isCamOff, setIsCamOff] = useState(true);
@@ -2150,12 +1110,159 @@ function AppContent() {
   
   // Sidebar tabs in-call panel
   const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools'>('chat');
-  const [chatMessageText, setChatMessageText] = useState('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [systemMessages, setSystemMessages] = useState<any[]>([]);
+
+  // Lexically declared refs and callbacks for hooks
+  const localJoinTimeRef = useRef<number | null>(null);
+  const hasSeenSelfInListRef = useRef(false);
+  const currentSessionIdRef = useRef<string | null>(null);
+  const isEvictedRef = useRef(false);
+  const isEnteringRoomRef = useRef<string | null>(null);
+  
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Local game/truth or dare/spin states
+  const [todLocalSpinning, setTodLocalSpinning] = useState(false);
+  const [todActiveIds, setTodActiveIds] = useState<string[]>([]);
+  const [todPendingIds, setTodPendingIds] = useState<string[]>([]);
+  const [spinLocalSpinning, setSpinLocalSpinning] = useState(false);
+
+  function showToast(msg: string) {
+    setToastMessage(msg);
+  }
+
+  let leavePresenceFn: (roomIdToLeave: string, sessionIdToDelete?: string | null) => Promise<void> = async () => {};
+
+  function handleLeaveCall() {
+    isEvictedRef.current = true;
+    hasSeenSelfInListRef.current = false;
+    if (currentRoom) {
+      const prevRoomId = roomDocId(currentRoom);
+      console.log("[LEAVE EVENT] leavePresence triggered from handleLeaveCall, session:", currentSessionIdRef.current);
+      leavePresenceFn(prevRoomId);
+      currentSessionIdRef.current = null;
+      setCurrentRoom(null);
+      setCallParticipants([]);
+      setChatMessages([]);
+      setSystemMessages([]);
+      isInitialLoadRef.current = true;
+      isChatInitialLoadRef.current = true;
+      setUnreadChatCount(0);
+      setViewingShare(null);
+      setLiveKitToken(null);
+    }
+    navigate('/');
+  }
+
+  // Hook-managed states
+  const {
+    currentRoom,
+    setCurrentRoom,
+    chatMessages,
+    setChatMessages,
+    systemMessages,
+    setSystemMessages,
+    viewingShare,
+    setViewingShare,
+    allowFunTools,
+    todSpinResult,
+    setTodSpinResult,
+    todSpinPool,
+    setTodSpinPool,
+    todState,
+    setTodState,
+    todChoice,
+    setTodChoice,
+    todText,
+    setTodText,
+    todSelectedId,
+    setTodSelectedId,
+    spinResult,
+    spinCheckedIds,
+    spinPool,
+    pomodoroIsRunning,
+    setPomodoroIsRunning,
+    pomodoroMinutes,
+    setPomodoroMinutes,
+    pomodoroSeconds,
+    setPomodoroSeconds,
+    pomodoroPhase,
+    setPomodoroPhase
+  } = useRoomState(roomId || null, user, guestId, localJoinTimeRef, showToast, handleLeaveCall);
+
+  const {
+    callParticipants,
+    setCallParticipants,
+    activeMenuParticipantId,
+    setActiveMenuParticipantId,
+    spotlightParticipantId,
+    setSpotlightParticipantId,
+    updateMySharing,
+    clearMySharing,
+    leavePresence
+  } = usePresence(
+    roomId || null,
+    user,
+    guestId,
+    guestName,
+    guestPhotoURL,
+    guestInitials,
+    guestColor,
+    currentSessionIdRef,
+    localJoinTimeRef,
+    hasSeenSelfInListRef,
+    currentRoom ? (currentRoom.creatorId || null) : null,
+    // onParticipantAdded callback
+    (docId, name, joinedAt) => {
+      const timestamp = new Date().toISOString();
+      const cleanName = name ? name.replace(' (You)', '') : 'Someone';
+      const getFormattedTime = () => {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      };
+      console.log(`[PRESENCE EVENT] Participant ADDED: ID=${docId}, Name=${name}`);
+      const parsedJoinTime = joinedAt ? new Date(joinedAt).getTime() : 0;
+      if (docId !== getMyId() && parsedJoinTime >= (localJoinTimeRef.current || 0)) {
+        setSystemMessages(prev => [
+          ...prev,
+          {
+            id: `system_join_${docId}_${Date.now()}`,
+            text: `${cleanName} joined · ${getFormattedTime()}`,
+            createdAt: timestamp
+          }
+        ]);
+      }
+    },
+    // onParticipantRemoved callback
+    (docId, name) => {
+      const timestamp = new Date().toISOString();
+      const cleanName = name ? name.replace(' (You)', '') : 'Someone';
+      const getFormattedTime = () => {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      };
+      console.log(`[PRESENCE EVENT] Participant REMOVED: ID=${docId}, Name=${name}`);
+      if (docId !== getMyId()) {
+        setSystemMessages(prev => [
+          ...prev,
+          {
+            id: `system_leave_${docId}_${Date.now()}`,
+            text: `${cleanName} left · ${getFormattedTime()}`,
+            createdAt: timestamp
+          }
+        ]);
+      }
+    },
+    // onEvicted callback
+    () => {
+      console.log("Kicking user out! meStillInRoom is false, hasSeenSelf is true.");
+      showToast("❌ You have been removed from the room by a host.");
+      handleLeaveCall();
+    }
+  );
+
+  leavePresenceFn = leavePresence;
   const isInitialLoadRef = useRef(true);
   const isChatInitialLoadRef = useRef(true);
-  const localJoinTimeRef = useRef<number | null>(null);
   const idTokenRef = useRef<string | null>(null);
 
   const isMicMutedRef = useRef(isMicMuted);
@@ -2168,36 +1275,15 @@ function AppContent() {
   }, [isCamOff]);
 
   // In-call participants state
-  const [callParticipants, setCallParticipants] = useState<Participant[]>([]);
-  const [activeMenuParticipantId, setActiveMenuParticipantId] = useState<string | null>(null);
-
   // Toast feedback state
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
   // const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
-  const [viewingShare, setViewingShare] = useState<ViewingShare | null>(null);
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawColor, setDrawColor] = useState('#f1c40f'); // Neon gold as default
-  const [whiteboardStrokes, setWhiteboardStrokes] = useState<any[]>([]);
-  const activeStrokeRef = useRef<any>(null);
-  const lastWhiteboardWriteTimeRef = useRef<number>(0);
+  
 
   // Tools sub-panel toggle
   const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
 
   // Fun Tools toggle & Truth or Dare synced spinner states
-  const [allowFunTools, setAllowFunTools] = useState(true);
-  const [todSpinResult, setTodSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, spunById?: string, timestamp: number } | null>(null);
-  const [todSpinPool, setTodSpinPool] = useState<string[]>([]);
-  const [todState, setTodState] = useState<'idle' | 'spinning' | 'choice' | 'reveal'>('idle');
-  const [todChoice, setTodChoice] = useState<'Truth' | 'Dare' | null>(null);
-  const [todText, setTodText] = useState('');
-  const [todSelectedId, setTodSelectedId] = useState('');
-  const [todLocalSpinning, setTodLocalSpinning] = useState(false);
-  const [todActiveIds, setTodActiveIds] = useState<string[]>([]);
-  const [todPendingIds, setTodPendingIds] = useState<string[]>([]);
-
   // Local sync of Truth or Dare active/pending participant states from callParticipants list
   useEffect(() => {
     const active = callParticipants.filter(p => p.todJoined).map(p => p.id);
@@ -2252,11 +1338,6 @@ function AppContent() {
   }, [callParticipants, currentRoom, todState, todLocalSpinning, todSpinPool]);
 
   // Spin the Wheel synced state
-  const [spinResult, setSpinResult] = useState<{ selectedId: string, angle: number, spunBy: string, timestamp: number } | null>(null);
-  const [spinCheckedIds, setSpinCheckedIds] = useState<string[]>([]);
-  const [spinPool, setSpinPool] = useState<string[]>([]);
-  const [spinLocalSpinning, setSpinLocalSpinning] = useState(false);
-
   // Header popover states
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
   const [roomJoinKey, setRoomJoinKey] = useState<string | null>(null);
@@ -2301,8 +1382,6 @@ function AppContent() {
       active = false;
     };
   }, [currentRoom, callParticipants]);
-  const isEvictedRef = useRef(false);
-
   // Whole-call Mini Mode (Zoom-like Call PiP) states
   const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
   const [isMiniModeActive, setIsMiniModeActive] = useState(false);
@@ -2357,11 +1436,6 @@ function AppContent() {
   // Shared Pomodoro Timer States (Default 25 focus / 5 break)
   const [pomodoroFocusLength, setPomodoroFocusLength] = useState(25);
   const [pomodoroBreakLength, setPomodoroBreakLength] = useState(5);
-  const [pomodoroMinutes, setPomodoroMinutes] = useState(25);
-  const [pomodoroSeconds, setPomodoroSeconds] = useState(0);
-  const [pomodoroIsRunning, setPomodoroIsRunning] = useState(false);
-  const [pomodoroPhase, setPomodoroPhase] = useState<'focus' | 'break'>('focus');
-
   // Session Target States
   const [targetInputText, setTargetInputText] = useState('');
   const [targetsList, setTargetsList] = useState<any[]>([]);
@@ -2631,28 +1705,9 @@ function AppContent() {
   const [looseIsRunning, setLooseIsRunning] = useState(false);
 
   // Guest Profile Identity State
-  const [guestName, setGuestName] = useState('');
-  const [guestColor, setGuestColor] = useState('');
-  const [guestInitials, setGuestInitials] = useState('');
-  const [guestPhotoURL, setGuestPhotoURL] = useState<string | null>(null);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [profileEditName, setProfileEditName] = useState('');
-  const [profileEditColor, setProfileEditColor] = useState('');
-  const [profileEditPhotoURL, setProfileEditPhotoURL] = useState('');
-
   // Spotlight view state
-  const [spotlightParticipantId, setSpotlightParticipantId] = useState<string | null>(null);
-
   const modalRef = useRef<HTMLDivElement>(null);
   const themePickerRef = useRef<HTMLDivElement>(null);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
-  const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
-  const hasSeenSelfInListRef = useRef(false);
-  const currentSessionIdRef = useRef<string | null>(null);
-  const isEnteringRoomRef = useRef<string | null>(null);
 
   const isUserAdmin = (u: any) => {
     const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
@@ -3063,13 +2118,6 @@ function AppContent() {
   };
 
   // Toast feedback trigger helper
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
-  };
-
   // Helper to extract room identifier (e.g. ielts9 from skulk.app/room/ielts9)
   const getRoomIdFromLink = (link?: string) => {
     if (!link) return '';
@@ -3085,21 +2133,6 @@ function AppContent() {
   };
 
   const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
-
-  const updateMySharing = async (fields: Record<string, unknown>) => {
-    const myId = getMyId();
-    const rid = roomDocId(currentRoom);
-    if (!myId || !rid) return;
-    try {
-      await updateDoc(doc(db, 'rooms', rid, 'participants', myId), fields);
-    } catch (e) {
-      console.warn('Failed to update sharing state:', e);
-    }
-  };
-
-  const clearMySharing = async () => {
-    await updateMySharing({ sharing: null, sharingYoutubeId: null, whiteboardData: '', whiteboardEditAllowed: false });
-  };
 
   const handleViewParticipantShare = (p: Participant) => {
     if (!p.sharing) return;
@@ -3124,136 +2157,6 @@ function AppContent() {
   //     </span>
   //   );
   // };
-
-  const leavePresence = async (roomIdToLeave: string, sessionIdToDelete?: string | null) => {
-    const myId = getMyId();
-    console.log("leavePresence called:", { roomIdToLeave, sessionIdToDelete, myId }, new Error().stack);
-    if (!myId || !roomIdToLeave) return;
-
-    const performLeave = async () => {
-      try {
-        const presenceDocRef = doc(db, 'rooms', roomIdToLeave, 'participants', myId);
-        
-        await runTransaction(db, async (transaction) => {
-          const snap = await transaction.get(presenceDocRef);
-          if (snap.exists()) {
-            const data = snap.data();
-            console.log("leavePresence transaction evaluate:", { storedSessionId: data.sessionId, sessionIdToDelete });
-            if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
-              console.log("leavePresence transaction deleting presence:", myId);
-
-              // 1. Perform all reads first
-              let roomSnap = null;
-              let userSnap = null;
-              const isAuthUser = user && user.uid === myId;
-              
-              if (isAuthUser) {
-                const roomRef = doc(db, 'rooms', roomIdToLeave);
-                const userRef = doc(db, 'users', myId);
-                roomSnap = await transaction.get(roomRef);
-                userSnap = await transaction.get(userRef);
-              }
-
-              // 2. Perform all writes second
-              transaction.delete(presenceDocRef);
-
-              if (isAuthUser) {
-                const roomName = (roomSnap && roomSnap.exists()) ? (roomSnap.data().name || 'Room') : 'Room';
-
-                const joinedAtStr = data.joinedAt || new Date().toISOString();
-                const leftAtStr = new Date().toISOString();
-                const joinedTime = new Date(joinedAtStr).getTime();
-                const leftTime = new Date(leftAtStr).getTime();
-                const durationMinutes = Math.max(0, Math.round((leftTime - joinedTime) / 60000));
-                
-                // Write session log document
-                const logId = `${roomIdToLeave}_${joinedTime}`;
-                const logRef = doc(db, 'users', myId, 'sessionLogs', logId);
-                transaction.set(logRef, {
-                  roomId: roomIdToLeave,
-                  roomName,
-                  joinedAt: joinedAtStr,
-                  leftAt: leftAtStr,
-                  durationMinutes,
-                  role: data.role || 'member'
-                });
-
-                // Update activity streak on user document
-                let currentStreak = 0;
-                let lastActiveDate = '';
-                
-                if (userSnap && userSnap.exists()) {
-                  const userData = userSnap.data();
-                  currentStreak = userData.currentStreak || 0;
-                  lastActiveDate = userData.lastActiveDate || '';
-                }
-
-                const today = new Date();
-                const todayStr = today.toLocaleDateString('en-CA');
-                const yesterday = new Date();
-                yesterday.setDate(today.getDate() - 1);
-                const yesterdayStr = yesterday.toLocaleDateString('en-CA');
-
-                if (lastActiveDate !== todayStr) {
-                  if (lastActiveDate === yesterdayStr) {
-                    currentStreak += 1;
-                  } else {
-                    currentStreak = 1;
-                  }
-                  lastActiveDate = todayStr;
-                }
-
-                const userRef = doc(db, 'users', myId);
-                transaction.set(userRef, {
-                  currentStreak,
-                  lastActiveDate
-                }, { merge: true });
-              }
-            } else {
-              console.log('leavePresence bypassed: presence belongs to a newer session (transaction).');
-            }
-          } else {
-            console.log("leavePresence transaction: presence doc does not exist.");
-          }
-        });
-
-        // Delete any signals associated with this user
-        try {
-          const signalsRef = collection(db, 'rooms', roomIdToLeave, 'signals');
-          const snapshot = await getDocs(signalsRef);
-          for (const docSnap of snapshot.docs) {
-            if (docSnap.id.includes(myId)) {
-              try {
-                // Delete candidates subcollection first
-                const candidatesRef = collection(db, 'rooms', roomIdToLeave, 'signals', docSnap.id, 'candidates');
-                const candSnap = await getDocs(candidatesRef);
-                for (const d of candSnap.docs) {
-                  try { await deleteDoc(d.ref); } catch (e) {}
-                }
-                await deleteDoc(docSnap.ref);
-              } catch (e) {}
-            }
-          }
-        } catch (e) {
-          console.warn("Skipping WebRTC signals cleanup (optional/absent):", e);
-        }
-        // Delete my join request doc if any exists
-        try {
-          await deleteDoc(doc(db, 'rooms', roomIdToLeave, 'joinRequests', myId));
-        } catch (e) {
-          console.warn("Failed to delete join request (optional/absent):", e);
-        }
-      } catch (e) {
-        console.error('Error removing presence document:', e);
-      }
-    };
-
-    globalPendingLeavePromise = (globalPendingLeavePromise || Promise.resolve())
-      .then(performLeave)
-      .catch(() => {});
-      
-    await globalPendingLeavePromise;
-  };
 
   const canJoin = async (targetRoom: Room) => {
     const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
@@ -3449,27 +2352,6 @@ function AppContent() {
         console.error('[DISCONNECT-DEBUG] enterCallRoom updateDoc error:', e);
       }
     }
-  };
-
-  const handleLeaveCall = () => {
-    isEvictedRef.current = true;
-    hasSeenSelfInListRef.current = false;
-    if (currentRoom) {
-      const prevRoomId = roomDocId(currentRoom);
-      console.log("[LEAVE EVENT] leavePresence triggered from handleLeaveCall, session:", currentSessionIdRef.current);
-      leavePresence(prevRoomId);
-      currentSessionIdRef.current = null;
-      setCurrentRoom(null);
-      setCallParticipants([]);
-      setChatMessages([]);
-      setSystemMessages([]);
-      isInitialLoadRef.current = true;
-      isChatInitialLoadRef.current = true;
-      setUnreadChatCount(0);
-      setViewingShare(null);
-      setLiveKitToken(null);
-    }
-    navigate('/');
   };
 
   const toggleMic = async () => {
@@ -3782,155 +2664,8 @@ function AppContent() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [currentRoom ? roomDocId(currentRoom) : null]);
 
-  // Real-time synchronization of call participants list inside calls
-  useEffect(() => {
-    if (!currentRoom) return;
-    
-    hasSeenSelfInListRef.current = false; // Reset on every subscription/auth change to block race conditions!
-    const listenerMyId = getMyId();
-    const rid = roomDocId(currentRoom);
-    const presenceRef = collection(db, 'rooms', rid, 'participants');
-    const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
-      const myId = listenerMyId;
-      if (myId !== getMyId()) {
-        console.log("Stale snapshot listener: ignoring participant update for old ID", { listenerMyId, currentMyId: getMyId() });
-        return;
-      }
-      
-      snapshot.docChanges().forEach((change) => {
-        const docId = change.doc.id;
-        const data = change.doc.data();
-        const timestamp = new Date().toISOString();
-        const cleanName = data.name ? data.name.replace(' (You)', '') : 'Someone';
-        
-        // Helper to format local time as e.g. "3:42 PM"
-        const getFormattedTime = () => {
-          return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        };
-
-        if (change.type === 'added') {
-          console.log(`[PRESENCE EVENT] Participant ADDED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, JoinTime=${data.joinedAt || 'none'}, EventTime=${timestamp}`);
-          if (!isInitialLoadRef.current) {
-            const timeStr = getFormattedTime();
-            const displayName = docId === myId ? 'You' : cleanName;
-            setSystemMessages(prev => [
-              ...prev,
-              {
-                id: `system_join_${docId}_${Date.now()}`,
-                text: `${displayName} joined · ${timeStr}`,
-                createdAt: timestamp
-              }
-            ]);
-            if (!isChatActiveRef.current) {
-              setUnreadChatCount(prev => prev + 1);
-            }
-          }
-        } else if (change.type === 'modified') {
-          console.log(`[PRESENCE EVENT] Participant MODIFIED: ID=${docId}, Name=${data.name}, SessionID=${data.sessionId || 'none'}, EventTime=${timestamp}`);
-        } else if (change.type === 'removed') {
-          console.log(`[PRESENCE EVENT] Participant REMOVED: ID=${docId}, Name=${data.name}, EventTime=${timestamp}`);
-          if (!isInitialLoadRef.current) {
-            const timeStr = getFormattedTime();
-            const displayName = docId === myId ? 'You' : cleanName;
-            setSystemMessages(prev => [
-              ...prev,
-              {
-                id: `system_leave_${docId}_${Date.now()}`,
-                text: `${displayName} left · ${timeStr}`,
-                createdAt: timestamp
-              }
-            ]);
-            if (!isChatActiveRef.current) {
-              setUnreadChatCount(prev => prev + 1);
-            }
-          }
-        }
-      });
-
-      const list = snapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        const isMe = docSnap.id === myId;
-        
-        return {
-          id: docSnap.id,
-          name: isMe ? `${data.name} (You)` : data.name,
-          initials: data.initials,
-          color: data.color,
-          photoURL: data.photoURL,
-          isMuted: data.isMuted ?? false,
-          isCamOff: data.isCamOff ?? false,
-          isSpeaking: false,
-          isPinned: false,
-          role: data.role || (currentRoom.creatorId === docSnap.id ? 'host' : 'member'),
-          sharing: data.sharing || null,
-          sharingYoutubeId: data.sharingYoutubeId || null,
-          whiteboardData: data.whiteboardData,
-          mutedBy: data.mutedBy || null,
-          camOffBy: data.camOffBy || null,
-          todJoined: data.todJoined ?? false,
-          todPending: data.todPending ?? false,
-          todRequestedSpin: data.todRequestedSpin || null,
-          todRequestedChoice: data.todRequestedChoice || null,
-          todRequestedReset: data.todRequestedReset || null,
-          ytPlaying: data.ytPlaying,
-          ytTime: data.ytTime,
-          ytUpdateTimestamp: data.ytUpdateTimestamp,
-          ytSpeed: data.ytSpeed,
-          whiteboardEditAllowed: data.whiteboardEditAllowed ?? false,
-          micOn: data.micOn ?? true,
-          camOn: data.camOn ?? true,
-          micRestricted: data.micRestricted ?? false,
-          camRestricted: data.camRestricted ?? false
-        } as Participant;
-      });
-
-      // Kick detection: Only trigger if we have seen ourselves in the active list first to prevent join race conditions
-      const meStillInRoom = list.some(p => p.id === myId);
-      console.log("Kick check snapshot list:", {
-        myId,
-        meStillInRoom,
-        hasSeenSelf: hasSeenSelfInListRef.current,
-        listIds: list.map(p => p.id)
-      });
-      if (myId && meStillInRoom) {
-        hasSeenSelfInListRef.current = true;
-      }
-      
-      if (myId && hasSeenSelfInListRef.current && !meStillInRoom) {
-        console.log("Kicking user out! meStillInRoom is false, hasSeenSelf is true.");
-        showToast("❌ You have been removed from the room by a host.");
-        handleLeaveCall();
-        return;
-      }
-      
-      setCallParticipants(list);
-      isInitialLoadRef.current = false;
-    }, (error) => {
-      console.warn("Firestore call presence subscription failed, falling back to local user presence:", error);
-      const myId = getMyId();
-      setCallParticipants([
-        {
-          id: myId,
-          name: `${user ? user.displayName || 'Google User' : guestName} (You)`,
-          initials: guestInitials,
-          color: guestColor,
-          photoURL: user ? user.photoURL : null,
-          isMuted: isMicMutedRef.current,
-          isCamOff: isCamOffRef.current,
-          isSpeaking: false,
-          isPinned: false,
-          role: determineRole(currentRoom.creatorId),
-          micOn: !isMicMutedRef.current,
-          camOn: !isCamOffRef.current,
-          micRestricted: false,
-          camRestricted: false
-        }
-      ]);
-    });
-    
-    return () => unsubscribe();
-  }, [currentRoom ? roomDocId(currentRoom) : null, user, guestId]);
   // Synchronize remote mute actions with local microphone state
+  
   useEffect(() => {
     if (!currentRoom) return;
     const myId = getMyId();
@@ -4050,298 +2785,8 @@ function AppContent() {
       console.warn("Failed to deny request:", e);
     }
   };
-  // Real-time synchronization of room document updates (Pomodoro, etc.)
-  useEffect(() => {
-    if (!currentRoom) return;
-    
-    const roomRef = doc(db, 'rooms', roomDocId(currentRoom));
-    const unsubscribe = onSnapshot(roomRef, (docSnap) => {
-      if (!docSnap.exists()) {
-        showToast("⚠️ This room has been closed by the host.");
-        handleLeaveCall();
-        return;
-      }
-      const data = docSnap.data();
-      
-      // Update room metadata in state to sync Firestore room name
-      setCurrentRoom(prev => {
-        if (!prev) return null;
-        if (prev.name === data.name && prev.creatorName === data.creatorName && prev.creatorEmail === data.creatorEmail && prev.type === data.type) {
-          return prev;
-        }
-        return {
-          ...prev,
-          name: data.name || prev.name,
-          creatorName: data.creatorName || prev.creatorName,
-          creatorEmail: data.creatorEmail || prev.creatorEmail,
-          type: data.type || prev.type
-        };
-      });
-
-      // Sync Pomodoro (shared room tool — still room-level)
-      if (data.pomodoroIsRunning !== undefined) {
-        setPomodoroIsRunning(data.pomodoroIsRunning);
-      }
-      if (data.pomodoroMinutes !== undefined && !pomodoroIsRunning) {
-        setPomodoroMinutes(data.pomodoroMinutes);
-      }
-      if (data.pomodoroSeconds !== undefined && !pomodoroIsRunning) {
-        setPomodoroSeconds(data.pomodoroSeconds);
-      }
-      if (data.pomodoroPhase !== undefined) {
-        setPomodoroPhase(data.pomodoroPhase);
-      }
-
-      // Sync new tools tab fields
-      if (data.allowFunTools !== undefined) {
-        setAllowFunTools(data.allowFunTools);
-        if (!data.allowFunTools) {
-          // If fun tools are disabled, force close any active fun tool detail screen
-          setActiveToolDetail(prev => (prev === 'games' || prev === 'truthordare') ? 'none' : prev);
-          setExpandedTool(prev => (prev === 'truthordare') ? 'none' : prev);
-        }
-      }
-      if (data.todSpinResult !== undefined) {
-        setTodSpinResult(data.todSpinResult);
-      }
-      if (data.todSpinPool !== undefined) {
-        setTodSpinPool(data.todSpinPool);
-      }
-      if (data.todState !== undefined) {
-        setTodState(data.todState);
-      }
-      if (data.todChoice !== undefined) {
-        setTodChoice(data.todChoice);
-      }
-      if (data.todText !== undefined) {
-        setTodText(data.todText);
-      }
-      if (data.todSelectedId !== undefined) {
-        setTodSelectedId(data.todSelectedId);
-      }
-      if (data.spinResult !== undefined) {
-        setSpinResult(data.spinResult);
-      }
-      if (data.spinCheckedIds !== undefined) {
-        setSpinCheckedIds(data.spinCheckedIds);
-      }
-      if (data.spinPool !== undefined) {
-        setSpinPool(data.spinPool);
-      }
-    }, (error) => {
-      console.warn("Room document subscription failed:", error);
-    });
-    
-    return () => unsubscribe();
-  }, [currentRoom ? roomDocId(currentRoom) : null, pomodoroIsRunning]);
-
-  const redrawCanvasFromStrokes = (strokes: any[], activeStroke?: any) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw completed or other strokes
-    strokes.forEach(stroke => {
-      if (activeStroke && stroke.id === activeStroke.id) return;
-      if (!stroke.points || stroke.points.length === 0) return;
-      
-      ctx.beginPath();
-      const startX = stroke.points[0][0] * canvas.width;
-      const startY = stroke.points[0][1] * canvas.height;
-      ctx.moveTo(startX, startY);
-      
-      for (let i = 1; i < stroke.points.length; i++) {
-        const x = stroke.points[i][0] * canvas.width;
-        const y = stroke.points[i][1] * canvas.height;
-        ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-    });
-    
-    // Draw active stroke on top
-    if (activeStroke && activeStroke.points && activeStroke.points.length > 0) {
-      ctx.beginPath();
-      const startX = activeStroke.points[0][0] * canvas.width;
-      const startY = activeStroke.points[0][1] * canvas.height;
-      ctx.moveTo(startX, startY);
-      
-      for (let i = 1; i < activeStroke.points.length; i++) {
-        const x = activeStroke.points[i][0] * canvas.width;
-        const y = activeStroke.points[i][1] * canvas.height;
-        ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = activeStroke.color;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-    }
-  };
-
-  // Sync whiteboard canvas from the participant being viewed
-  useEffect(() => {
-    if (!viewingShare || viewingShare.type !== 'whiteboard' || !currentRoom) return;
-
-    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
-    const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        if (viewingShare.participantId !== getMyId()) {
-          setViewingShare(null);
-          showToast('Whiteboard presenter has left. Ending session.');
-        }
-        return;
-      }
-      const data = snapshot.data();
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      if (data.whiteboardData !== undefined) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          if (!data.whiteboardData) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            setWhiteboardStrokes([]);
-          } else if (data.whiteboardData.startsWith('[')) {
-            try {
-              const parsed = JSON.parse(data.whiteboardData);
-              setWhiteboardStrokes(parsed);
-              redrawCanvasFromStrokes(parsed, activeStrokeRef.current);
-            } catch (e) {
-              console.warn("Failed to parse whiteboard strokes:", e);
-            }
-          } else {
-            const img = new Image();
-            img.onload = () => {
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            };
-            img.src = data.whiteboardData;
-          }
-        }
-      }
-      // Close view if sharer stopped sharing
-      if (!data.sharing && viewingShare.participantId !== getMyId()) {
-        setViewingShare(null);
-      }
-    });
-    return () => unsubscribe();
-  }, [viewingShare, currentRoom, user, guestId]);
-
-  // Sync YouTube video ID when viewing someone's share
-  useEffect(() => {
-    if (!viewingShare || viewingShare.type !== 'youtube' || !currentRoom) return;
-
-    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
-    const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        if (viewingShare.participantId !== getMyId()) {
-          setViewingShare(null);
-          showToast('YouTube presenter has left. Ending session.');
-        }
-        return;
-      }
-      const data = snapshot.data();
-      if (data.sharingYoutubeId) {
-        setViewingShare(prev => prev ? { ...prev, youtubeVideoId: data.sharingYoutubeId } : null);
-      }
-      if (!data.sharing && viewingShare.participantId !== getMyId()) {
-        setViewingShare(null);
-      }
-    });
-    return () => unsubscribe();
-  }, [viewingShare?.participantId, viewingShare?.type, currentRoom, user, guestId]);
-
-  // Sync screen share state when viewing someone's share
-  useEffect(() => {
-    if (!viewingShare || viewingShare.type !== 'screen' || !currentRoom) return;
-
-    const partRef = doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId);
-    const unsubscribe = onSnapshot(partRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        if (viewingShare.participantId !== getMyId()) {
-          setViewingShare(null);
-          showToast('Screen presenter has left. Ending session.');
-        }
-        return;
-      }
-      const data = snapshot.data();
-      if (!data.sharing && viewingShare.participantId !== getMyId()) {
-        setViewingShare(null);
-      }
-    });
-    return () => unsubscribe();
-  }, [viewingShare?.participantId, viewingShare?.type, currentRoom, user, guestId]);
-
-  // Real-time synchronization of chat messages inside calls
-  useEffect(() => {
-    if (!currentRoom) return;
-    
-    const messagesRef = collection(db, 'rooms', roomDocId(currentRoom), 'messages');
-    
-    const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
-      const list = snapshot.docs.map(docSnap => docSnap.data() as ChatMessage);
-      
-      // Filter out messages sent before the local user joined or refreshed this session
-      const joinTime = localJoinTimeRef.current || Date.now();
-      const filtered = list.filter(msg => {
-        if (!msg.createdAt) return true;
-        return new Date(msg.createdAt).getTime() >= joinTime;
-      });
-
-      // Sort client-side by createdAt to prevent query index requirements
-      filtered.sort((a, b) => {
-        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return timeA - timeB;
-      });
-      setChatMessages(filtered);
-    }, (error) => {
-      console.warn("Firestore chat subscription failed:", error);
-    });
-    
-    return () => unsubscribe();
-  }, [currentRoom]);
-
-  // Auto-scroll chat to bottom
-  const prevMessagesLengthRef = useRef(0);
-  const prevTabRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const currentLength = chatMessages.length + systemMessages.length;
-    const prevLength = prevMessagesLengthRef.current;
-    
-    if (callTab === 'chat' && chatEndRef.current) {
-      const container = chatEndRef.current.parentElement;
-      if (container) {
-        const isTabSwitch = prevTabRef.current !== 'chat' && prevTabRef.current !== null;
-        const isNewMessage = currentLength > prevLength && prevLength > 0;
-        
-        if (isTabSwitch || prevLength === 0) {
-          setTimeout(() => {
-            chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-          }, 50);
-        } else if (isNewMessage) {
-          const threshold = 150;
-          const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
-          if (isNearBottom) {
-            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-          }
-        }
-      }
-    }
-    
-    prevTabRef.current = callTab;
-    prevMessagesLengthRef.current = currentLength;
-  }, [chatMessages, systemMessages, callTab]);
-
   // Clean up screen presenting tracks when leaving call
+  
   useEffect(() => {
     if (!currentRoom) {
       if (screenShareStream) {
@@ -4353,194 +2798,7 @@ function AppContent() {
   }, [currentRoom, screenShareStream]);
 
 
-  const syncCurrentStrokesToFirestore = async () => {
-    if (!activeStrokeRef.current || !currentRoom || !viewingShare || viewingShare.type !== 'whiteboard' || !canDrawOnWhiteboard) return;
-    const otherStrokes = whiteboardStrokes.filter(s => s.id !== activeStrokeRef.current.id);
-    const updatedStrokes = [...otherStrokes, activeStrokeRef.current];
-    try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { 
-        whiteboardData: JSON.stringify(updatedStrokes) 
-      });
-    } catch (e) {
-      console.warn("Failed to sync live whiteboard:", e);
-    }
-  };
-
-  // Resize canvas when whiteboard view opens or draw color changes
-  useEffect(() => {
-    if (viewingShare?.type === 'whiteboard' && canvasRef.current) {
-      const handleResize = () => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        canvas.width = canvas.parentElement?.clientWidth || 800;
-        canvas.height = canvas.parentElement?.clientHeight || 500;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.lineCap = 'round';
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = drawColor;
-          redrawCanvasFromStrokes(whiteboardStrokes, activeStrokeRef.current);
-        }
-      };
-
-      // Run immediately
-      handleResize();
-
-      // Run after a short delay to allow DOM transition/reflow to settle
-      const timer = setTimeout(handleResize, 100);
-
-      window.addEventListener('resize', handleResize);
-      return () => {
-        clearTimeout(timer);
-        window.removeEventListener('resize', handleResize);
-      };
-    }
-  }, [viewingShare?.type, drawColor, whiteboardStrokes]);
-
-  // Mouse drawing handlers
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / canvas.width;
-    const y = (e.clientY - rect.top) / canvas.height;
-    
-    ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-    ctx.strokeStyle = drawColor;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    setIsDrawing(true);
-    
-    activeStrokeRef.current = {
-      id: Math.random().toString(36).substr(2, 9),
-      color: drawColor,
-      points: [[x, y]]
-    };
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !activeStrokeRef.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const localX = e.clientX - rect.left;
-    const localY = e.clientY - rect.top;
-    
-    ctx.lineTo(localX, localY);
-    ctx.stroke();
-    
-    const x = localX / canvas.width;
-    const y = localY / canvas.height;
-    activeStrokeRef.current.points.push([x, y]);
-    
-    const now = Date.now();
-    if (now - lastWhiteboardWriteTimeRef.current > 150) {
-      lastWhiteboardWriteTimeRef.current = now;
-      syncCurrentStrokesToFirestore();
-    }
-  };
-
-  const stopDrawing = async () => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    
-    if (activeStrokeRef.current) {
-      const otherStrokes = whiteboardStrokes.filter(s => s.id !== activeStrokeRef.current.id);
-      const updatedStrokes = [...otherStrokes, activeStrokeRef.current];
-      activeStrokeRef.current = null;
-      setWhiteboardStrokes(updatedStrokes);
-      
-      if (currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
-        try {
-          await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { 
-            whiteboardData: JSON.stringify(updatedStrokes) 
-          });
-        } catch (e) {
-          console.warn("Failed to commit whiteboard stroke:", e);
-        }
-      }
-    }
-  };
-
-  // Touch drawing handlers (for mobile support)
-  const startDrawingTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) / canvas.width;
-    const y = (touch.clientY - rect.top) / canvas.height;
-    
-    ctx.beginPath();
-    ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
-    ctx.strokeStyle = drawColor;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    setIsDrawing(true);
-    
-    activeStrokeRef.current = {
-      id: Math.random().toString(36).substr(2, 9),
-      color: drawColor,
-      points: [[x, y]]
-    };
-  };
-
-  const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !activeStrokeRef.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const localX = touch.clientX - rect.left;
-    const localY = touch.clientY - rect.top;
-    
-    ctx.lineTo(localX, localY);
-    ctx.stroke();
-    
-    const x = localX / canvas.width;
-    const y = localY / canvas.height;
-    activeStrokeRef.current.points.push([x, y]);
-    
-    const now = Date.now();
-    if (now - lastWhiteboardWriteTimeRef.current > 150) {
-      lastWhiteboardWriteTimeRef.current = now;
-      syncCurrentStrokesToFirestore();
-    }
-  };
-
-  const clearCanvas = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-    setWhiteboardStrokes([]);
-    activeStrokeRef.current = null;
-    showToast('Whiteboard cleared');
-    if (currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
-      try {
-        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { whiteboardData: '' });
-      } catch (e) {
-        console.warn("Failed to clear whiteboard in Firestore:", e);
-      }
-    }
-  };
+  
 
   // Screen share trigger
   const startScreenShare = async () => {
@@ -5705,13 +3963,6 @@ function AppContent() {
   };
 
   // Local chat submission
-  const handleSendChatMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatMessageText.trim()) return;
-    await sendChatMessage(chatMessageText);
-    setChatMessageText('');
-  };
-
   // Co-host control triggers (Mute, Pin, Remove)
   const handleParticipantMuteToggle = async (id: string, name: string) => {
     if (!currentRoom) return;
@@ -5939,575 +4190,6 @@ function AppContent() {
     if (count <= 6) return { columns: 'repeat(3, 1fr)', rows: 'repeat(2, 1fr)' };
     return { columns: 'repeat(3, 1fr)', rows: 'repeat(3, 1fr)' };
   };
-
-  const renderParticipantTile = (p: Participant, isThumbnail: boolean = false) => {
-    const isUser = p.id === getMyId();
-    const showMuted = isUser ? isMicMuted : p.isMuted;
-    const showCamOff = isUser ? isCamOff : p.isCamOff;
-    const isSpeaking = p.isSpeaking && !showMuted;
-
-    // If it's a thumbnail strip tile:
-    if (isThumbnail) {
-      const isSpotlightActive = p.id === spotlightParticipantId;
-      return (
-        <div 
-          key={p.id} 
-          className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''} ${showCamOff ? 'camera-off' : ''}`}
-          onClick={() => setSpotlightParticipantId(p.id)}
-          style={{ 
-            cursor: 'pointer',
-            position: 'relative',
-            width: '120px',
-            height: '75px',
-            minWidth: '120px',
-            borderRadius: '6px',
-            overflow: 'hidden',
-            backgroundColor: p.color,
-            boxSizing: 'border-box',
-            border: isSpotlightActive ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
-            boxShadow: isSpotlightActive ? '0 0 10px var(--primary-color)' : 'none',
-            flexShrink: 0
-          }}
-        >
-          {p.sharing === 'youtube' ? (
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
-              animation: 'pulse 2s infinite',
-              zIndex: 2
-            }}>
-              <span style={{ fontSize: '16px', color: 'var(--primary-color)' }}>▶</span>
-            </div>
-          ) : (
-            <>
-              <div className="tile-video-wrapper">
-                {!(isUser && cameraError) && (
-                  <ParticipantVideo participantId={p.id} objectFit="cover" />
-                )}
-              </div>
-              <div className="tile-avatar-wrapper">
-                {p.photoURL ? (
-                  <img 
-                    src={p.photoURL} 
-                    alt={p.name} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '16px', fontWeight: 'bold', color: '#fff' }}>
-                    {p.initials}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Micro status indicator (Muted status) */}
-          <div style={{
-            position: 'absolute',
-            top: '4px',
-            right: '4px',
-            zIndex: 10,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            borderRadius: '50%',
-            width: '16px',
-            height: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            {showMuted ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-              </svg>
-            )}
-          </div>
-          
-          {/* Small overlay name tag */}
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: 'rgba(0, 0, 0, 0.65)',
-            padding: '3px 6px',
-            fontSize: '9px',
-            fontWeight: 600,
-            color: '#fff',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            zIndex: 5
-          }}>
-            {p.name.replace(' (You)', '')}
-          </div>
-        </div>
-      );
-    }
-    
-    // Check if we should do a media sharing visual state takeover
-    const showMediaTakeover = p.sharing === 'youtube';
-    
-    return (
-      <div 
-        key={p.id} 
-        className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${showCamOff ? 'camera-off' : ''}`}
-        onClick={() => {
-          if (p.sharing) {
-            handleViewParticipantShare(p);
-          } else if (!spotlightParticipantId) {
-            setSpotlightParticipantId(p.id);
-          }
-        }}
-        style={{ 
-          cursor: (p.sharing || !spotlightParticipantId) ? 'pointer' : 'default',
-          // Show container border glow if they are sharing media
-          ...p.sharing === 'youtube' ? {
-            boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
-            border: '2.5px solid var(--primary-color)'
-          } : {},
-          // Keep tiles equal size, prevent overflow/overlap, and auto-shrink to fit in gallery view
-          ...(!isThumbnail && isGalleryView) ? {
-            width: '100%',
-            height: '100%',
-            maxWidth: '100%',
-            maxHeight: '100%',
-            aspectRatio: '16/10'
-          } : {}
-        }}
-      >
-        {isGalleryView && !isThumbnail ? (
-          // Gallery Layout or camera is ON: Full Card Video/Avatar
-          showMediaTakeover ? (
-            /* Takeover card for gallery layout - beautifully contained */
-            <div 
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                padding: '12px',
-                background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                border: '2px dashed var(--primary-color)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                animation: 'pulse 2s infinite'
-              }}>
-                <span style={{ fontSize: '18px', color: 'var(--primary-color)', marginLeft: '3px' }}>▶</span>
-              </div>
-              <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--primary-color)', letterSpacing: '0.1em', textTransform: 'uppercase', textAlign: 'center' }}>
-                Watching Together
-              </span>
-              <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>Click to join</span>
-            </div>
-          ) : (
-            <>
-              {/* Keep video element in DOM */}
-              <div className="tile-video-wrapper">
-                {isUser && cameraError ? (
-                  // Refined camera error display: show PFP/initials background + a small centered retry box!
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                    {p.photoURL ? (
-                      <img 
-                        src={p.photoURL} 
-                        alt={p.name} 
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
-                    )}
-                    <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                      }}
-                      style={{
-                        position: 'absolute',
-                        padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
-                        border: '1px solid var(--border-color)', borderRadius: '6px',
-                        cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
-                      }}
-                    >
-                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
-                      <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
-                    </div>
-                  </div>
-                ) : (
-                  <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
-                )}
-              </div>
-              
-              {/* Keep large avatar circle in DOM */}
-              <div 
-                className="participant-avatar-large" 
-                style={{ 
-                  backgroundColor: p.color, 
-                  cursor: p.sharing ? 'pointer' : 'default',
-                  position: 'relative',
-                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                  overflow: 'hidden',
-                  width: '96px',
-                  height: '96px',
-                  borderRadius: '50%',
-                  fontSize: '32px',
-                  marginBottom: '0'
-                }}
-                onClick={() => {
-                  if (p.sharing) {
-                    handleViewParticipantShare(p);
-                  }
-                }}
-              >
-                {p.photoURL ? (
-                  <img 
-                    src={p.photoURL} 
-                    alt={p.name} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  p.initials
-                )}
-              </div>
-
-              {p.sharing && (
-                <div className="sharing-badge-overlay" style={{
-                  position: 'absolute',
-                  bottom: '12px',
-                  right: '12px',
-                  backgroundColor: 'var(--primary-color)',
-                  color: '#0f1013',
-                  borderRadius: '50%',
-                  width: '22px',
-                  height: '22px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  border: '2px solid var(--card-bg, #1a1c23)',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                  zIndex: 10
-                }} title={`Sharing ${p.sharing} - click to view`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleViewParticipantShare(p);
-                  }}
-                >
-                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                </div>
-              )}
-            </>
-          )
-        ) : (
-          // Compact Grid Layout OR Thumbnail view: Floating Avatar
-          <div 
-            className="participant-avatar-large" 
-            style={{ 
-              backgroundColor: p.color, 
-              cursor: p.sharing ? 'pointer' : 'default',
-              position: 'relative',
-              boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-              border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-              overflow: 'hidden',
-              background: p.sharing === 'youtube' ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)' : undefined,
-              // Shrink for thumbnail strip
-              ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
-            }}
-          >
-            {p.sharing === 'youtube' ? (
-              /* Pulsing play icon inside circular avatar circle */
-              <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                animation: 'pulse 2s infinite',
-                zIndex: 2
-              }}>
-                <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
-              </div>
-            ) : (
-              <>
-                <div className="tile-video-wrapper">
-                  {!(isUser && cameraError) && (
-                    <ParticipantVideo participantId={p.id} />
-                  )}
-                </div>
-                <div className="tile-avatar-wrapper">
-                  {p.photoURL ? (
-                    <img 
-                      src={p.photoURL} 
-                      alt={p.name} 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="tile-avatar-initials">{p.initials}</span>
-                  )}
-                </div>
-              </>
-            )}
-            
-            {/* Clickable Retry warning indicator in compact view */}
-            {isUser && !showCamOff && cameraError && (
-              <div 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                }}
-                style={{
-                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center', zIndex: 15,
-                  cursor: 'pointer'
-                }} 
-                title="Camera error - check hardware switch and click to retry"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
-                  <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
-                  <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
-                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
-                </svg>
-                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
-              </div>
-            )}
-  
-            {p.sharing && (
-              <div className="sharing-badge-overlay" style={{
-                position: 'absolute',
-                bottom: '-6px',
-                right: '-6px',
-                backgroundColor: 'var(--primary-color)',
-                color: '#0f1013',
-                borderRadius: '50%',
-                width: '22px',
-                height: '22px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                border: '2px solid var(--card-bg, #1a1c23)',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                zIndex: 10
-              }} title={`Sharing ${p.sharing} - click to view`}>
-                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Name Tag + Muted Status Overlay */}
-        {!isThumbnail && (
-          <div className="participant-info-overlay">
-            <div className="participant-name-tag" style={{ gap: '6px' }}>
-              <span>{p.name}</span>
-              {p.role && p.role !== 'member' && (
-                <span className={`role-tag-${p.role}`} style={{
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  textTransform: 'uppercase',
-                  border: '1px solid',
-                  lineHeight: '1.2',
-                  ...p.role === 'admin' ? {
-                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                    borderColor: 'var(--primary-color, #f1c40f)',
-                    color: 'var(--primary-color, #f1c40f)'
-                  } : p.role === 'host' ? {
-                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                    borderColor: '#3b82f6',
-                    color: '#3b82f6'
-                  } : {
-                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                    borderColor: '#10b981',
-                    color: '#10b981'
-                  }
-                }}>
-                  {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-                </span>
-              )}
-            </div>
-            <div className={`tile-mic-badge ${showMuted ? 'muted' : 'active'}`}>
-              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
-              </svg>
-              <svg className="tile-icon-active" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="22"></line>
-              </svg>
-            </div>
-          </div>
-        )}
-  
-        {/* Host Actions Hover Trigger Menu */}
-        {!isThumbnail && !isUser && (callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
-                                     callParticipants.find(part => part.id === getMyId())?.role === 'host' || 
-                                     callParticipants.find(part => part.id === getMyId())?.role === 'cohost') && (
-          <div>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveMenuParticipantId(activeMenuParticipantId === p.id ? null : p.id);
-              }}
-              className="tile-actions-trigger" 
-              aria-label="Participant options"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="1"></circle>
-                <circle cx="12" cy="5" r="1"></circle>
-                <circle cx="12" cy="19" r="1"></circle>
-              </svg>
-            </button>
-            
-            {/* Option Dropdown List */}
-            {activeMenuParticipantId === p.id && (
-              <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }} onClick={e => e.stopPropagation()}>
-                {/* Mute action */}
-                {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                  <button 
-                    onClick={() => handleParticipantMuteToggle(p.id, p.name)} 
-                    className="tile-menu-item"
-                  >
-                    {p.isMuted ? 'Unmute' : 'Mute'}
-                  </button>
-                )}
-                
-                {/* Camera off action */}
-                {checkCanMute(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                  <button 
-                    onClick={() => handleParticipantCameraToggle(p.id, p.name)} 
-                    className="tile-menu-item"
-                  >
-                    {p.isCamOff ? 'Turn camera on' : 'Turn camera off'}
-                  </button>
-                )}
-                
-                
-                {/* Role Promotion/Demotion Actions */}
-                {callParticipants.find(part => part.id === getMyId())?.role === 'admin' && (
-                  <>
-                    {p.role !== 'host' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'host')} 
-                        className="tile-menu-item"
-                      >
-                        Make Host
-                      </button>
-                    )}
-                    {p.role !== 'cohost' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
-                        className="tile-menu-item"
-                      >
-                        Make Co-host
-                      </button>
-                    )}
-                    {p.role !== 'member' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'member')} 
-                        className="tile-menu-item"
-                      >
-                        Demote to Member
-                      </button>
-                    )}
-                  </>
-                )}
-  
-                {callParticipants.find(part => part.id === getMyId())?.role === 'host' && (
-                  <>
-                    {p.role !== 'host' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'host')} 
-                        className="tile-menu-item"
-                      >
-                        Make Host (Transfer)
-                      </button>
-                    )}
-                    {p.role === 'member' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'cohost')} 
-                        className="tile-menu-item"
-                      >
-                        Make Co-host
-                      </button>
-                    )}
-                    {p.role === 'cohost' && (
-                      <button 
-                        onClick={() => handleParticipantRoleChange(p.id, 'member')} 
-                        className="tile-menu-item"
-                      >
-                        Demote to Member
-                      </button>
-                    )}
-                  </>
-                )}
-  
-                {/* Kick action */}
-                {checkCanKick(callParticipants.find(part => part.id === getMyId())?.role || 'member', p.role || 'member') && (
-                  <button 
-                    onClick={() => handleParticipantRemove(p.id, p.name)} 
-                    className="tile-menu-item" 
-                    style={{ color: '#ef4444' }}
-                  >
-                    Kick out
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const myId = getMyId();
-  const whiteboardPresenter = (viewingShare && viewingShare.type === 'whiteboard') ? callParticipants.find(p => p.id === viewingShare.participantId) : null;
-  const isWhiteboardPresenter = (viewingShare && viewingShare.type === 'whiteboard') && viewingShare.participantId === myId;
-  const canDrawOnWhiteboard = isWhiteboardPresenter || (whiteboardPresenter?.whiteboardEditAllowed ?? false);
 
   // Filtered rooms based on name search
   const filteredRooms = rooms.filter(room => {
@@ -6903,398 +4585,6 @@ function AppContent() {
             </div>
           )}
         </div>
-      </div>
-    );
-  };
-
-  const renderWheelSVG = (
-    spinParticipants: Participant[],
-    angle: number,
-    size: number,
-    isExpanded: boolean,
-    onSpin: () => void
-  ) => {
-    const cx = size / 2;
-    const cy = size / 2;
-    const radius = size * 0.42;
-    const n = spinParticipants.length;
-    const segmentAngle = n > 0 ? 360 / n : 360;
-
-    return (
-      <div className="wheel-outer-wrapper" style={{ width: size, height: size }}>
-        <div className="wheel-pointer" style={{ top: isExpanded ? '-12px' : '-8px' }}>
-          <svg width={isExpanded ? 28 : 20} height={isExpanded ? 28 : 20} viewBox="0 0 24 24" fill="var(--primary-color)" stroke="#fff" strokeWidth="2">
-            <polygon points="12,24 4,8 20,8" />
-          </svg>
-        </div>
-
-        {n > 0 ? (
-          <svg 
-            width={size} 
-            height={size} 
-            viewBox={`0 0 ${size} ${size}`} 
-            style={{ 
-              transform: `rotate(${angle}deg)`, 
-              transition: 'transform 4s cubic-bezier(0.1, 0.8, 0.1, 1)' 
-            }}
-          >
-            {spinParticipants.map((p, idx) => {
-              const startAngle = idx * segmentAngle;
-              const endAngle = (idx + 1) * segmentAngle;
-              
-              const x1 = cx + radius * Math.cos((startAngle - 90) * Math.PI / 180);
-              const y1 = cy + radius * Math.sin((startAngle - 90) * Math.PI / 180);
-              const x2 = cx + radius * Math.cos((endAngle - 90) * Math.PI / 180);
-              const y2 = cy + radius * Math.sin((endAngle - 90) * Math.PI / 180);
-              
-              const largeArcFlag = segmentAngle > 180 ? 1 : 0;
-              const pathData = `
-                M ${cx} ${cy}
-                L ${x1} ${y1}
-                A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}
-                Z
-              `;
-              
-              const textAngle = startAngle + segmentAngle / 2;
-              const textRadius = radius * 0.65;
-              const tx = cx + textRadius * Math.cos((textAngle - 90) * Math.PI / 180);
-              const ty = cy + textRadius * Math.sin((textAngle - 90) * Math.PI / 180);
-
-              return (
-                <g key={p.id}>
-                  <path d={pathData} fill={p.color || '#3b82f6'} stroke="rgba(0,0,0,0.15)" strokeWidth="1.5" />
-                  <text 
-                    x={tx} 
-                    y={ty} 
-                    fill="#fff" 
-                    fontSize={isExpanded ? 11 : 9} 
-                    fontWeight="800" 
-                    textAnchor="middle" 
-                    transform={`rotate(${textAngle}, ${tx}, ${ty})`}
-                  >
-                    {p.initials || p.name.substring(0, 2)}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-        ) : (
-          <div className="wheel-empty-state">No participants checked</div>
-        )}
-
-        <button 
-          type="button"
-          onClick={onSpin} 
-          className="wheel-center-button"
-          style={{
-            width: isExpanded ? '64px' : '44px',
-            height: isExpanded ? '64px' : '44px',
-            fontSize: isExpanded ? '12px' : '10px',
-          }}
-        >
-          SPIN
-        </button>
-      </div>
-    );
-  };
-
-  const renderTruthOrDareUI = (isExpanded: boolean) => {
-    const size = isExpanded ? 320 : 180;
-    const myId = getMyId();
-    const myPresence = callParticipants.find(p => p.id === myId);
-    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
-
-    const activeIds = todActiveIds.filter(id => callParticipants.some(p => p.id === id));
-    const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
-
-    const canDecide = todSelectedId === myId || isHostOrAdmin || todActiveIds.includes(myId);
-
-    return (
-      <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
-        <div className="spinner-main-area" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          
-          {/* Wheel rendering in IDLE or SPINNING state */}
-          {(todState === 'idle' || todState === 'spinning') && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              {renderWheelSVG(spinParticipants, todSpinResult ? todSpinResult.angle : 0, size, isExpanded, handleSpinTruthOrDare)}
-              
-              {todSpinResult && todState === 'idle' && !todLocalSpinning && (
-                <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  Spun by {todSpinResult.spunBy}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Choice phase */}
-          {todState === 'choice' && (
-            <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px', padding: '16px 0' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Landed on</div>
-              
-              {(() => {
-                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
-                const isMeSelected = myId === todSelectedId;
-                
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div className="participant-avatar-large" style={{ backgroundColor: selectedUser?.color || '#3b82f6', width: '48px', height: '48px', border: '2px solid var(--primary-color)', position: 'relative', overflow: 'hidden' }}>
-                        {selectedUser?.photoURL ? (
-                          <img src={selectedUser.photoURL} alt={selectedUser.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
-                        ) : (
-                          selectedUser?.initials || selectedUser?.name.substring(0, 2)
-                        )}
-                      </div>
-                      <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--primary-color)' }}>
-                        {selectedUser?.name.replace(' (You)', '') || 'Participant'}
-                      </span>
-                    </div>
-
-                    {/* Choice action buttons */}
-                    {canDecide ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                          {isMeSelected ? "Choose your challenge:" : "Choose on behalf of participant:"}
-                        </span>
-                        <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: '240px' }}>
-                          <button 
-                            type="button"
-                            onClick={() => handleSelectTodChoice('Truth')} 
-                            className="btn-create" 
-                            style={{ flex: 1, padding: '10px', fontSize: '13px', background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', borderColor: 'transparent', color: '#fff', fontWeight: 700 }}
-                          >
-                            😇 Truth
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => handleSelectTodChoice('Dare')} 
-                            className="btn-create" 
-                            style={{ flex: 1, padding: '10px', fontSize: '13px', background: 'linear-gradient(135deg, #ec4899, #be185d)', borderColor: 'transparent', color: '#fff', fontWeight: 700 }}
-                          >
-                            😈 Dare
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        Waiting for {selectedUser?.name} to choose...
-                      </span>
-                    )}
-
-                    {canDecide && (
-                      <button 
-                        type="button"
-                        onClick={handleResetTod} 
-                        className="btn-signin"
-                        style={{ marginTop: '16px', fontSize: '11px', padding: '6px 12px', backgroundColor: 'var(--button-secondary-bg)', border: '1px solid var(--border-color)' }}
-                      >
-                        Reset / Spin Again
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Reveal prompt phase */}
-          {todState === 'reveal' && (
-            <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px', padding: '16px 0' }}>
-              {(() => {
-                const selectedUser = callParticipants.find(p => p.id === todSelectedId);
-                
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '16px' }}>
-                    <div className={`truthordare-card type-${todChoice?.toLowerCase() || 'truth'} ${isExpanded ? 'expanded' : ''}`} style={{ width: '100%', maxWidth: isExpanded ? '500px' : 'none' }}>
-                      <div className="card-badge" style={{
-                        display: 'inline-block',
-                        fontSize: '9px',
-                        fontWeight: 800,
-                        textTransform: 'uppercase',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        marginBottom: '12px',
-                        backgroundColor: todChoice === 'Truth' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(236, 72, 153, 0.15)',
-                        color: todChoice === 'Truth' ? '#3b82f6' : '#ec4899'
-                      }}>
-                        {todChoice} for {selectedUser?.name.replace(' (You)', '')}
-                      </div>
-                      <div className="truthordare-text" style={{ fontSize: isExpanded ? '20px' : '15px', fontWeight: 700, margin: '8px 0 0 0' }}>
-                        "{todText}"
-                      </div>
-                    </div>
-
-                    {canDecide ? (
-                      <button 
-                        type="button"
-                        onClick={handleResetTod} 
-                        className="btn-signin"
-                        style={{ width: '100%', maxWidth: '200px', padding: '10px', fontWeight: 700, backgroundColor: 'var(--primary-color)', color: '#0f1013', border: 'none' }}
-                      >
-                        Done (Next Turn)
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        Waiting for completion...
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-
-        </div>
-
-        {/* Sidebar participant list for opt-in game model */}
-        {(todState === 'idle' || todState === 'spinning') && (
-          <div className="spinner-participants-sidebar">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-              {todActiveIds.includes(myId) || todPendingIds.includes(myId) ? (
-                <button 
-                  type="button" 
-                  onClick={handleLeaveTodGame} 
-                  className="btn-signin"
-                  style={{ width: '100%', padding: '8px', color: '#ef4444', borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.05)', fontWeight: 600 }}
-                >
-                  Leave Game
-                </button>
-              ) : (
-                <button 
-                  type="button" 
-                  onClick={handleJoinTodGame} 
-                  className="btn-create"
-                  style={{ width: '100%', padding: '8px', fontWeight: 600 }}
-                >
-                  Join Game
-                </button>
-              )}
-            </div>
-
-            {(() => {
-              const joinedPlayers = callParticipants.filter(p => todActiveIds.includes(p.id) || todPendingIds.includes(p.id));
-              return (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                      Players ({joinedPlayers.length}/{callParticipants.length})
-                    </span>
-                    <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-                      Pool: {todSpinPool.filter(id => activeIds.includes(id)).length} left
-                    </span>
-                  </div>
-
-                  <div className="spinner-participants-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {joinedPlayers.map(p => {
-                      const isActive = todActiveIds.includes(p.id);
-                      const isPending = todPendingIds.includes(p.id);
-                      
-                      let statusText = '';
-                      let statusColor = '';
-                      if (isActive) {
-                        statusText = '🎮 In Game';
-                        statusColor = 'var(--primary-color)';
-                      } else if (isPending) {
-                        statusText = '⏳ Pending Next';
-                        statusColor = '#f59e0b';
-                      }
-
-                      return (
-                        <div key={p.id} className="spinner-participant-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
-                              {p.name.replace(' (You)', '')}
-                            </span>
-                            {todSpinPool.includes(p.id) && isActive && (
-                              <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(241, 196, 15, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
-                                Pool
-                              </span>
-                            )}
-                          </div>
-                          <span style={{ fontSize: '10px', fontWeight: 600, color: statusColor }}>
-                            {statusText}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderSpinWheelUI = (isExpanded: boolean) => {
-    const myId = getMyId();
-    const myPresence = callParticipants.find(p => p.id === myId);
-    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
-
-    const activeIds = spinCheckedIds.length > 0 
-      ? spinCheckedIds.filter(id => callParticipants.some(p => p.id === id))
-      : callParticipants.map(p => p.id);
-
-    const spinParticipants = callParticipants.filter(p => activeIds.includes(p.id));
-    const n = spinParticipants.length;
-    const size = isExpanded ? 360 : 200;
-
-    return (
-      <div className={`spinwheel-layout-container ${isExpanded ? 'expanded' : ''}`}>
-        <div className="spinner-main-area">
-          {renderWheelSVG(spinParticipants, spinResult ? spinResult.angle : 0, size, isExpanded, handleSpinWheel)}
-
-          {spinResult && !spinLocalSpinning && (
-            <div className="spin-result-banner animate-fade-in" style={{ marginTop: '16px' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Landed on</div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--primary-color)', marginTop: '2px' }}>
-                {callParticipants.find(p => p.id === spinResult.selectedId)?.name.replace(' (You)', '') || 'Participant'}
-              </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px' }}>Spun by {spinResult.spunBy}</div>
-            </div>
-          )}
-        </div>
-
-        <div className="spinner-participants-sidebar">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-              Checked ({n}/{callParticipants.length})
-            </span>
-            <span style={{ fontSize: '9px', padding: '2px 6px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-              Pool: {spinPool.length} left
-            </span>
-          </div>
-
-          <div className="spinner-participants-list">
-            {callParticipants.map(p => {
-              const isChecked = activeIds.includes(p.id);
-              return (
-                <div key={p.id} className="spinner-participant-row" onClick={() => isHostOrAdmin && handleToggleSpinCheckedParticipant(p.id)} style={{ cursor: isHostOrAdmin ? 'pointer' : 'default' }}>
-                  {isHostOrAdmin ? (
-                    <input 
-                      type="checkbox" 
-                      checked={isChecked} 
-                      onChange={() => {}} 
-                      style={{ cursor: 'pointer' }}
-                    />
-                  ) : (
-                    <span style={{ fontSize: '12px' }}>{isChecked ? '✅' : '⬜'}</span>
-                  )}
-                  <span style={{ fontSize: '12px', fontWeight: isChecked ? 600 : 400, color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)', flex: 1, marginLeft: '6px' }}>
-                    {p.name}
-                  </span>
-                  {spinPool.includes(p.id) && isChecked && (
-                    <span style={{ fontSize: '8px', color: 'var(--primary-color)', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
-                      Pool
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
       </div>
     );
   };
@@ -8808,8 +6098,40 @@ function AppContent() {
                         {expandedTool === 'pomodoro' && renderPomodoroUI(true)}
                         {expandedTool === 'deadline' && renderDeadlineUI(true)}
                         {expandedTool === 'loose' && renderLooseTimerUI(true)}
-                        {expandedTool === 'truthordare' && renderTruthOrDareUI(true)}
-                        {expandedTool === 'spin' && renderSpinWheelUI(true)}
+                        {expandedTool === 'truthordare' && (
+                          <TruthOrDareUI
+                            isExpanded={true}
+                            myId={getMyId()}
+                            callParticipants={callParticipants}
+                            todActiveIds={todActiveIds}
+                            todPendingIds={todPendingIds}
+                            todSelectedId={todSelectedId}
+                            todChoice={todChoice}
+                            todText={todText}
+                            todState={todState}
+                            todSpinResult={todSpinResult}
+                            todLocalSpinning={todLocalSpinning}
+                            todSpinPool={todSpinPool}
+                            handleSpinTruthOrDare={handleSpinTruthOrDare}
+                            handleSelectTodChoice={handleSelectTodChoice}
+                            handleResetTod={handleResetTod}
+                            handleJoinTodGame={handleJoinTodGame}
+                            handleLeaveTodGame={handleLeaveTodGame}
+                          />
+                        )}
+                        {expandedTool === 'spin' && (
+                          <SpinWheelUI
+                            isExpanded={true}
+                            myId={getMyId()}
+                            callParticipants={callParticipants}
+                            spinCheckedIds={spinCheckedIds}
+                            spinPool={spinPool}
+                            spinResult={spinResult}
+                            spinLocalSpinning={spinLocalSpinning}
+                            handleSpinWheel={handleSpinWheel}
+                            handleToggleSpinCheckedParticipant={handleToggleSpinCheckedParticipant}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -8832,131 +6154,67 @@ function AppContent() {
                     scrollbarWidth: 'none',
                     boxSizing: 'border-box'
                   }}>
-                    {callParticipants.map((p) => renderParticipantTile(p, true))}
+                    {callParticipants.map((p) => (
+                      <ParticipantTile
+                        key={p.id}
+                        p={p}
+                        isThumbnail={true}
+                        myId={getMyId()}
+                        isMicMuted={isMicMuted}
+                        isCamOff={isCamOff}
+                        cameraError={cameraError}
+                        spotlightParticipantId={spotlightParticipantId}
+                        setSpotlightParticipantId={setSpotlightParticipantId}
+                        handleViewParticipantShare={handleViewParticipantShare}
+                        isGalleryView={isGalleryView}
+                        activeMenuParticipantId={activeMenuParticipantId}
+                        setActiveMenuParticipantId={setActiveMenuParticipantId}
+                        callParticipants={callParticipants}
+                        checkCanMute={checkCanMute}
+                        handleParticipantMuteToggle={handleParticipantMuteToggle}
+                        handleParticipantCameraToggle={handleParticipantCameraToggle}
+                        handleParticipantRoleChange={handleParticipantRoleChange}
+                        checkCanKick={checkCanKick}
+                        handleParticipantRemove={handleParticipantRemove}
+                      />
+                    ))}
                   </div>
                 </div>
               ) : viewingShare ? (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', flex: 1 }}>
                   <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
                     {viewingShare.type === 'whiteboard' ? (
-                      <div className="whiteboard-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', border: 'none', borderRadius: 0 }}>
-                        <div className="whiteboard-toolbar">
-                          <div className="whiteboard-tools-left">
-                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              Whiteboard {viewingShare.participantId !== getMyId() ? `(viewing ${callParticipants.find(p => p.id === viewingShare.participantId)?.name.replace(' (You)', '') || 'participant'})` : '(You)'}
-                            </span>
-                            {viewingShare.participantId !== getMyId() && (
-                              <span 
-                                style={{ 
-                                  fontSize: '11px', 
-                                  padding: '2px 8px', 
-                                  borderRadius: '12px', 
-                                  backgroundColor: whiteboardPresenter?.whiteboardEditAllowed ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)', 
-                                  color: whiteboardPresenter?.whiteboardEditAllowed ? '#10b981' : 'var(--text-secondary)',
-                                  border: `1px solid ${whiteboardPresenter?.whiteboardEditAllowed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
-                                  fontWeight: 600,
-                                  marginLeft: '8px'
-                                }}
-                              >
-                                {whiteboardPresenter?.whiteboardEditAllowed ? 'Collaborative' : 'View Only'}
-                              </span>
-                            )}
-                            {canDrawOnWhiteboard && (
-                            <div className="whiteboard-color-pickers">
-                              {['#f1c40f', '#ef4444', '#10b981', '#3b82f6', '#ffffff'].map(color => (
-                                <div 
-                                  key={color}
-                                  className={`whiteboard-color-dot ${drawColor === color ? 'selected' : ''}`}
-                                  style={{ backgroundColor: color }}
-                                  onClick={() => setDrawColor(color)}
-                                  title={`Select ${color} pen`}
-                                />
-                              ))}
-                            </div>
-                            )}
-                            {viewingShare.participantId === getMyId() && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px' }}>
-                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Allow members to edit</span>
-                                <label className="switch-toggle">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={whiteboardPresenter?.whiteboardEditAllowed ?? false} 
-                                    onChange={async (e) => {
-                                      await updateMySharing({ whiteboardEditAllowed: e.target.checked });
-                                    }} 
-                                  />
-                                  <span className="switch-slider"></span>
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            {viewingShare.participantId === getMyId() && (
-                              <button onClick={clearCanvas} className="btn-signin" style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: 'var(--button-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>
-                                Clear
-                              </button>
-                            )}
-                            <button 
-                              onClick={async () => {
-                                if (viewingShare.participantId === getMyId()) {
-                                  await clearMySharing();
-                                }
-                                setViewingShare(null);
-                              }} 
-                              className="btn-create" 
-                              style={{ padding: '6px 12px', fontSize: '12px' }}
-                            >
-                              {viewingShare.participantId === getMyId() ? 'Stop sharing' : 'Close view'}
-                            </button>
-                          </div>
-                        </div>
-                        <canvas 
-                          ref={canvasRef}
-                          className="whiteboard-canvas"
-                          onMouseDown={canDrawOnWhiteboard ? startDrawing : undefined}
-                          onMouseMove={canDrawOnWhiteboard ? draw : undefined}
-                          onMouseUp={canDrawOnWhiteboard ? stopDrawing : undefined}
-                          onMouseLeave={canDrawOnWhiteboard ? stopDrawing : undefined}
-                          onTouchStart={canDrawOnWhiteboard ? startDrawingTouch : undefined}
-                          onTouchMove={canDrawOnWhiteboard ? drawTouch : undefined}
-                          onTouchEnd={canDrawOnWhiteboard ? stopDrawing : undefined}
-                          style={{ cursor: canDrawOnWhiteboard ? 'crosshair' : 'default', flex: 1, width: '100%', height: '100%', display: 'block' }}
-                        />
-                      </div>
+                      <WhiteboardView
+                        roomId={roomDocId(currentRoom!)}
+                        viewingShare={viewingShare}
+                        setViewingShare={setViewingShare}
+                        myId={getMyId()}
+                        callParticipants={callParticipants}
+                        updateMySharing={updateMySharing}
+                        clearMySharing={clearMySharing}
+                        showToast={showToast}
+                      />
                     ) : (
                       <div className="screenshare-stage-layout animate-fade-in" style={{ height: '100%', gap: 0 }}>
                         <div className="screenshare-video-wrapper" style={{ border: 'none', borderRadius: 0 }}>
                           {viewingShare.type === 'screen' ? (
                             <ScreenShareVideo participantId={viewingShare.participantId} />
                           ) : viewingShare.type === 'youtube' && viewingShare.youtubeVideoId ? (
-                            (() => {
-                              const parsed = parseMediaUrl(viewingShare.youtubeVideoId);
-                              if (parsed) {
-                                return (
-                                  <UniversalVideoPlayer
-                                    videoId={parsed.videoId}
-                                    platform={parsed.platform}
-                                    isLive={parsed.isLive ?? false}
-                                    isPresenter={viewingShare.participantId === getMyId()}
-                                    presenterId={viewingShare.participantId}
-                                    roomId={roomDocId(currentRoom!)}
-                                    myId={getMyId()}
-                                    participants={callParticipants}
-                                  />
-                                );
-                              } else {
-                                return (
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-                                    Content unavailable
-                                  </div>
-                                );
-                              }
-                            })()
-                          ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-                              Content unavailable
-                            </div>
-                          )}
+                              <UniversalVideoPlayer
+                                videoId={parseMediaUrl(viewingShare.youtubeVideoId)?.videoId || ""}
+                                platform={parseMediaUrl(viewingShare.youtubeVideoId)?.platform || "youtube"}
+                                isLive={parseMediaUrl(viewingShare.youtubeVideoId)?.isLive ?? false}
+                                isPresenter={viewingShare.participantId === getMyId()}
+                                presenterId={viewingShare.participantId}
+                                roomId={roomDocId(currentRoom!)}
+                                myId={getMyId()}
+                                participants={callParticipants}
+                              />
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                                Content unavailable
+                              </div>
+                            )}
                           <button 
                             onClick={async () => {
                               if (viewingShare.participantId === getMyId()) {
@@ -9000,7 +6258,30 @@ function AppContent() {
                     scrollbarWidth: 'none',
                     boxSizing: 'border-box'
                   }}>
-                    {callParticipants.map((p) => renderParticipantTile(p, true))}
+                    {callParticipants.map((p) => (
+                      <ParticipantTile
+                        key={p.id}
+                        p={p}
+                        isThumbnail={true}
+                        myId={getMyId()}
+                        isMicMuted={isMicMuted}
+                        isCamOff={isCamOff}
+                        cameraError={cameraError}
+                        spotlightParticipantId={spotlightParticipantId}
+                        setSpotlightParticipantId={setSpotlightParticipantId}
+                        handleViewParticipantShare={handleViewParticipantShare}
+                        isGalleryView={isGalleryView}
+                        activeMenuParticipantId={activeMenuParticipantId}
+                        setActiveMenuParticipantId={setActiveMenuParticipantId}
+                        callParticipants={callParticipants}
+                        checkCanMute={checkCanMute}
+                        handleParticipantMuteToggle={handleParticipantMuteToggle}
+                        handleParticipantCameraToggle={handleParticipantCameraToggle}
+                        handleParticipantRoleChange={handleParticipantRoleChange}
+                        checkCanKick={checkCanKick}
+                        handleParticipantRemove={handleParticipantRemove}
+                      />
+                    ))}
                   </div>
                 </div>
               ) : (
@@ -9048,14 +6329,59 @@ function AppContent() {
                   {spotlightParticipantId ? (
                     <div className="spotlight-stage-layout animate-fade-in">
                       <div className="spotlight-strip">
-                        {callParticipants.map((p) => renderParticipantTile(p, true))}
+                        {callParticipants.map((p) => (
+                      <ParticipantTile
+                        key={p.id}
+                        p={p}
+                        isThumbnail={true}
+                        myId={getMyId()}
+                        isMicMuted={isMicMuted}
+                        isCamOff={isCamOff}
+                        cameraError={cameraError}
+                        spotlightParticipantId={spotlightParticipantId}
+                        setSpotlightParticipantId={setSpotlightParticipantId}
+                        handleViewParticipantShare={handleViewParticipantShare}
+                        isGalleryView={isGalleryView}
+                        activeMenuParticipantId={activeMenuParticipantId}
+                        setActiveMenuParticipantId={setActiveMenuParticipantId}
+                        callParticipants={callParticipants}
+                        checkCanMute={checkCanMute}
+                        handleParticipantMuteToggle={handleParticipantMuteToggle}
+                        handleParticipantCameraToggle={handleParticipantCameraToggle}
+                        handleParticipantRoleChange={handleParticipantRoleChange}
+                        checkCanKick={checkCanKick}
+                        handleParticipantRemove={handleParticipantRemove}
+                      />
+                    ))}
                       </div>
                       <div className="spotlight-main">
                         {(() => {
                           const spotlightedPart = callParticipants.find(p => p.id === spotlightParticipantId);
                           return spotlightedPart ? (
                             <>
-                              {renderParticipantTile(spotlightedPart, false)}
+                              {spotlightedPart && (
+                                <ParticipantTile
+                                  p={spotlightedPart}
+                                  isThumbnail={false}
+                                  myId={getMyId()}
+                                  isMicMuted={isMicMuted}
+                                  isCamOff={isCamOff}
+                                  cameraError={cameraError}
+                                  spotlightParticipantId={spotlightParticipantId}
+                                  setSpotlightParticipantId={setSpotlightParticipantId}
+                                  handleViewParticipantShare={handleViewParticipantShare}
+                                  isGalleryView={isGalleryView}
+                                  activeMenuParticipantId={activeMenuParticipantId}
+                                  setActiveMenuParticipantId={setActiveMenuParticipantId}
+                                  callParticipants={callParticipants}
+                                  checkCanMute={checkCanMute}
+                                  handleParticipantMuteToggle={handleParticipantMuteToggle}
+                                  handleParticipantCameraToggle={handleParticipantCameraToggle}
+                                  handleParticipantRoleChange={handleParticipantRoleChange}
+                                  checkCanKick={checkCanKick}
+                                  handleParticipantRemove={handleParticipantRemove}
+                                />
+                              )}
                               <button 
                                 className="btn-exit-spotlight" 
                                 onClick={(e) => {
@@ -9111,7 +6437,30 @@ function AppContent() {
                           alignItems: 'center'
                         } : {}}
                       >
-                        {displayedParticipants.map((p) => renderParticipantTile(p, false))}
+                        {displayedParticipants.map((p) => (
+                          <ParticipantTile
+                            key={p.id}
+                            p={p}
+                            isThumbnail={false}
+                            myId={getMyId()}
+                            isMicMuted={isMicMuted}
+                            isCamOff={isCamOff}
+                            cameraError={cameraError}
+                            spotlightParticipantId={spotlightParticipantId}
+                            setSpotlightParticipantId={setSpotlightParticipantId}
+                            handleViewParticipantShare={handleViewParticipantShare}
+                            isGalleryView={isGalleryView}
+                            activeMenuParticipantId={activeMenuParticipantId}
+                            setActiveMenuParticipantId={setActiveMenuParticipantId}
+                            callParticipants={callParticipants}
+                            checkCanMute={checkCanMute}
+                            handleParticipantMuteToggle={handleParticipantMuteToggle}
+                            handleParticipantCameraToggle={handleParticipantCameraToggle}
+                            handleParticipantRoleChange={handleParticipantRoleChange}
+                            checkCanKick={checkCanKick}
+                            handleParticipantRemove={handleParticipantRemove}
+                      />
+                    ))}
                       </div>
                     );
                   })()}
@@ -9161,97 +6510,13 @@ function AppContent() {
                 
                 {/* 2A. Chat Tab Panel */}
                 {callTab === 'chat' && (
-                  <>
-                    <div className="chat-messages-list">
-                      {(() => {
-                        const combined = [
-                          ...chatMessages.map(m => ({ ...m, type: 'chat' as const })),
-                          ...systemMessages.map(m => ({ ...m, type: 'system' as const }))
-                        ].sort((a, b) => {
-                          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-                          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-                          return timeA - timeB;
-                        });
-
-                        return combined.map((msg) => {
-                          if (msg.type === 'system') {
-                            return (
-                              <div 
-                                key={msg.id} 
-                                className="chat-message-item chat-system-message animate-fade-in" 
-                                style={{ 
-                                  textAlign: 'center', 
-                                  padding: '8px 12px', 
-                                  color: 'var(--text-secondary, #94a3b8)', 
-                                  fontSize: '11px',
-                                  fontStyle: 'italic',
-                                  opacity: 0.8,
-                                  borderBottom: '1px solid rgba(255,255,255,0.02)'
-                                }}
-                              >
-                                {msg.text}
-                              </div>
-                            );
-                          }
-
-                          const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
-                          return (
-                            <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                <span className="chat-sender" style={{ fontWeight: 700, fontSize: '13px' }}>{msg.sender}</span>
-                                {role && role !== 'member' && (
-                                  <span className={`role-badge-${role}`} style={{
-                                    fontSize: '8px',
-                                    fontWeight: 'bold',
-                                    padding: '1px 4px',
-                                    borderRadius: '3px',
-                                    border: '1px solid',
-                                    textTransform: 'uppercase',
-                                    lineHeight: '1.2',
-                                    ...role === 'admin' ? {
-                                      backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                                      borderColor: 'var(--primary-color, #f1c40f)',
-                                      color: 'var(--primary-color, #f1c40f)'
-                                    } : role === 'host' ? {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                      borderColor: '#3b82f6',
-                                      color: '#3b82f6'
-                                    } : {
-                                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                      borderColor: '#10b981',
-                                      color: '#10b981'
-                                    }
-                                  }}>
-                                    {role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
-                            </div>
-                          );
-                        });
-                      })()}
-                      <div ref={chatEndRef} />
-                    </div>
-                    
-                    <form onSubmit={handleSendChatMessage} className="chat-input-form">
-                      <input 
-                        type="text" 
-                        placeholder="Message the room..." 
-                        className="search-input"
-                        style={{ paddingLeft: '14px', fontSize: '13px' }}
-                        value={chatMessageText}
-                        onChange={(e) => setChatMessageText(e.target.value)}
-                        required
-                      />
-                      <button type="submit" className="btn-signin" style={{ padding: '8px 12px' }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="22" y1="2" x2="11" y2="13"></line>
-                          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                      </button>
-                    </form>
-                  </>
+                  <ChatPanel
+                    chatMessages={chatMessages}
+                    systemMessages={systemMessages}
+                    callParticipants={callParticipants}
+                    sendChatMessage={sendChatMessage}
+                    callTab={callTab}
+                  />
                 )}
 
                 {/* 2B. People Tab Panel */}
@@ -10008,7 +7273,25 @@ function AppContent() {
                             <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
                           </div>
                         ) : (
-                          renderTruthOrDareUI(false)
+                          <TruthOrDareUI
+                            isExpanded={false}
+                            myId={getMyId()}
+                            callParticipants={callParticipants}
+                            todActiveIds={todActiveIds}
+                            todPendingIds={todPendingIds}
+                            todSelectedId={todSelectedId}
+                            todChoice={todChoice}
+                            todText={todText}
+                            todState={todState}
+                            todSpinResult={todSpinResult}
+                            todLocalSpinning={todLocalSpinning}
+                            todSpinPool={todSpinPool}
+                            handleSpinTruthOrDare={handleSpinTruthOrDare}
+                            handleSelectTodChoice={handleSelectTodChoice}
+                            handleResetTod={handleResetTod}
+                            handleJoinTodGame={handleJoinTodGame}
+                            handleLeaveTodGame={handleLeaveTodGame}
+                          />
                         )}
                       </div>
                     )}
@@ -10044,7 +7327,17 @@ function AppContent() {
                             <span style={{ fontSize: '11px', lineHeight: 1.4 }}>This tool is currently active in the main stage view.</span>
                           </div>
                         ) : (
-                          renderSpinWheelUI(false)
+                          <SpinWheelUI
+                            isExpanded={false}
+                            myId={getMyId()}
+                            callParticipants={callParticipants}
+                            spinCheckedIds={spinCheckedIds}
+                            spinPool={spinPool}
+                            spinResult={spinResult}
+                            spinLocalSpinning={spinLocalSpinning}
+                            handleSpinWheel={handleSpinWheel}
+                            handleToggleSpinCheckedParticipant={handleToggleSpinCheckedParticipant}
+                          />
                         )}
                       </div>
                     )}
