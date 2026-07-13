@@ -321,6 +321,26 @@ function loadTwitchApi(): Promise<void> {
   return twitchApiPromise;
 }
 
+let dailymotionApiPromise: Promise<void> | null = null;
+function loadDailymotionApi(): Promise<void> {
+  if (dailymotionApiPromise) return dailymotionApiPromise;
+  
+  dailymotionApiPromise = new Promise((resolve) => {
+    if ((window as any).dailymotion) {
+      resolve();
+      return;
+    }
+    
+    const tag = document.createElement('script');
+    tag.src = 'https://geo.dailymotion.com/libs/player/x508t.js';
+    tag.onload = () => resolve();
+    tag.onerror = () => resolve();
+    document.head.appendChild(tag);
+  });
+  
+  return dailymotionApiPromise;
+}
+
 interface AbstractPlayer {
   play(): void;
   pause(): void;
@@ -444,97 +464,68 @@ function createWrappedPlayer(
   }
 
   if (platform === 'dailymotion') {
-    targetElement.innerHTML = '';
-
-    const iframe = document.createElement('iframe');
-    iframe.src = `https://www.dailymotion.com/embed/video/${videoId}?api=1&autoplay=1&controls=1&mute=${isPresenter ? 0 : 1}&origin=${window.location.origin}`;
-    iframe.style.width = '100%';
-    iframe.style.height = '100%';
-    iframe.style.border = 'none';
-    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    targetElement.appendChild(iframe);
-
-    let playerState = 2; // 2 = paused, 1 = playing
-    let currentTime = 0;
-    let currentSpeed = 1;
-    
-    // Listen to messages from Dailymotion iframe
-    const messageListener = (event: MessageEvent) => {
-      if (!event.origin.includes('dailymotion.com')) return;
+    return loadDailymotionApi().then(() => {
+      targetElement.innerHTML = '';
       
-      try {
-        let eventName = '';
-        let timeVal = currentTime;
-        
-        if (typeof event.data === 'string') {
-          if (event.data.startsWith('event=')) {
-            const params = new URLSearchParams(event.data);
-            eventName = params.get('event') || '';
-            timeVal = parseFloat(params.get('time') || String(currentTime));
-          } else {
+      const playerDiv = document.createElement('div');
+      playerDiv.id = 'dailymotion-player-' + Date.now();
+      playerDiv.style.width = '100%';
+      playerDiv.style.height = '100%';
+      targetElement.appendChild(playerDiv);
+
+      return (window as any).dailymotion.createPlayer(playerDiv.id, {
+        video: videoId,
+        params: {
+          autoplay: true,
+          mute: !isPresenter,
+          controls: true
+        }
+      }).then((player: any) => {
+        const events = (window as any).dailymotion.events || {};
+        const playingEvent = events.VIDEO_PLAYING || 'play';
+        const pauseEvent = events.VIDEO_PAUSE || 'pause';
+        const seekEvent = events.VIDEO_SEEKEND || 'seekend';
+
+        if (isPresenter) {
+          player.on(playingEvent, () => {
+            onStateChange(true, player.currentTime || 0);
+          });
+          player.on(pauseEvent, () => {
+            onStateChange(false, player.currentTime || 0);
+          });
+          player.on(seekEvent, () => {
+            onStateChange(!player.paused, player.currentTime || 0);
+          });
+        }
+
+        return {
+          play: () => {
             try {
-              const parsed = JSON.parse(event.data);
-              eventName = parsed.event || '';
-              timeVal = parsed.time !== undefined ? parsed.time : currentTime;
+              player.play().catch(() => {});
             } catch (e) {}
+          },
+          pause: () => {
+            try {
+              player.pause().catch(() => {});
+            } catch (e) {}
+          },
+          seekTo: (sec: number) => {
+            try {
+              player.seek(sec).catch(() => {});
+            } catch (e) {}
+          },
+          getCurrentTime: () => player.currentTime || 0,
+          getPlayerState: () => player.paused ? 2 : 1,
+          getPlaybackRate: () => 1,
+          setPlaybackRate: () => {},
+          destroy: () => {
+            try {
+              (window as any).dailymotion.destroy(playerDiv.id);
+            } catch (e) {}
+            targetElement.innerHTML = '';
           }
-        } else if (event.data && typeof event.data === 'object') {
-          eventName = event.data.event || '';
-          timeVal = event.data.time !== undefined ? event.data.time : currentTime;
-        }
-        
-        if (eventName) {
-          if (eventName === 'play') {
-            playerState = 1;
-            onStateChange(true, timeVal);
-          } else if (eventName === 'pause') {
-            playerState = 2;
-            onStateChange(false, timeVal);
-          } else if (eventName === 'timeupdate' || eventName === 'progress') {
-            currentTime = timeVal;
-          } else if (eventName === 'seeked') {
-            currentTime = timeVal;
-            onStateChange(playerState === 1, timeVal);
-          }
-        }
-      } catch (e) {}
-    };
-
-    window.addEventListener('message', messageListener);
-
-    return Promise.resolve({
-      play: () => {
-        try {
-          iframe.contentWindow?.postMessage('play', '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
-        } catch (e) {}
-      },
-      pause: () => {
-        try {
-          iframe.contentWindow?.postMessage('pause', '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
-        } catch (e) {}
-      },
-      seekTo: (sec) => {
-        try {
-          iframe.contentWindow?.postMessage(`seek=${sec}`, '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'seek', parameters: [sec] }), '*');
-        } catch (e) {}
-      },
-      getCurrentTime: () => currentTime,
-      getPlayerState: () => playerState,
-      getPlaybackRate: () => currentSpeed,
-      setPlaybackRate: (rate) => {
-        try {
-          currentSpeed = rate;
-          iframe.contentWindow?.postMessage(`speed=${rate}`, '*');
-          iframe.contentWindow?.postMessage(JSON.stringify({ command: 'speed', value: rate }), '*');
-        } catch (e) {}
-      },
-      destroy: () => {
-        window.removeEventListener('message', messageListener);
-        targetElement.innerHTML = '';
-      }
+        };
+      });
     });
   }
 
