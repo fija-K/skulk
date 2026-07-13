@@ -61,7 +61,11 @@ service cloud.firestore {
       // Whitelists update fields
       allow update: if request.auth != null && 
         request.resource.data.creatorId == resource.data.creatorId &&
-        request.resource.data.keys().hasOnly(['id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName']) &&
+        request.resource.data.keys().hasOnly([
+          'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
+          'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
+          'spinResult', 'spinPool', 'spinCheckedIds'
+        ]) &&
         (
           resource.data.creatorId == request.auth.uid ||
           get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
