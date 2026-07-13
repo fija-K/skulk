@@ -7856,6 +7856,28 @@ function AppContent() {
                   }
                 </p>
 
+                {startOption !== 'later' && (
+                  <button 
+                    onClick={() => {
+                      closeModal();
+                      window.open(`/room/${generatedRoomLink.split('/').pop()}`, '_blank');
+                    }}
+                    className="btn-create" 
+                    style={{ 
+                      width: '100%', 
+                      padding: '12px 16px', 
+                      fontSize: '15px', 
+                      justifyContent: 'center',
+                      marginBottom: '16px',
+                      backgroundColor: 'var(--primary-color)',
+                      color: 'var(--primary-text)',
+                      fontWeight: 700
+                    }}
+                  >
+                    Join Room
+                  </button>
+                )}
+
                 {/* Link Copy Field Box */}
                 <div style={{ 
                   display: 'flex', 
