@@ -794,7 +794,7 @@ function UniversalVideoPlayer({
           console.error("Tracking loop encountered error:", e);
         }
       }
-    }, 1000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
@@ -826,7 +826,7 @@ function UniversalVideoPlayer({
       if (playerRef.current && lastPresenterDataRef.current) {
         syncToPresenterState(lastPresenterDataRef.current, playerRef.current);
       }
-    }, 1000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [isPresenter, isLive]);
@@ -1896,22 +1896,82 @@ function AppContent() {
   }, []);
 
   // Listen to participants subcollection for each room listed on the dashboard
+  const unsubscribesRef = useRef<Record<string, () => void>>({});
+
   useEffect(() => {
-    if (rooms.length === 0) return;
-    
-    const unsubscribes = rooms.map(room => {
-      return onSnapshot(collection(db, 'rooms', room.id, 'participants'), (snapshot) => {
-        const participantsList = snapshot.docs.map(doc => doc.data());
-        setRoomsParticipants(prev => ({
-          ...prev,
-          [room.id]: participantsList
-        }));
-      });
-    });
-    
     return () => {
-      unsubscribes.forEach(unsub => unsub());
+      // Clean up all active subscriptions on component unmount
+      Object.values(unsubscribesRef.current).forEach(unsub => unsub());
+      unsubscribesRef.current = {};
     };
+  }, []);
+
+  useEffect(() => {
+    if (rooms.length === 0) {
+      Object.values(unsubscribesRef.current).forEach(unsub => unsub());
+      unsubscribesRef.current = {};
+      return;
+    }
+
+    const currentRoomIds = new Set(rooms.map(r => r.id));
+
+    // 1. Clean up stale subscriptions for rooms no longer present
+    Object.keys(unsubscribesRef.current).forEach(roomId => {
+      if (!currentRoomIds.has(roomId)) {
+        unsubscribesRef.current[roomId]();
+        delete unsubscribesRef.current[roomId];
+      }
+    });
+
+    // 2. Set up new subscriptions for newly added rooms
+    rooms.forEach(room => {
+      if (!unsubscribesRef.current[room.id]) {
+        unsubscribesRef.current[room.id] = onSnapshot(
+          collection(db, 'rooms', room.id, 'participants'),
+          (snapshot) => {
+            const participantsList = snapshot.docs.map(docSnap => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                uid: data.uid || docSnap.id,
+                name: data.name || '',
+                initials: data.initials || '',
+                color: data.color || '',
+                photoURL: data.photoURL || null,
+                role: data.role || ''
+              };
+            });
+
+            setRoomsParticipants(prev => {
+              const currentList = prev[room.id] || [];
+              
+              // Map current list to match layout structure for comparison
+              const currentListCompared = currentList.map(p => ({
+                id: p.id,
+                uid: p.uid || p.id,
+                name: p.name || '',
+                initials: p.initials || '',
+                color: p.color || '',
+                photoURL: p.photoURL || null,
+                role: p.role || ''
+              }));
+
+              if (JSON.stringify(currentListCompared) === JSON.stringify(participantsList)) {
+                return prev;
+              }
+              
+              return {
+                ...prev,
+                [room.id]: participantsList
+              };
+            });
+          },
+          (error) => {
+            console.warn(`Failed to listen to participants for room ${room.id}:`, error);
+          }
+        );
+      }
+    });
   }, [rooms]);
 
   // Modal State
