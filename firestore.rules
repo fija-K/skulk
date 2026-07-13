@@ -123,11 +123,21 @@ service cloud.firestore {
                                 (request.resource.data.role == resource.data.role && 
                                  get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'])
                               ) &&
-                              (!request.resource.data.keys().hasAny(['micOn', 'camOn']) || 
-                               (
-                                 request.resource.data.micOn == (resource.data.keys().hasAny(['micOn']) ? resource.data.micOn : false) && 
-                                 request.resource.data.camOn == (resource.data.keys().hasAny(['camOn']) ? resource.data.camOn : false)
-                               )
+                              (
+                                !request.resource.data.keys().hasAny(['micOn']) ||
+                                request.resource.data.micOn == false ||
+                                (
+                                  resource.data.keys().hasAny(['micOn']) &&
+                                  request.resource.data.micOn == resource.data.micOn
+                                )
+                              ) &&
+                              (
+                                !request.resource.data.keys().hasAny(['camOn']) ||
+                                request.resource.data.camOn == false ||
+                                (
+                                  resource.data.keys().hasAny(['camOn']) &&
+                                  request.resource.data.camOn == resource.data.camOn
+                                )
                               )
                             )
                           )

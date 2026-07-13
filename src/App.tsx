@@ -433,51 +433,55 @@ function createWrappedPlayer(
       
       const player = new (window as any).Vimeo.Player(targetElement, {
         id: parseInt(videoId, 10),
-        autoplay: true,
+        autoplay: isPresenter,
         muted: !isPresenter,
         controls: true,
         loop: false
       });
 
-      // style vimeo's auto-created iframe
-      const iframe = targetElement.querySelector('iframe');
-      if (iframe) {
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        iframe.style.border = 'none';
-      }
-
-      if (isPresenter) {
-        player.on('play', async () => {
-          const time = await player.getCurrentTime().catch(() => 0);
-          onStateChange(true, time);
-        });
-        player.on('pause', async () => {
-          const time = await player.getCurrentTime().catch(() => 0);
-          onStateChange(false, time);
-        });
-        player.on('seeked', async () => {
-          const time = await player.getCurrentTime().catch(() => 0);
-          onStateChange(true, time);
-        });
-      }
-
-      return Promise.resolve({
-        play: () => player.play().catch(() => {}),
-        pause: () => player.pause().catch(() => {}),
-        seekTo: (sec) => player.setCurrentTime(sec).catch(() => {}),
-        getCurrentTime: () => player.getCurrentTime().catch(() => 0),
-        getPlayerState: async () => {
-          const paused = await player.getPaused().catch(() => true);
-          return paused ? 2 : 1;
-        },
-        getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
-        setPlaybackRate: (rate) => player.setPlaybackRate(rate).catch(() => {}),
-        destroy: () => {
-          try {
-            player.unload();
-          } catch (e) {}
+      return player.ready().then(() => {
+        // style vimeo's auto-created iframe
+        const iframe = targetElement.querySelector('iframe');
+        if (iframe) {
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          iframe.style.border = 'none';
         }
+
+        if (isPresenter) {
+          player.on('play', async () => {
+            const time = await player.getCurrentTime().catch(() => 0);
+            onStateChange(true, time);
+          });
+          player.on('pause', async () => {
+            const time = await player.getCurrentTime().catch(() => 0);
+            onStateChange(false, time);
+          });
+          player.on('seeked', async () => {
+            const time = await player.getCurrentTime().catch(() => 0);
+            const paused = await player.getPaused().catch(() => true);
+            onStateChange(!paused, time);
+          });
+        }
+
+        return {
+          play: () => player.play().catch(() => {}),
+          pause: () => player.pause().catch(() => {}),
+          seekTo: (sec: number) => player.setCurrentTime(sec).catch(() => {}),
+          getCurrentTime: () => player.getCurrentTime().catch(() => 0),
+          getPlayerState: async () => {
+            const paused = await player.getPaused().catch(() => true);
+            return paused ? 2 : 1;
+          },
+          getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
+          setPlaybackRate: (rate: number) => player.setPlaybackRate(rate).catch(() => {}),
+          destroy: () => {
+            try {
+              player.unload();
+            } catch (e) {}
+            targetElement.innerHTML = '';
+          }
+        };
       });
     });
   }
@@ -498,39 +502,43 @@ function createWrappedPlayer(
       return (window as any).dailymotion.createPlayer(playerDiv.id, {
         video: videoId,
         params: {
-          autoplay: true,
+          autoplay: isPresenter,
           mute: !isPresenter,
           controls: true
         }
       }).then((player: any) => {
-        const events = (window as any).dailymotion.events || {};
-        const playingEvent = events.VIDEO_PLAYING || 'video_playing';
-        const pauseEvent = events.VIDEO_PAUSE || 'video_pause';
-        const seekEvent = events.VIDEO_SEEKEND || 'video_seekend';
-        const timechangeEvent = events.VIDEO_TIMECHANGE || 'video_timechange';
-
         let localTime = 0;
-        let isPlaying = true; // autoplay is true by default
+        let isPlaying = isPresenter;
 
-        player.on(playingEvent, () => {
+        player.on('play', () => {
           isPlaying = true;
           if (isPresenter) {
             onStateChange(true, localTime);
           }
         });
-        player.on(pauseEvent, () => {
+
+        player.on('pause', () => {
           isPlaying = false;
           if (isPresenter) {
             onStateChange(false, localTime);
           }
         });
-        player.on(seekEvent, () => {
+
+        player.on('seeked', (e: any) => {
+          if (e && typeof e.time === 'number') {
+            localTime = e.time;
+          } else if (e && typeof e.videoTime === 'number') {
+            localTime = e.videoTime;
+          }
           if (isPresenter) {
             onStateChange(isPlaying, localTime);
           }
         });
-        player.on(timechangeEvent, (e: any) => {
-          if (e && typeof e.videoTime === 'number') {
+
+        player.on('timeupdate', (e: any) => {
+          if (e && typeof e.time === 'number') {
+            localTime = e.time;
+          } else if (e && typeof e.videoTime === 'number') {
             localTime = e.videoTime;
           }
         });
@@ -538,24 +546,49 @@ function createWrappedPlayer(
         return {
           play: () => {
             try {
-              player.play().catch(() => {});
-            } catch (e) {}
+              player.play();
+            } catch (e) {
+              console.warn("Dailymotion play failed:", e);
+            }
           },
           pause: () => {
             try {
-              player.pause().catch(() => {});
-            } catch (e) {}
+              player.pause();
+            } catch (e) {
+              console.warn("Dailymotion pause failed:", e);
+            }
           },
           seekTo: (sec: number) => {
             try {
-              player.seek(sec).catch(() => {});
-            } catch (e) {}
+              player.seek(sec);
+            } catch (e) {
+              console.warn("Dailymotion seek failed:", e);
+            }
           },
-          getCurrentTime: () => localTime,
-          getPlayerState: () => isPlaying ? 1 : 2,
+          getCurrentTime: async () => {
+            try {
+              const state = await player.getState();
+              if (state && typeof state.videoTime === 'number') {
+                localTime = state.videoTime;
+              }
+            } catch (e) {}
+            return localTime;
+          },
+          getPlayerState: async () => {
+            try {
+              const state = await player.getState();
+              if (state && typeof state.playerIsPlaying === 'boolean') {
+                isPlaying = state.playerIsPlaying;
+              }
+            } catch (e) {}
+            return isPlaying ? 1 : 2;
+          },
           getPlaybackRate: () => 1,
           setPlaybackRate: () => {},
           destroy: () => {
+            try {
+              player.destroy();
+            } catch (e) {}
             try {
               (window as any).dailymotion.destroy(playerDiv.id);
             } catch (e) {}
@@ -576,7 +609,7 @@ function createWrappedPlayer(
       const options: any = {
         width: '100%',
         height: '100%',
-        autoplay: true,
+        autoplay: isPresenter,
         muted: !isPresenter,
         controls: true,
         parent: [window.location.hostname]
@@ -592,7 +625,7 @@ function createWrappedPlayer(
 
       return new Promise<AbstractPlayer>((resolve) => {
         player.addEventListener((window as any).Twitch.Player.READY, () => {
-          let isPaused = true; // Will be set to false when play event fires
+          let isPaused = !isPresenter;
 
           player.addEventListener((window as any).Twitch.Player.PLAY, () => {
             isPaused = false;
@@ -615,13 +648,42 @@ function createWrappedPlayer(
           }
 
           resolve({
-            play: () => player.play(),
-            pause: () => player.pause(),
-            seekTo: (sec) => {
-              if (!isLive) player.seek(sec);
+            play: () => {
+              try {
+                player.play();
+              } catch (e) {
+                console.warn("Twitch play failed:", e);
+              }
             },
-            getCurrentTime: () => isLive ? 0 : player.getCurrentTime(),
-            getPlayerState: () => isPaused ? 2 : 1,
+            pause: () => {
+              try {
+                player.pause();
+              } catch (e) {
+                console.warn("Twitch pause failed:", e);
+              }
+            },
+            seekTo: (sec) => {
+              try {
+                if (!isLive) player.seek(sec);
+              } catch (e) {
+                console.warn("Twitch seek failed:", e);
+              }
+            },
+            getCurrentTime: () => {
+              if (isLive) return 0;
+              try {
+                return player.getCurrentTime();
+              } catch (e) {
+                return 0;
+              }
+            },
+            getPlayerState: () => {
+              try {
+                return player.isPaused() ? 2 : 1;
+              } catch (e) {
+                return isPaused ? 2 : 1;
+              }
+            },
             destroy: () => {
               targetElement.innerHTML = '';
             }
@@ -3717,10 +3779,11 @@ function AppContent() {
     if (!currentRoom) return;
     
     hasSeenSelfInListRef.current = false; // Reset on every subscription/auth change to block race conditions!
+    const listenerMyId = getMyId();
     const rid = roomDocId(currentRoom);
     const presenceRef = collection(db, 'rooms', rid, 'participants');
     const unsubscribe = onSnapshot(presenceRef, (snapshot) => {
-      const myId = getMyId();
+      const myId = listenerMyId;
       
       snapshot.docChanges().forEach((change) => {
         const docId = change.doc.id;
