@@ -362,7 +362,7 @@ function createWrappedPlayer(
 ): Promise<AbstractPlayer> {
   if (platform === 'youtube') {
     return loadYoutubeApi().then(() => {
-      if (!document.body.contains(targetElement)) {
+      if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before YouTube Player could load");
       }
       return new Promise<AbstractPlayer>((resolve) => {
@@ -375,7 +375,9 @@ function createWrappedPlayer(
             controls: 1,
             disablekb: 0,
             rel: 0,
-            mute: isPresenter ? 0 : 1
+            mute: isPresenter ? 0 : 1,
+            origin: window.location.origin,
+            enablejsapi: 1
           },
           events: {
             onReady: () => {
@@ -419,7 +421,7 @@ function createWrappedPlayer(
 
   if (platform === 'vimeo') {
     return loadVimeoApi().then(() => {
-      if (!document.body.contains(targetElement)) {
+      if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before Vimeo Player could load");
       }
       targetElement.innerHTML = '';
@@ -471,7 +473,7 @@ function createWrappedPlayer(
 
   if (platform === 'dailymotion') {
     return loadDailymotionApi().then(() => {
-      if (!document.body.contains(targetElement)) {
+      if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before Dailymotion Player could load");
       }
       targetElement.innerHTML = '';
@@ -540,7 +542,7 @@ function createWrappedPlayer(
 
   if (platform === 'twitch') {
     return loadTwitchApi().then(() => {
-      if (!document.body.contains(targetElement)) {
+      if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before Twitch Player could load");
       }
       targetElement.innerHTML = '';
