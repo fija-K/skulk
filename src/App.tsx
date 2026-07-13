@@ -5211,15 +5211,7 @@ function AppContent() {
                 {filteredRooms.map((room) => {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
                   const rawParticipants = roomsParticipants[room.id] || [];
-                  const activeRoomId = currentRoom ? roomDocId(currentRoom) : null;
-                  const myId = getMyId();
-                  const filteredParticipants = rawParticipants.filter(p => {
-                    if (p.uid === myId) {
-                      return activeRoomId === room.id;
-                    }
-                    return true;
-                  });
-                  const currentRoomParticipants = [...filteredParticipants].sort((a, b) => {
+                  const currentRoomParticipants = [...rawParticipants].sort((a, b) => {
                     const aIsAdmin = a.role === 'admin';
                     const bIsAdmin = b.role === 'admin';
                     if (aIsAdmin && !bIsAdmin) return -1;
