@@ -2184,8 +2184,7 @@ function AppContent() {
   // Join Room Handlers (wiring direct vs pending status)
   const handleJoinRoomClick = async (room: Room) => {
     const myId = getMyId();
-    const isAdmin = isUserAdmin(user);
-    if (!isAdmin && myId) {
+    if (myId) {
       const alreadyJoinedRoomId = Object.keys(roomsParticipants).find(rid => {
         if (rid === room.id) return false;
         const participants = roomsParticipants[rid] || [];
@@ -2450,8 +2449,7 @@ function AppContent() {
               await new Promise(resolve => setTimeout(resolve, 200));
             }
           }
-          const isAdmin = isUserAdmin(user);
-          if (!isAdmin && myId) {
+          if (myId) {
             const alreadyJoinedRoomId = Object.keys(roomsParticipants).find(rid => {
               if (rid === roomObj!.id) return false;
               const participants = roomsParticipants[rid] || [];
@@ -2520,6 +2518,20 @@ function AppContent() {
       }
     } else {
       isEnteringRoomRef.current = null;
+      const myId = getMyId();
+      if (myId) {
+        Object.keys(roomsParticipants).forEach(async (rid) => {
+          const participants = roomsParticipants[rid] || [];
+          if (participants.some(p => p.uid === myId)) {
+            console.log("[DASHBOARD CLEANUP] removing residual presence from room:", rid);
+            try {
+              await leavePresence(rid);
+            } catch (e) {
+              console.warn("Failed to cleanup residual presence:", e);
+            }
+          }
+        });
+      }
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         console.log("[LEAVE EVENT] leavePresence triggered from route sync useEffect else-block (dashboard route), session:", currentSessionIdRef.current);
@@ -5199,7 +5211,15 @@ function AppContent() {
                 {filteredRooms.map((room) => {
                   const isScheduled = room.scheduledDate && room.scheduledTime;
                   const rawParticipants = roomsParticipants[room.id] || [];
-                  const currentRoomParticipants = [...rawParticipants].sort((a, b) => {
+                  const activeRoomId = currentRoom ? roomDocId(currentRoom) : null;
+                  const myId = getMyId();
+                  const filteredParticipants = rawParticipants.filter(p => {
+                    if (p.uid === myId) {
+                      return activeRoomId === room.id;
+                    }
+                    return true;
+                  });
+                  const currentRoomParticipants = [...filteredParticipants].sort((a, b) => {
                     const aIsAdmin = a.role === 'admin';
                     const bIsAdmin = b.role === 'admin';
                     if (aIsAdmin && !bIsAdmin) return -1;
