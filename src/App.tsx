@@ -2086,6 +2086,9 @@ function AppContent() {
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawColor, setDrawColor] = useState('#f1c40f'); // Neon gold as default
+  const [whiteboardStrokes, setWhiteboardStrokes] = useState<any[]>([]);
+  const activeStrokeRef = useRef<any>(null);
+  const lastWhiteboardWriteTimeRef = useRef<number>(0);
 
   // Tools sub-panel toggle
   const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -3987,6 +3990,56 @@ function AppContent() {
     return () => unsubscribe();
   }, [currentRoom ? roomDocId(currentRoom) : null, pomodoroIsRunning]);
 
+  const redrawCanvasFromStrokes = (strokes: any[], activeStroke?: any) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw completed or other strokes
+    strokes.forEach(stroke => {
+      if (activeStroke && stroke.id === activeStroke.id) return;
+      if (!stroke.points || stroke.points.length === 0) return;
+      
+      ctx.beginPath();
+      const startX = stroke.points[0][0] * canvas.width;
+      const startY = stroke.points[0][1] * canvas.height;
+      ctx.moveTo(startX, startY);
+      
+      for (let i = 1; i < stroke.points.length; i++) {
+        const x = stroke.points[i][0] * canvas.width;
+        const y = stroke.points[i][1] * canvas.height;
+        ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    });
+    
+    // Draw active stroke on top
+    if (activeStroke && activeStroke.points && activeStroke.points.length > 0) {
+      ctx.beginPath();
+      const startX = activeStroke.points[0][0] * canvas.width;
+      const startY = activeStroke.points[0][1] * canvas.height;
+      ctx.moveTo(startX, startY);
+      
+      for (let i = 1; i < activeStroke.points.length; i++) {
+        const x = activeStroke.points[i][0] * canvas.width;
+        const y = activeStroke.points[i][1] * canvas.height;
+        ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = activeStroke.color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+  };
+
   // Sync whiteboard canvas from the participant being viewed
   useEffect(() => {
     if (!viewingShare || viewingShare.type !== 'whiteboard' || !currentRoom) return;
@@ -4009,6 +4062,15 @@ function AppContent() {
         if (ctx) {
           if (!data.whiteboardData) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            setWhiteboardStrokes([]);
+          } else if (data.whiteboardData.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(data.whiteboardData);
+              setWhiteboardStrokes(parsed);
+              redrawCanvasFromStrokes(parsed, activeStrokeRef.current);
+            } catch (e) {
+              console.warn("Failed to parse whiteboard strokes:", e);
+            }
           } else {
             const img = new Image();
             img.onload = () => {
@@ -4146,6 +4208,19 @@ function AppContent() {
   }, [currentRoom, screenShareStream]);
 
 
+  const syncCurrentStrokesToFirestore = async () => {
+    if (!activeStrokeRef.current || !currentRoom || !viewingShare || viewingShare.type !== 'whiteboard' || !canDrawOnWhiteboard) return;
+    const otherStrokes = whiteboardStrokes.filter(s => s.id !== activeStrokeRef.current.id);
+    const updatedStrokes = [...otherStrokes, activeStrokeRef.current];
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { 
+        whiteboardData: JSON.stringify(updatedStrokes) 
+      });
+    } catch (e) {
+      console.warn("Failed to sync live whiteboard:", e);
+    }
+  };
+
   // Resize canvas when whiteboard view opens or draw color changes
   useEffect(() => {
     if (viewingShare?.type === 'whiteboard' && canvasRef.current) {
@@ -4159,6 +4234,7 @@ function AppContent() {
           ctx.lineCap = 'round';
           ctx.lineWidth = 3;
           ctx.strokeStyle = drawColor;
+          redrawCanvasFromStrokes(whiteboardStrokes, activeStrokeRef.current);
         }
       };
 
@@ -4174,7 +4250,7 @@ function AppContent() {
         window.removeEventListener('resize', handleResize);
       };
     }
-  }, [viewingShare?.type, drawColor]);
+  }, [viewingShare?.type, drawColor, whiteboardStrokes]);
 
   // Mouse drawing handlers
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -4184,35 +4260,67 @@ function AppContent() {
     if (!ctx) return;
     
     const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / canvas.width;
+    const y = (e.clientY - rect.top) / canvas.height;
+    
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
     ctx.strokeStyle = drawColor;
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     setIsDrawing(true);
+    
+    activeStrokeRef.current = {
+      id: Math.random().toString(36).substr(2, 9),
+      color: drawColor,
+      points: [[x, y]]
+    };
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+    if (!isDrawing || !activeStrokeRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
     const rect = canvas.getBoundingClientRect();
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    
+    ctx.lineTo(localX, localY);
     ctx.stroke();
+    
+    const x = localX / canvas.width;
+    const y = localY / canvas.height;
+    activeStrokeRef.current.points.push([x, y]);
+    
+    const now = Date.now();
+    if (now - lastWhiteboardWriteTimeRef.current > 150) {
+      lastWhiteboardWriteTimeRef.current = now;
+      syncCurrentStrokesToFirestore();
+    }
   };
 
   const stopDrawing = async () => {
+    if (!isDrawing) return;
     setIsDrawing(false);
-    const canvas = canvasRef.current;
-    if (canvas && currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
-      const dataUrl = canvas.toDataURL();
-      try {
-        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { whiteboardData: dataUrl });
-      } catch (e) {
-        console.warn("Failed to sync whiteboard to Firestore:", e);
+    
+    if (activeStrokeRef.current) {
+      const otherStrokes = whiteboardStrokes.filter(s => s.id !== activeStrokeRef.current.id);
+      const updatedStrokes = [...otherStrokes, activeStrokeRef.current];
+      activeStrokeRef.current = null;
+      setWhiteboardStrokes(updatedStrokes);
+      
+      if (currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
+        try {
+          await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', viewingShare.participantId), { 
+            whiteboardData: JSON.stringify(updatedStrokes) 
+          });
+        } catch (e) {
+          console.warn("Failed to commit whiteboard stroke:", e);
+        }
       }
     }
   };
@@ -4226,16 +4334,26 @@ function AppContent() {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) / canvas.width;
+    const y = (touch.clientY - rect.top) / canvas.height;
+    
     ctx.beginPath();
     ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
     ctx.strokeStyle = drawColor;
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     setIsDrawing(true);
+    
+    activeStrokeRef.current = {
+      id: Math.random().toString(36).substr(2, 9),
+      color: drawColor,
+      points: [[x, y]]
+    };
   };
 
   const drawTouch = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+    if (!isDrawing || !activeStrokeRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -4243,8 +4361,21 @@ function AppContent() {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    ctx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+    const localX = touch.clientX - rect.left;
+    const localY = touch.clientY - rect.top;
+    
+    ctx.lineTo(localX, localY);
     ctx.stroke();
+    
+    const x = localX / canvas.width;
+    const y = localY / canvas.height;
+    activeStrokeRef.current.points.push([x, y]);
+    
+    const now = Date.now();
+    if (now - lastWhiteboardWriteTimeRef.current > 150) {
+      lastWhiteboardWriteTimeRef.current = now;
+      syncCurrentStrokesToFirestore();
+    }
   };
 
   const clearCanvas = async () => {
@@ -4254,6 +4385,8 @@ function AppContent() {
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    setWhiteboardStrokes([]);
+    activeStrokeRef.current = null;
     showToast('Whiteboard cleared');
     if (currentRoom && viewingShare && viewingShare.type === 'whiteboard' && canDrawOnWhiteboard) {
       try {
