@@ -5583,17 +5583,6 @@ function AppContent() {
     setActiveMenuParticipantId(null);
   };
 
-  const handleParticipantPinToggle = (id: string, name: string) => {
-    setCallParticipants(prev => prev.map(p => {
-      if (p.id === id) {
-        const nextPin = !p.isPinned;
-        showToast(nextPin ? `Pinned ${name}` : `Unpinned ${name}`);
-        return { ...p, isPinned: nextPin };
-      }
-      return p;
-    }));
-    setActiveMenuParticipantId(null);
-  };
 
   const handleParticipantRemove = async (id: string, name: string) => {
     if (!currentRoom) return;
@@ -5804,7 +5793,7 @@ function AppContent() {
       return (
         <div 
           key={p.id} 
-          className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''}`}
+          className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''} ${showCamOff ? 'camera-off' : ''}`}
           onClick={() => setSpotlightParticipantId(p.id)}
           style={{ 
             cursor: 'pointer',
@@ -5837,19 +5826,28 @@ function AppContent() {
             }}>
               <span style={{ fontSize: '16px', color: 'var(--primary-color)' }}>▶</span>
             </div>
-          ) : !showCamOff && !(isUser && cameraError) ? (
-            <ParticipantVideo participantId={p.id} objectFit="cover" />
-          ) : p.photoURL ? (
-            <img 
-              src={p.photoURL} 
-              alt={p.name} 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-              referrerPolicy="no-referrer"
-            />
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '16px', fontWeight: 'bold', color: '#fff' }}>
-              {p.initials}
-            </div>
+            <>
+              <div className="tile-video-wrapper">
+                {!(isUser && cameraError) && (
+                  <ParticipantVideo participantId={p.id} objectFit="cover" />
+                )}
+              </div>
+              <div className="tile-avatar-wrapper">
+                {p.photoURL ? (
+                  <img 
+                    src={p.photoURL} 
+                    alt={p.name} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '16px', fontWeight: 'bold', color: '#fff' }}>
+                    {p.initials}
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           {/* Micro status indicator (Muted status) */}
@@ -5908,7 +5906,7 @@ function AppContent() {
     return (
       <div 
         key={p.id} 
-        className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''}`}
+        className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${showCamOff ? 'camera-off' : ''}`}
         onClick={() => {
           if (p.sharing) {
             handleViewParticipantShare(p);
@@ -5972,41 +5970,78 @@ function AppContent() {
               </span>
               <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>Click to join</span>
             </div>
-          ) : !showCamOff ? (
+          ) : (
             <>
-              {isUser && cameraError ? (
-                // Refined camera error display: show PFP/initials background + a small centered retry box!
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  {p.photoURL ? (
-                    <img 
-                      src={p.photoURL} 
-                      alt={p.name} 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
-                  )}
-                  <div 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                    }}
-                    style={{
-                      position: 'absolute',
-                      padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
-                      border: '1px solid var(--border-color)', borderRadius: '6px',
-                      cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
-                    }}
-                  >
-                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
-                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+              {/* Keep video element in DOM */}
+              <div className="tile-video-wrapper">
+                {isUser && cameraError ? (
+                  // Refined camera error display: show PFP/initials background + a small centered retry box!
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    {p.photoURL ? (
+                      <img 
+                        src={p.photoURL} 
+                        alt={p.name} 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                    )}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                      }}
+                      style={{
+                        position: 'absolute',
+                        padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
+                        border: '1px solid var(--border-color)', borderRadius: '6px',
+                        cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
-              )}
+                ) : (
+                  <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
+                )}
+              </div>
               
+              {/* Keep large avatar circle in DOM */}
+              <div 
+                className="participant-avatar-large" 
+                style={{ 
+                  backgroundColor: p.color, 
+                  cursor: p.sharing ? 'pointer' : 'default',
+                  position: 'relative',
+                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                  overflow: 'hidden',
+                  width: '96px',
+                  height: '96px',
+                  borderRadius: '50%',
+                  fontSize: '32px',
+                  marginBottom: '0'
+                }}
+                onClick={() => {
+                  if (p.sharing) {
+                    handleViewParticipantShare(p);
+                  }
+                }}
+              >
+                {p.photoURL ? (
+                  <img 
+                    src={p.photoURL} 
+                    alt={p.name} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  p.initials
+                )}
+              </div>
+
               {p.sharing && (
                 <div className="sharing-badge-overlay" style={{
                   position: 'absolute',
@@ -6035,62 +6070,6 @@ function AppContent() {
                 </div>
               )}
             </>
-          ) : (
-            /* Avatar Square (Gallery Mode) */
-            <div 
-              className="participant-avatar-large" 
-              style={{ 
-                backgroundColor: p.color, 
-                cursor: p.sharing ? 'pointer' : 'default',
-                position: 'relative',
-                boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                overflow: 'hidden',
-                width: '96px',
-                height: '96px',
-                borderRadius: '50%',
-                fontSize: '32px',
-                marginBottom: '0'
-              }}
-              onClick={() => {
-                if (p.sharing) {
-                  handleViewParticipantShare(p);
-                }
-              }}
-            >
-              {p.photoURL ? (
-                <img 
-                  src={p.photoURL} 
-                  alt={p.name} 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                p.initials
-              )}
-              {p.sharing && (
-                <div className="sharing-badge-overlay" style={{
-                  position: 'absolute',
-                  bottom: '-6px',
-                  right: '-6px',
-                  backgroundColor: 'var(--primary-color)',
-                  color: '#0f1013',
-                  borderRadius: '50%',
-                  width: '22px',
-                  height: '22px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  border: '2px solid var(--card-bg, #1a1c23)',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                  zIndex: 10
-                }} title={`Sharing ${p.sharing} - click to view`}>
-                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                </div>
-              )}
-            </div>
           )
         ) : (
           // Compact Grid Layout OR Thumbnail view: Floating Avatar
@@ -6124,17 +6103,26 @@ function AppContent() {
               }}>
                 <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
               </div>
-            ) : !showCamOff && !(isUser && cameraError) ? (
-              <ParticipantVideo participantId={p.id} />
-            ) : p.photoURL ? (
-              <img 
-                src={p.photoURL} 
-                alt={p.name} 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                referrerPolicy="no-referrer"
-              />
             ) : (
-              p.initials
+              <>
+                <div className="tile-video-wrapper">
+                  {!(isUser && cameraError) && (
+                    <ParticipantVideo participantId={p.id} />
+                  )}
+                </div>
+                <div className="tile-avatar-wrapper">
+                  {p.photoURL ? (
+                    <img 
+                      src={p.photoURL} 
+                      alt={p.name} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="tile-avatar-initials">{p.initials}</span>
+                  )}
+                </div>
+              </>
             )}
             
             {/* Clickable Retry warning indicator in compact view */}
@@ -6187,51 +6175,52 @@ function AppContent() {
           </div>
         )}
         
-        {/* Name Tag + Muted Status */}
+        {/* Name Tag + Muted Status Overlay */}
         {!isThumbnail && (
-          <div className="participant-name-tag" style={{ gap: '6px' }}>
-            <span>{p.name}</span>
-            {p.role && p.role !== 'member' && (
-              <span className={`role-tag-${p.role}`} style={{
-                fontSize: '9px',
-                fontWeight: 'bold',
-                padding: '1px 5px',
-                borderRadius: '4px',
-                textTransform: 'uppercase',
-                border: '1px solid',
-                lineHeight: '1.2',
-                ...p.role === 'admin' ? {
-                  backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                  borderColor: 'var(--primary-color, #f1c40f)',
-                  color: 'var(--primary-color, #f1c40f)'
-                } : p.role === 'host' ? {
-                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                  borderColor: '#3b82f6',
-                  color: '#3b82f6'
-                } : {
-                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  borderColor: '#10b981',
-                  color: '#10b981'
-                }
-              }}>
-                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-              </span>
-            )}
-            {showMuted && (
-              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <div className="participant-info-overlay">
+            <div className="participant-name-tag" style={{ gap: '6px' }}>
+              <span>{p.name}</span>
+              {p.role && p.role !== 'member' && (
+                <span className={`role-tag-${p.role}`} style={{
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  border: '1px solid',
+                  lineHeight: '1.2',
+                  ...p.role === 'admin' ? {
+                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                    borderColor: 'var(--primary-color, #f1c40f)',
+                    color: 'var(--primary-color, #f1c40f)'
+                  } : p.role === 'host' ? {
+                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                    borderColor: '#3b82f6',
+                    color: '#3b82f6'
+                  } : {
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    borderColor: '#10b981',
+                    color: '#10b981'
+                  }
+                }}>
+                  {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                </span>
+              )}
+            </div>
+            <div className={`tile-mic-badge ${showMuted ? 'muted' : 'active'}`}>
+              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="1" y1="1" x2="23" y2="23"></line>
                 <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
                 <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
                 <line x1="12" y1="19" x2="12" y2="23"></line>
                 <line x1="8" y1="23" x2="16" y2="23"></line>
               </svg>
-            )}
-            {p.isPinned && (
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary-color)' }}>
-                <line x1="12" y1="17" x2="12" y2="22"></line>
-                <path d="M5 17h14v-1.76a2 2 0 0 0-.44-1.24l-2.33-2.91a2 2 0 0 1-.43-1.23V4a1 1 0 0 0-1-1h-5.6a1 1 0 0 0-1 1v5.86c0 .44-.16.86-.43 1.23l-2.33 2.91a2 2 0 0 0-.44 1.24V17Z"></path>
+              <svg className="tile-icon-active" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
               </svg>
-            )}
+            </div>
           </div>
         )}
   
@@ -6278,13 +6267,6 @@ function AppContent() {
                   </button>
                 )}
                 
-                {/* Pin action */}
-                <button 
-                  onClick={() => handleParticipantPinToggle(p.id, p.name)} 
-                  className="tile-menu-item"
-                >
-                  {p.isPinned ? 'Unpin' : 'Pin'}
-                </button>
                 
                 {/* Role Promotion/Demotion Actions */}
                 {callParticipants.find(part => part.id === getMyId())?.role === 'admin' && (

@@ -1118,26 +1118,233 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
 }
 
-.participant-name-tag {
+.participant-info-overlay {
   position: absolute;
   bottom: 12px;
   left: 12px;
-  background-color: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  padding: 4px 8px;
-  border-radius: var(--btn-radius);
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.participant-name-tag {
+  background-color: rgba(15, 16, 19, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 6px 10px;
+  border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
   color: #ffffff;
   display: flex;
   align-items: center;
   gap: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.tile-icon-muted {
-  color: #ef4444;
+.tile-mic-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: rgba(15, 16, 19, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.tile-mic-badge.muted {
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tile-mic-badge.active {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tile-mic-badge svg {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tile-mic-badge .tile-icon-muted {
+  color: #ef4444;
+  opacity: 0;
+  transform: scale(0.7) rotate(-45deg);
+}
+
+.tile-mic-badge .tile-icon-active {
+  color: #10b981;
+  opacity: 0;
+  transform: scale(0.7) rotate(45deg);
+}
+
+.tile-mic-badge.muted .tile-icon-muted {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.tile-mic-badge.active .tile-icon-active {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+/* Video & Avatar Transitions */
+.tile-video-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.tile-avatar-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background-color: inherit;
+}
+
+.tile-avatar-initials {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+/* When camera is off */
+.participant-tile.camera-off .tile-video-wrapper {
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+}
+
+.participant-tile.camera-off .tile-avatar-wrapper {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+/* Gallery View: Full Card Avatar circle visibility */
+.participant-tile .participant-avatar-large {
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.participant-tile.camera-off .participant-avatar-large {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+/* Override for Compact Grid and Thumbnail Strip Views */
+.grid-layout .participant-tile .participant-avatar-large,
+.screenshare-tiles-strip .participant-tile .participant-avatar-large {
+  opacity: 1 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+}
+
+.grid-layout .participant-info-overlay {
+  position: static !important;
+  display: block !important;
+  width: 100%;
+  text-align: center;
+  margin-top: 8px;
+  pointer-events: auto !important;
+}
+
+.grid-layout .participant-info-overlay .participant-name-tag {
+  background: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  color: var(--text-primary) !important;
+  justify-content: center;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.grid-layout .tile-mic-badge {
+  position: absolute !important;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.grid-layout .tile-mic-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+.screenshare-tiles-strip .participant-info-overlay {
+  position: static !important;
+  display: block !important;
+  width: 100%;
+  text-align: center;
+  margin-top: 4px;
+  pointer-events: auto !important;
+}
+
+.screenshare-tiles-strip .participant-info-overlay .participant-name-tag {
+  background: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  font-size: 11px !important;
+  color: var(--text-primary) !important;
+  justify-content: center;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.screenshare-tiles-strip .tile-mic-badge {
+  position: absolute !important;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.screenshare-tiles-strip .tile-mic-badge svg {
+  width: 9px;
+  height: 9px;
 }
 
 /* Compact Grid View Overrides (remove wrapping box cards, glow on avatar) */
