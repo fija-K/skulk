@@ -2518,20 +2518,6 @@ function AppContent() {
       }
     } else {
       isEnteringRoomRef.current = null;
-      const myId = getMyId();
-      if (myId) {
-        Object.keys(roomsParticipants).forEach(async (rid) => {
-          const participants = roomsParticipants[rid] || [];
-          if (participants.some(p => p.uid === myId)) {
-            console.log("[DASHBOARD CLEANUP] removing residual presence from room:", rid);
-            try {
-              await leavePresence(rid);
-            } catch (e) {
-              console.warn("Failed to cleanup residual presence:", e);
-            }
-          }
-        });
-      }
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         console.log("[LEAVE EVENT] leavePresence triggered from route sync useEffect else-block (dashboard route), session:", currentSessionIdRef.current);
