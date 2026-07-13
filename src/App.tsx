@@ -2552,7 +2552,6 @@ function AppContent() {
 
   const modalRef = useRef<HTMLDivElement>(null);
   const themePickerRef = useRef<HTMLDivElement>(null);
-  const sidebarMenuRef = useRef<HTMLDivElement>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -2741,7 +2740,8 @@ function AppContent() {
         setIsRoomSettingsOpen(false);
       }
       // Hover participant action dropdown click outside close
-      if (sidebarMenuRef.current && !sidebarMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest('.tile-actions-trigger') && !target.closest('.tile-actions-menu')) {
         setActiveMenuParticipantId(null);
       }
       // User dropdown click outside close
@@ -3720,8 +3720,8 @@ function AppContent() {
           initials: data.initials,
           color: data.color,
           photoURL: data.photoURL,
-          isMuted: isMe ? isMicMutedRef.current : (data.isMuted ?? false),
-          isCamOff: isMe ? isCamOffRef.current : (data.isCamOff ?? false),
+          isMuted: data.isMuted ?? false,
+          isCamOff: data.isCamOff ?? false,
           isSpeaking: false,
           isPinned: false,
           role: data.role || (currentRoom.creatorId === docSnap.id ? 'host' : 'member'),
@@ -6239,7 +6239,7 @@ function AppContent() {
         {!isThumbnail && !isUser && (callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
                                      callParticipants.find(part => part.id === getMyId())?.role === 'host' || 
                                      callParticipants.find(part => part.id === getMyId())?.role === 'cohost') && (
-          <div ref={sidebarMenuRef}>
+          <div>
             <button 
               onClick={(e) => {
                 e.stopPropagation();
