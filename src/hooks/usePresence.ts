@@ -7,8 +7,7 @@ import {
   setDoc, 
   updateDoc, 
   runTransaction, 
-  onSnapshot,
-  Timestamp
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Participant, Room } from '../App';
@@ -67,17 +66,6 @@ export function usePresence(
           const data = snap.data();
           if (!sessionIdToDelete || data.sessionId === sessionIdToDelete) {
             console.log("leavePresence transaction deleting presence:", myId);
-            
-            const logRef = doc(collection(db, 'rooms', roomIdToLeave, 'history'));
-            transaction.set(logRef, {
-              type: 'leave',
-              uid: myId,
-              name: data.name || 'Unknown',
-              sessionId: data.sessionId || 'none',
-              leftAt: Timestamp.now(),
-              duration: localJoinTimeRef.current ? Math.round((Date.now() - localJoinTimeRef.current) / 1000) : 0
-            });
-
             transaction.delete(presenceDocRef);
           } else {
             console.log('leavePresence bypassed: presence belongs to a newer session.');
