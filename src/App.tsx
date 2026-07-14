@@ -1468,6 +1468,7 @@ function AppContent() {
     }
   }, [userDataState, isEditingBio]);
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
+  const [followerUserIds, setFollowerUserIds] = useState<string[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [connectionsCount, setConnectionsCount] = useState(0);
@@ -1611,6 +1612,7 @@ function AppContent() {
   useEffect(() => {
     if (!user) {
       setFollowingUserIds([]);
+      setFollowerUserIds([]);
       setFollowersCount(0);
       setFollowingCount(0);
       setConnectionsCount(0);
@@ -1627,28 +1629,27 @@ function AppContent() {
       console.warn("Failed to listen to follows list:", err);
     });
 
-    // 2. Followers Count query
+    // 2. Followers list
     const qFollowers = query(collection(db, 'follows'), where('followingId', '==', user.uid));
     const unsubFollowers = onSnapshot(qFollowers, (snap) => {
+      const ids = snap.docs.map(d => d.data().followerId);
+      setFollowerUserIds(ids);
       setFollowersCount(snap.size);
     }, (err) => {
       console.warn("Failed to listen to followers count:", err);
     });
 
-    // 3. Mutual Connections Count query (subcollection under user doc)
-    const qConn = query(collection(db, 'users', user.uid, 'connections'), where('status', '==', 'accepted'));
-    const unsubConn = onSnapshot(qConn, (snap) => {
-      setConnectionsCount(snap.size);
-    }, (err) => {
-      console.warn("Failed to listen to connections count:", err);
-    });
-
     return () => {
       unsubFollows();
       unsubFollowers();
-      unsubConn();
     };
   }, [user]);
+
+  // Compute connectionsCount as mutual followers
+  useEffect(() => {
+    const mutual = followingUserIds.filter(id => followerUserIds.includes(id));
+    setConnectionsCount(mutual.length);
+  }, [followingUserIds, followerUserIds]);
 
   // Real-time Community Directory Query
   useEffect(() => {
