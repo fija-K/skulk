@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
@@ -2892,7 +2892,27 @@ function AppContent() {
   
 
   // Screen share trigger
-  const startScreenShare = async () => {
+  const stopScreenShare = useCallback(async () => {
+    setScreenShareStream(prevStream => {
+      if (prevStream) {
+        prevStream.getTracks().forEach(track => track.stop());
+      }
+      return null;
+    });
+    
+    await clearMySharing();
+    
+    setViewingShare(prevShare => {
+      if (prevShare?.type === 'screen') {
+        return null;
+      }
+      return prevShare;
+    });
+    
+    showToast('Screen sharing stopped');
+  }, []);
+
+  const startScreenShare = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
@@ -2914,19 +2934,7 @@ function AppContent() {
       console.error('Error starting screen share:', err);
       showToast('Screen share failed or cancelled');
     }
-  };
-
-  const stopScreenShare = async () => {
-    if (screenShareStream) {
-      screenShareStream.getTracks().forEach(track => track.stop());
-      setScreenShareStream(null);
-    }
-    await clearMySharing();
-    if (viewingShare?.type === 'screen') {
-      setViewingShare(null);
-    }
-    showToast('Screen sharing stopped');
-  };
+  }, [stopScreenShare]);
 
   // Watch Together Submit Handler
   const handleWatchTogetherSubmit = async (e: React.FormEvent) => {
