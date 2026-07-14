@@ -5298,13 +5298,13 @@ function AppContent() {
                                     style={{ objectFit: 'cover', border: '1px solid var(--border-color)', cursor: 'pointer' }}
                                     referrerPolicy="no-referrer"
                                     onClick={() => {
-                                      setSelectedProfile({
+                                      handleOpenProfile({
                                         id: participant.uid || participant.id,
                                         name: participant.name.replace(' (You)', ''),
                                         initials: participant.initials,
                                         color: participant.color || '#3b82f6',
                                         photoURL: participant.photoURL
-                                      });
+                                      }, 'card');
                                     }}
                                   />
                                 ) : (
@@ -5313,13 +5313,13 @@ function AppContent() {
                                     className="avatar-slot avatar-filled"
                                     style={{ backgroundColor: participant.color || '#8b5cf6', cursor: 'pointer' }}
                                     onClick={() => {
-                                      setSelectedProfile({
+                                      handleOpenProfile({
                                         id: participant.uid || participant.id,
                                         name: participant.name.replace(' (You)', ''),
                                         initials: participant.initials,
                                         color: participant.color || '#8b5cf6',
                                         photoURL: null
-                                      });
+                                      }, 'card');
                                     }}
                                   >
                                     {participant.initials}
@@ -5356,13 +5356,13 @@ function AppContent() {
                                       style={{ objectFit: 'cover', border: '1px solid var(--border-color)', cursor: 'pointer' }}
                                       referrerPolicy="no-referrer"
                                       onClick={() => {
-                                        setSelectedProfile({
+                                        handleOpenProfile({
                                           id: participant.uid || participant.id,
                                           name: participant.name.replace(' (You)', ''),
                                           initials: participant.initials,
                                           color: participant.color || '#3b82f6',
                                           photoURL: participant.photoURL
-                                        });
+                                        }, 'card');
                                       }}
                                     />
                                   ) : (
@@ -5371,13 +5371,13 @@ function AppContent() {
                                       className="avatar-slot avatar-filled"
                                       style={{ backgroundColor: participant.color || '#8b5cf6', cursor: 'pointer' }}
                                       onClick={() => {
-                                        setSelectedProfile({
+                                        handleOpenProfile({
                                           id: participant.uid || participant.id,
                                           name: participant.name.replace(' (You)', ''),
                                           initials: participant.initials,
                                           color: participant.color || '#8b5cf6',
                                           photoURL: null
-                                        });
+                                        }, 'card');
                                       }}
                                     >
                                       {participant.initials}
@@ -6742,13 +6742,13 @@ function AppContent() {
                                 border: p.sharing ? '1px solid var(--primary-color)' : 'none'
                               }}
                               onClick={() => {
-                                setSelectedProfile({
+                                handleOpenProfile({
                                   id: p.id,
                                   name: p.name.replace(' (You)', ''),
                                   initials: p.initials,
                                   color: p.color,
                                   photoURL: p.photoURL || null
-                                });
+                                }, 'card');
                               }}
                             >
                               {p.initials}
@@ -6778,13 +6778,13 @@ function AppContent() {
                                 className="person-name"
                                 style={{ cursor: 'pointer' }}
                                 onClick={() => {
-                                  setSelectedProfile({
+                                  handleOpenProfile({
                                     id: p.id,
                                     name: p.name.replace(' (You)', ''),
                                     initials: p.initials,
                                     color: p.color,
                                     photoURL: p.photoURL || null
-                                  });
+                                  }, 'card');
                                 }}
                               >
                                 {p.name}
