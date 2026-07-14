@@ -17,6 +17,7 @@ export interface AbstractPlayer {
   getPlayerState(): Promise<number> | number;
   getPlaybackRate?(): Promise<number> | number;
   setPlaybackRate?(rate: number): Promise<void> | void;
+  getDuration?(): Promise<number> | number;
   destroy(): void;
 }
 
@@ -66,6 +67,7 @@ export function createWrappedPlayer(
                 },
                 getPlaybackRate: () => player.getPlaybackRate() || 1,
                 setPlaybackRate: (rate) => player.setPlaybackRate(rate),
+                getDuration: () => player.getDuration() || 0,
                 destroy: () => {
                   try {
                     player.destroy();
@@ -432,10 +434,26 @@ export function UniversalVideoPlayer({
       console.warn("Failed to sync playback rate:", e);
     }
 
-    // 3. Sync seek/current time
+    // 3. Sync seek/current time (with safe metadata duration check)
     try {
       const currentTime = await player.getCurrentTime();
-      if (Math.abs(currentTime - correctedTime) > 2) {
+      let canSeek = true;
+      if (player.getDuration) {
+        const dur = await player.getDuration();
+        if (dur === 0) {
+          canSeek = false;
+          // Force a play command to kickstart the player buffering if it's stuck in UNSTARTED/CUED
+          if (targetPlaying) {
+            player.play();
+          }
+          // Retry sync in 250ms
+          setTimeout(() => {
+            if (playerRef.current) syncToPresenterState(data, playerRef.current);
+          }, 250);
+        }
+      }
+
+      if (canSeek && Math.abs(currentTime - correctedTime) > 2) {
         player.seekTo(correctedTime);
       }
     } catch (e) {
