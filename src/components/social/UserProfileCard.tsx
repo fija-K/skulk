@@ -18,6 +18,7 @@ interface UserProfileCardProps {
   onClose: () => void;
   onSelectUser: (user: UserProfile) => void;
   showToast: (msg: string) => void;
+  initialView?: 'card' | 'followers' | 'following' | 'connections' | 'report';
 }
 
 export function UserProfileCard({
@@ -26,9 +27,10 @@ export function UserProfileCard({
   callParticipants,
   onClose,
   onSelectUser,
-  showToast
+  showToast,
+  initialView = 'card'
 }: UserProfileCardProps) {
-  const [view, setView] = useState<'card' | 'followers' | 'following' | 'report'>('card');
+  const [view, setView] = useState<'card' | 'followers' | 'following' | 'connections' | 'report'>(initialView);
   const [listUserIds, setListUserIds] = useState<string[]>([]);
   const [isListLoading, setIsListLoading] = useState(false);
   
@@ -61,34 +63,68 @@ export function UserProfileCard({
     targetUser.id
   );
 
-  // Sync list of followers or following
+  // Sync list of followers, following, or connections
   useEffect(() => {
-    if (view !== 'followers' && view !== 'following') return;
+    if (view !== 'followers' && view !== 'following' && view !== 'connections') return;
     setIsListLoading(true);
 
     const followsRef = collection(db, 'follows');
-    const q = query(
-      followsRef,
-      where(view === 'followers' ? 'followingId' : 'followerId', '==', targetUser.id)
-    );
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const ids = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return view === 'followers' ? data.followerId : data.followingId;
-        });
-        setListUserIds(ids);
-        setIsListLoading(false);
-      },
-      (err) => {
-        console.error('Failed to sync follows list:', err);
+    if (view === 'connections') {
+      const qFollowers = query(followsRef, where('followingId', '==', targetUser.id));
+      const qFollowing = query(followsRef, where('followerId', '==', targetUser.id));
+
+      let followersIds: string[] = [];
+      let followingIds: string[] = [];
+
+      const unsubFollowers = onSnapshot(qFollowers, (snap) => {
+        followersIds = snap.docs.map(doc => doc.data().followerId);
+        updateMutual();
+      }, (err) => {
+        console.error("Failed to sync connections followers:", err);
+      });
+
+      const unsubFollowing = onSnapshot(qFollowing, (snap) => {
+        followingIds = snap.docs.map(doc => doc.data().followingId);
+        updateMutual();
+      }, (err) => {
+        console.error("Failed to sync connections following:", err);
+      });
+
+      function updateMutual() {
+        const intersection = followersIds.filter(id => followingIds.includes(id));
+        setListUserIds(intersection);
         setIsListLoading(false);
       }
-    );
 
-    return () => unsubscribe();
+      return () => {
+        unsubFollowers();
+        unsubFollowing();
+      };
+    } else {
+      const q = query(
+        followsRef,
+        where(view === 'followers' ? 'followingId' : 'followerId', '==', targetUser.id)
+      );
+
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const ids = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return view === 'followers' ? data.followerId : data.followingId;
+          });
+          setListUserIds(ids);
+          setIsListLoading(false);
+        },
+        (err) => {
+          console.error('Failed to sync follows list:', err);
+          setIsListLoading(false);
+        }
+      );
+
+      return () => unsubscribe();
+    }
   }, [view, targetUser.id]);
 
   const handleReportSubmit = async (e: React.FormEvent) => {
@@ -289,8 +325,8 @@ export function UserProfileCard({
           </div>
         )}
 
-        {/* 2. Followers / Following List View */}
-        {(view === 'followers' || view === 'following') && (
+        {/* 2. Followers / Following / Connections List View */}
+        {(view === 'followers' || view === 'following' || view === 'connections') && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', gap: '8px' }}>
               <button 

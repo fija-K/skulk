@@ -1132,6 +1132,8 @@ function AppContent() {
     photoURL?: string | null;
   } | null>(null);
 
+  const [initialProfileView, setInitialProfileView] = useState<'card' | 'followers' | 'following' | 'connections' | 'report'>('card');
+
 
 
   // Local game/truth or dare/spin states
@@ -1473,6 +1475,11 @@ function AppContent() {
   const [followingCount, setFollowingCount] = useState(0);
   const [connectionsCount, setConnectionsCount] = useState(0);
   const [communityUsers, setCommunityUsers] = useState<any[]>([]);
+
+  const handleOpenProfile = (profile: any, view: 'card' | 'followers' | 'following' | 'connections' | 'report' = 'card') => {
+    setInitialProfileView(view);
+    setSelectedProfile(profile);
+  };
 
   const isRollingOverRef = useRef(false);
 
@@ -5490,15 +5497,42 @@ function AppContent() {
                       <span style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>Weekly Self-Reflection</span>
                       
                       <div style={{ display: 'flex', gap: '16px', marginTop: '6px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div 
+                          onClick={() => handleOpenProfile({
+                            id: user.uid,
+                            name: user.displayName || 'Google User',
+                            initials: guestInitials || (user.displayName ? user.displayName.substring(0, 2).toUpperCase() : 'G'),
+                            color: guestColor || '#8b5cf6',
+                            photoURL: user.photoURL || null
+                          }, 'connections')}
+                          style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+                        >
                           <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{connectionsCount}</span>
                           <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Connections</span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div 
+                          onClick={() => handleOpenProfile({
+                            id: user.uid,
+                            name: user.displayName || 'Google User',
+                            initials: guestInitials || (user.displayName ? user.displayName.substring(0, 2).toUpperCase() : 'G'),
+                            color: guestColor || '#8b5cf6',
+                            photoURL: user.photoURL || null
+                          }, 'followers')}
+                          style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+                        >
                           <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{followersCount}</span>
                           <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Followers</span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div 
+                          onClick={() => handleOpenProfile({
+                            id: user.uid,
+                            name: user.displayName || 'Google User',
+                            initials: guestInitials || (user.displayName ? user.displayName.substring(0, 2).toUpperCase() : 'G'),
+                            color: guestColor || '#8b5cf6',
+                            photoURL: user.photoURL || null
+                          }, 'following')}
+                          style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+                        >
                           <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: '1.2' }}>{followingCount}</span>
                           <span style={{ fontSize: '9px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Following</span>
                         </div>
@@ -8137,6 +8171,7 @@ function AppContent() {
           onClose={() => setSelectedProfile(null)}
           onSelectUser={(profile) => setSelectedProfile(profile)}
           showToast={showToast}
+          initialView={initialProfileView}
         />
       )}
 
