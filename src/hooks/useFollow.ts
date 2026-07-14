@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
+import { doc, onSnapshot, writeBatch, increment, getDocs, query, collection, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export function useFollow(currentUserId: string, targetUserId: string) {
@@ -23,11 +23,31 @@ export function useFollow(currentUserId: string, targetUserId: string) {
     });
 
     const targetUserRef = doc(db, 'users', targetUserId);
-    const unsubUser = onSnapshot(targetUserRef, (docSnap) => {
+    const unsubUser = onSnapshot(targetUserRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setFollowersCount(data.followersCount || 0);
-        setFollowingCount(data.followingCount || 0);
+        let fers = data.followersCount;
+        let fing = data.followingCount;
+
+        if (fers === undefined || fing === undefined) {
+          try {
+            if (fers === undefined) {
+              const qFers = query(collection(db, 'follows'), where('followingId', '==', targetUserId));
+              const snap = await getDocs(qFers);
+              fers = snap.size;
+            }
+            if (fing === undefined) {
+              const qFing = query(collection(db, 'follows'), where('followerId', '==', targetUserId));
+              const snap = await getDocs(qFing);
+              fing = snap.size;
+            }
+          } catch (e) {
+            console.warn("Failed to query fallback follows count:", e);
+          }
+        }
+
+        setFollowersCount(fers || 0);
+        setFollowingCount(fing || 0);
       } else {
         setFollowersCount(0);
         setFollowingCount(0);

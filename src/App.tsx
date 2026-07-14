@@ -1658,6 +1658,28 @@ function AppContent() {
     setConnectionsCount(mutual.length);
   }, [followingUserIds, followerUserIds]);
 
+  // Background self-healing for denormalized follow counts
+  useEffect(() => {
+    if (!user || !userDataState) return;
+
+    const dbFollowers = userDataState.followersCount ?? -1;
+    const dbFollowing = userDataState.followingCount ?? -1;
+
+    if (dbFollowers !== followersCount || dbFollowing !== followingCount) {
+      const userRef = doc(db, 'users', user.uid);
+      setDoc(userRef, {
+        followersCount: followersCount,
+        followingCount: followingCount
+      }, { merge: true })
+      .then(() => {
+        console.log("Self-healed denormalized follow counts:", { followersCount, followingCount });
+      })
+      .catch(err => {
+        console.warn("Failed to self-heal follow counts:", err);
+      });
+    }
+  }, [user, userDataState, followersCount, followingCount]);
+
   // Real-time Community Directory Query
   useEffect(() => {
     if (!user || activeTab !== 'community') {
