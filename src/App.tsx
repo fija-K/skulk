@@ -2196,7 +2196,7 @@ function AppContent() {
   // Toast feedback trigger helper
 
 
-  const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
+  const getMyId = useCallback(() => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || ''), [user, guestId]);
 
   const handleViewParticipantShare = (p: Participant) => {
     if (!p.sharing) return;
@@ -2912,7 +2912,7 @@ function AppContent() {
     });
     
     showToast('Screen sharing stopped');
-  }, []);
+  }, [clearMySharing, setViewingShare]);
 
   const startScreenShare = useCallback(async () => {
     try {
@@ -2936,7 +2936,7 @@ function AppContent() {
       console.error('Error starting screen share:', err);
       showToast('Screen share failed or cancelled');
     }
-  }, [stopScreenShare]);
+  }, [stopScreenShare, updateMySharing, setViewingShare, getMyId]);
 
   // Watch Together Submit Handler
   const handleWatchTogetherSubmit = async (e: React.FormEvent) => {
