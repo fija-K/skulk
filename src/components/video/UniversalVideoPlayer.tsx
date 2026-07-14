@@ -26,7 +26,8 @@ export function createWrappedPlayer(
   videoId: string,
   isPresenter: boolean,
   isLive: boolean,
-  onStateChange: (playing: boolean, time: number) => void
+  onStateChange: (playing: boolean, time: number) => void,
+  onNativeStateChange?: (state: number) => void
 ): Promise<AbstractPlayer> {
   if (platform === 'youtube') {
     return loadYoutubeApi().then(() => {
@@ -42,7 +43,7 @@ export function createWrappedPlayer(
             autoplay: 1,
             controls: 1,
             disablekb: 0,
-Rel: 0,
+            rel: 0,
             mute: isPresenter ? 0 : 1,
             origin: window.location.origin,
             enablejsapi: 1
@@ -74,6 +75,9 @@ Rel: 0,
             },
             onStateChange: (event: any) => {
               const state = event.data;
+              if (onNativeStateChange) {
+                onNativeStateChange(state);
+              }
               const time = player.getCurrentTime() || 0;
               if (state === 1) {
                 onStateChange(true, time);
@@ -382,6 +386,7 @@ export function UniversalVideoPlayer({
   const playerRef = useRef<AbstractPlayer | null>(null);
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
+  const hasDoneInitialSeekRef = useRef(false);
 
   const getPresenterState = () => {
     return participants.find(p => p.id === presenterId) as any;
@@ -442,6 +447,7 @@ export function UniversalVideoPlayer({
 
   useEffect(() => {
     let active = true;
+    hasDoneInitialSeekRef.current = false;
 
     if (!containerRef.current) return;
     
@@ -464,6 +470,18 @@ export function UniversalVideoPlayer({
         if (!isLocalChangeRef.current) {
           updateFirestorePlaybackState(playing, time);
         }
+      },
+      (state) => {
+        // State 1 is PLAYING, State 3 is BUFFERING.
+        // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
+        if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
+          hasDoneInitialSeekRef.current = true;
+          const presenterData = lastPresenterDataRef.current || getPresenterState();
+          if (presenterData && playerRef.current) {
+            console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
+            syncToPresenterState(presenterData, playerRef.current);
+          }
+        }
       }
     ).then((wrappedPlayer) => {
       if (!active) {
@@ -473,7 +491,7 @@ export function UniversalVideoPlayer({
       playerRef.current = wrappedPlayer;
 
       // Sync to latest presenter state immediately when player mounts
-      const presenterData = getPresenterState();
+      const presenterData = lastPresenterDataRef.current || getPresenterState();
       if (presenterData) {
         syncToPresenterState(presenterData, wrappedPlayer);
       }
