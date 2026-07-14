@@ -6397,7 +6397,6 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
-                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                   </div>
@@ -6502,7 +6501,6 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
-                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                   </div>
@@ -6574,7 +6572,6 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
-                        onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                       </div>
@@ -6604,7 +6601,6 @@ function AppContent() {
                                   handleParticipantRoleChange={handleParticipantRoleChange}
                                   checkCanKick={checkCanKick}
                                   handleParticipantRemove={handleParticipantRemove}
-                                  onOpenProfile={(profile) => setSelectedProfile(profile)}
                                 />
                               )}
                               <button 
@@ -6684,7 +6680,6 @@ function AppContent() {
                             handleParticipantRoleChange={handleParticipantRoleChange}
                             checkCanKick={checkCanKick}
                             handleParticipantRemove={handleParticipantRemove}
-                            onOpenProfile={(profile) => setSelectedProfile(profile)}
                       />
                     ))}
                       </div>
@@ -6760,17 +6755,13 @@ function AppContent() {
                               style={{ 
                                 backgroundColor: p.color, 
                                 position: 'relative',
-                                cursor: 'pointer',
+                                cursor: p.sharing ? 'pointer' : 'default',
                                 border: p.sharing ? '1px solid var(--primary-color)' : 'none'
                               }}
                               onClick={() => {
-                                handleOpenProfile({
-                                  id: p.id,
-                                  name: p.name.replace(' (You)', ''),
-                                  initials: p.initials,
-                                  color: p.color,
-                                  photoURL: p.photoURL || null
-                                }, 'card');
+                                if (p.sharing) {
+                                  handleViewParticipantShare(p);
+                                }
                               }}
                             >
                               {p.initials}
@@ -6796,19 +6787,7 @@ function AppContent() {
                               )}
                             </div>
                             <div className="person-name-wrapper" style={{ display: 'flex', alignItems: 'center' }}>
-                              <span 
-                                className="person-name"
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => {
-                                  handleOpenProfile({
-                                    id: p.id,
-                                    name: p.name.replace(' (You)', ''),
-                                    initials: p.initials,
-                                    color: p.color,
-                                    photoURL: p.photoURL || null
-                                  }, 'card');
-                                }}
-                              >
+                              <span className="person-name">
                                 {p.name}
                               </span>
                               {p.role && p.role !== 'member' && (

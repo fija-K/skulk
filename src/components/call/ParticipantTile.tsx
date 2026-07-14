@@ -21,7 +21,6 @@ interface ParticipantTileProps {
   handleParticipantRoleChange: (id: string, role: 'host' | 'cohost' | 'member') => void | Promise<void>;
   checkCanKick: (myRole: string, targetRole: string) => boolean;
   handleParticipantRemove: (id: string, name: string) => void;
-  onOpenProfile?: (profile: any) => void;
 }
 
 export function ParticipantTile({
@@ -43,8 +42,7 @@ export function ParticipantTile({
   handleParticipantCameraToggle,
   handleParticipantRoleChange,
   checkCanKick,
-  handleParticipantRemove,
-  onOpenProfile
+  handleParticipantRemove
 }: ParticipantTileProps) {
   const isUser = p.id === myId;
   const showMuted = isUser ? isMicMuted : p.isMuted;
@@ -96,22 +94,7 @@ export function ParticipantTile({
                 <ParticipantVideo participantId={p.id} objectFit="cover" />
               )}
             </div>
-            <div 
-              className="tile-avatar-wrapper"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onOpenProfile) {
-                  onOpenProfile({
-                    id: p.id,
-                    name: p.name.replace(' (You)', ''),
-                    initials: p.initials,
-                    color: p.color,
-                    photoURL: p.photoURL || null
-                  });
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            >
+            <div className="tile-avatar-wrapper">
               {p.photoURL ? (
                 <img 
                   src={p.photoURL} 
@@ -290,7 +273,7 @@ export function ParticipantTile({
               className="participant-avatar-large" 
               style={{ 
                 backgroundColor: p.color, 
-                cursor: 'pointer',
+                cursor: p.sharing ? 'pointer' : 'default',
                 position: 'relative',
                 boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
                 border: p.sharing ? '2px solid var(--primary-color)' : 'none',
@@ -304,14 +287,6 @@ export function ParticipantTile({
               onClick={() => {
                 if (p.sharing) {
                   handleViewParticipantShare(p);
-                } else if (onOpenProfile) {
-                  onOpenProfile({
-                    id: p.id,
-                    name: p.name.replace(' (You)', ''),
-                    initials: p.initials,
-                    color: p.color,
-                    photoURL: p.photoURL || null
-                  });
                 }
               }}
             >
@@ -395,22 +370,7 @@ export function ParticipantTile({
                   <ParticipantVideo participantId={p.id} />
                 )}
               </div>
-              <div 
-                className="tile-avatar-wrapper"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenProfile) {
-                    onOpenProfile({
-                      id: p.id,
-                      name: p.name.replace(' (You)', ''),
-                      initials: p.initials,
-                      color: p.color,
-                      photoURL: p.photoURL || null
-                    });
-                  }
-                }}
-                style={{ cursor: 'pointer' }}
-              >
+              <div className="tile-avatar-wrapper">
                 {p.photoURL ? (
                   <img 
                     src={p.photoURL} 
@@ -479,23 +439,7 @@ export function ParticipantTile({
       {!isThumbnail && (
         <div className="participant-info-overlay">
           <div className="participant-name-tag" style={{ gap: '6px' }}>
-            <span 
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onOpenProfile) {
-                  onOpenProfile({
-                    id: p.id,
-                    name: p.name.replace(' (You)', ''),
-                    initials: p.initials,
-                    color: p.color,
-                    photoURL: p.photoURL || null
-                  });
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              {p.name}
-            </span>
+            <span>{p.name}</span>
             {p.role && p.role !== 'member' && (
               <span className={`role-tag-${p.role}`} style={{
                 fontSize: '9px',
