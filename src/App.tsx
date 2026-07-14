@@ -857,6 +857,20 @@ function PipWindowContent({
   );
 }
 
+// Helper to extract room identifier (e.g. ielts9 from skulk.app/room/ielts9)
+export const getRoomIdFromLink = (link?: string) => {
+  if (!link) return '';
+  const cleanLink = link.split('?')[0];
+  const parts = cleanLink.split('/');
+  return parts[parts.length - 1];
+};
+
+// Canonical Firestore room ID — always matches the URL slug so all users sync to the same room
+export const roomDocId = (room: Room | null | undefined) => {
+  if (!room) return '';
+  return getRoomIdFromLink(room.link) || room.id;
+};
+
 let globalPendingLeavePromise: Promise<void> | null = null;
 function AppContent() {
   const navigate = useNavigate();
@@ -1223,7 +1237,7 @@ function AppContent() {
     clearMySharing,
     leavePresence
   } = usePresence(
-    roomId || null,
+    currentRoom ? roomDocId(currentRoom) : null,
     user,
     guestId,
     guestName,
@@ -2180,19 +2194,7 @@ function AppContent() {
   };
 
   // Toast feedback trigger helper
-  // Helper to extract room identifier (e.g. ielts9 from skulk.app/room/ielts9)
-  const getRoomIdFromLink = (link?: string) => {
-    if (!link) return '';
-    const cleanLink = link.split('?')[0];
-    const parts = cleanLink.split('/');
-    return parts[parts.length - 1];
-  };
 
-  // Canonical Firestore room ID — always matches the URL slug so all users sync to the same room
-  const roomDocId = (room: Room | null | undefined) => {
-    if (!room) return '';
-    return getRoomIdFromLink(room.link) || room.id;
-  };
 
   const getMyId = () => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || '');
 

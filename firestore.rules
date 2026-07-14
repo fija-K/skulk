@@ -119,12 +119,8 @@ service cloud.firestore {
                               (resource.data.role == 'host' && (request.resource.data.role == 'cohost' || request.resource.data.role == 'member')) ||
                               (resource.data.role == 'cohost' && request.resource.data.role == 'member')
                              ) &&
-                             (!request.resource.data.keys().hasAny(['micRestricted', 'camRestricted']) || 
-                              (
-                                request.resource.data.micRestricted == (resource.data.keys().hasAny(['micRestricted']) ? resource.data.micRestricted : false) && 
-                                request.resource.data.camRestricted == (resource.data.keys().hasAny(['camRestricted']) ? resource.data.camRestricted : false)
-                              )
-                             )
+                             (!('micRestricted' in request.resource.data) || !('micRestricted' in resource.data) || request.resource.data.micRestricted == resource.data.micRestricted) &&
+                             (!('camRestricted' in request.resource.data) || !('camRestricted' in resource.data) || request.resource.data.camRestricted == resource.data.camRestricted)
                             ) ||
                             (
                               participantId != request.auth.uid &&
