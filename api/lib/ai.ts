@@ -89,67 +89,115 @@ export class GeminiService {
       throw err;
     }
 
-    const modelsList = response.models || [];
+    const modelsList: any[] = [];
+    try {
+      for await (const m of response) {
+        modelsList.push(m);
+      }
+    } catch (err: any) {
+      console.error('[Gemini SDK] Failed to iterate model list iterator:', err.message);
+      throw err;
+    }
+
     if (modelsList.length === 0) {
       console.warn('[Gemini SDK] Discover response returned 0 models.');
       throw new Error('NO_MODELS_DISCOVERED');
     }
 
-    // Filter compatible text generation models
-    const compatible = modelsList.filter((m: any) => {
-      // Must support generateContent
-      const supportsChat = m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent');
-      if (!supportsChat) return false;
+    console.info(`[Gemini SDK] Discovered ${modelsList.length} models. Evaluating compatibility...`);
 
-      // Exclude specialized / non-chat models
-      const lowerName = (m.name || '').toLowerCase();
-      const lowerDesc = (m.description || '').toLowerCase();
-      const hasExcludedKeyword = EXCLUDED_KEYWORDS.some(k => lowerName.includes(k) || lowerDesc.includes(k));
-      if (hasExcludedKeyword) return false;
-
-      return true;
-    });
-
-    if (compatible.length === 0) {
-      console.error('[Gemini SDK] No compatible models found. Discovered list:', modelsList.map((m: any) => m.name));
-      throw new Error('NO_COMPATIBLE_MODELS');
-    }
-
-    // Score models to determine the best choice
-    const scoredModels = compatible.map((m: any) => {
+    const scoredModels = modelsList.map((m: any) => {
       const name = m.name || '';
       const lowerName = name.toLowerCase();
-      let score = 0;
+      const displayName = m.displayName || '';
+      const lowerDisplay = displayName.toLowerCase();
+      const description = m.description || '';
+      const lowerDesc = description.toLowerCase();
 
-      // Prefer Flash models
-      if (lowerName.includes('flash')) {
-        score += 100;
+      // Heuristic checks using SDK fields
+      const supportsChat = m.supportedActions && m.supportedActions.includes('generateContent');
+      const isExcluded = EXCLUDED_KEYWORDS.some(k => lowerName.includes(k) || lowerDesc.includes(k) || lowerDisplay.includes(k));
+
+      if (!supportsChat) {
+        return { model: m, compatible: false, reason: 'Does not support generateContent', score: -1000 };
+      }
+      if (isExcluded) {
+        return { model: m, compatible: false, reason: 'Excluded keyword (non-chat/specialized model)', score: -1000 };
       }
 
-      // Prefer stable models (exclude preview/experimental/exp/alpha)
+      let score = 0;
+      let reasons: string[] = [];
+
+      // Check if it is Flash
+      const isFlash = lowerName.includes('flash') || lowerDisplay.includes('flash');
+      if (isFlash) {
+        score += 1000;
+        reasons.push('Flash model (+1000)');
+      } else {
+        reasons.push('Non-Flash model (+0)');
+      }
+
+      // Check stability (not preview, experimental, exp, alpha)
       const isStable = !lowerName.includes('preview') && 
                        !lowerName.includes('experimental') && 
                        !lowerName.includes('exp') && 
-                       !lowerName.includes('alpha');
+                       !lowerName.includes('alpha') &&
+                       !lowerDisplay.includes('preview') &&
+                       !lowerDisplay.includes('experimental');
       if (isStable) {
+        score += 500;
+        reasons.push('Stable model (+500)');
+      } else {
+        reasons.push('Preview/Experimental model (+0)');
+      }
+
+      // Check standard (not lite)
+      const isLite = lowerName.includes('lite') || lowerDisplay.includes('lite');
+      if (!isLite) {
+        score += 100;
+        reasons.push('Standard model (+100)');
+      } else {
+        reasons.push('Lite model (+0)');
+      }
+
+      // Check image/tts specialized
+      const isImageOrTts = lowerName.includes('image') || lowerName.includes('tts') || lowerDisplay.includes('image') || lowerDisplay.includes('tts');
+      if (!isImageOrTts) {
         score += 50;
+        reasons.push('No image/tts (+50)');
+      } else {
+        reasons.push('Specialized image/tts (+0)');
       }
 
-      // Prefer non-image and non-tts models
-      if (!lowerName.includes('image') && !lowerName.includes('tts')) {
-        score += 25;
-      }
-
-      // Prefer standard Flash over Flash-Lite
-      if (!lowerName.includes('lite')) {
-        score += 10;
-      }
-
-      return { model: m, score };
+      return {
+        model: m,
+        compatible: true,
+        reasons: reasons.join(', '),
+        score
+      };
     });
 
-    // Sort: score descending, then version descending as tie-breaker, then name alphabetical
-    scoredModels.sort((a: any, b: any) => {
+    // Filter compatible ones
+    const compatible = scoredModels.filter(item => item.compatible && item.score >= 0);
+
+    if (compatible.length === 0) {
+      console.warn('[Gemini SDK] Dynamic filtering returned 0 models. Relaxing filters to use any text generation model...');
+      const fallbackList = scoredModels.filter(item => item.model.supportedActions && item.model.supportedActions.includes('generateContent'));
+      if (fallbackList.length === 0) {
+        console.error('[Gemini SDK] Even relaxed filters returned 0 models. Full discovered list:', modelsList.map(m => m.name));
+        throw new Error('NO_COMPATIBLE_MODELS');
+      }
+      
+      // Put fallback models into compatible list
+      fallbackList.forEach(item => {
+        item.compatible = true;
+        if (item.score < 0) item.score = 0; // reset negative penalty
+        compatible.push(item);
+      });
+    }
+
+    // Sort descending by score, tie-break by version descending, then name alphabetical
+    compatible.sort((a, b) => {
       if (b.score !== a.score) {
         return b.score - a.score;
       }
@@ -165,14 +213,19 @@ export class GeminiService {
       return a.model.name.localeCompare(b.model.name);
     });
 
-    const chosen = scoredModels[0].model;
+    // Logging detailed evaluations for every candidate to aid debugging
+    console.info('=== Gemini Model Selection Pipeline Evaluation ===');
+    scoredModels.forEach((item) => {
+      const status = item.compatible ? `ACCEPTED (Score: ${item.score}, Reasons: ${item.reasons})` : `REJECTED (${item.reason})`;
+      console.info(`- Model: ${item.model.name} -> ${status}`);
+    });
+    console.info('==================================================');
+
+    const chosen = compatible[0].model;
     const cleanName = chosen.name.startsWith('models/') ? chosen.name : `models/${chosen.name}`;
-    
-    console.info(`[Gemini SDK] Model Discovery Diagnostics:
-- Total Discovered: ${modelsList.length}
-- Total Compatible: ${compatible.length}
-- Chosen Model: ${cleanName} (Score: ${scoredModels[0].score})
-- Initialization: Success`);
+
+    console.info(`[Gemini SDK] Selected Gemini model: ${cleanName}
+Reason: Highest compatible score (Score: ${compatible[0].score}).`);
 
     this.cachedModel = cleanName;
     this.lastSelectedTime = Date.now();
