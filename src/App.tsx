@@ -3089,6 +3089,80 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [pomodoroIsRunning, pomodoroMinutes, pomodoroSeconds, pomodoroPhase, pomodoroFocusLength, pomodoroBreakLength]);
 
+  // Web Audio API Sound Generation Helpers
+  const playMessageSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.15);
+      
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (e) {
+      console.warn("Failed to play message sound:", e);
+    }
+  };
+
+  const playLeaveSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(500, ctx.currentTime);
+      osc.frequency.setValueAtTime(320, ctx.currentTime + 0.12);
+      
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+    } catch (e) {
+      console.warn("Failed to play leave sound:", e);
+    }
+  };
+
+  const prevMessagesCountRef = useRef(0);
+  useEffect(() => {
+    if (chatMessages.length > prevMessagesCountRef.current) {
+      if (prevMessagesCountRef.current > 0) {
+        const lastMsg = chatMessages[chatMessages.length - 1];
+        if (lastMsg && lastMsg.senderId !== getMyId()) {
+          playMessageSound();
+        }
+      }
+    }
+    prevMessagesCountRef.current = chatMessages.length;
+  }, [chatMessages]);
+
+  const prevParticipantsRef = useRef<Participant[]>([]);
+  useEffect(() => {
+    if (prevParticipantsRef.current.length > 0 && callParticipants.length < prevParticipantsRef.current.length) {
+      const currentIds = callParticipants.map(p => p.id);
+      const leftUser = prevParticipantsRef.current.find(p => !currentIds.includes(p.id));
+      if (leftUser && leftUser.id !== getMyId()) {
+        playLeaveSound();
+      }
+    }
+    prevParticipantsRef.current = callParticipants;
+  }, [callParticipants]);
+
   // Helper cleanups on leave room
   useEffect(() => {
     if (!currentRoom) {

@@ -9,6 +9,22 @@ interface ChatPanelProps {
   callTab: string;
 }
 
+const POPULAR_EMOJIS = [
+  '😀', '😂', '😍', '🥰', '😎', '😭', '😡', '😱', '👍', '👎', '👏', '🙌', '🎉', '🔥', '❤️', '💀', '🤔', '👀', '💯', '🚀', '🥳', '💡', '🎮', '🍕', '🍻', '✨', '👑', '⭐'
+];
+
+const DEFAULT_GIFS = [
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3h2Z2VlNDh0dW15cHlta3pxZHp5MGQyMWh5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3NtY188QaxDdC/giphy.gif', // cat typing
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmNxMDZ3NnM1cW15ejR4YzN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/t3s3EZmJr7vwY/giphy.gif', // coding dog
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26uf3jBf9yBM1ZsFO/giphy.gif', // thumbs up
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l3q2Z6G1OE6mK0IOk/giphy.gif', // clapping
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9s73S0Jz2Z1lK/giphy.gif', // minion celebrate
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/b09xElu8umMm4/giphy.gif', // dance cat
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/13HgwGsXF0G6wU/giphy.gif', // yes nod
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/d1E1msP6kmXCza6I/giphy.gif', // mind blown
+  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xT0xeJpD8e4DYnMGsw/giphy.gif' // facepalm
+];
+
 export function ChatPanel({
   chatMessages,
   systemMessages,
@@ -22,6 +38,16 @@ export function ChatPanel({
   // Auto-scroll chat to bottom
   const prevMessagesLengthRef = useRef(0);
   const prevTabRef = useRef<string | null>(null);
+
+  // Pickers states
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifQuery, setGifQuery] = useState('');
+  const [gifs, setGifs] = useState<string[]>([]);
+  const [loadingGifs, setLoadingGifs] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const currentLength = chatMessages.length + systemMessages.length;
@@ -51,6 +77,36 @@ export function ChatPanel({
     prevMessagesLengthRef.current = currentLength;
   }, [chatMessages, systemMessages, callTab]);
 
+  // Debounced GIF search effect
+  useEffect(() => {
+    if (!showGifPicker) return;
+    const fetchGifs = async () => {
+      setLoadingGifs(true);
+      try {
+        const query = gifQuery.trim() || 'trending';
+        const url = query === 'trending'
+          ? `https://api.giphy.com/v1/gifs/trending?api_key=dc6zaTOxFJmzC&limit=12`
+          : `https://api.giphy.com/v1/gifs/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(query)}&limit=12`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const json = await res.json();
+          const urls = json.data.map((item: any) => item.images.fixed_height.url);
+          setGifs(urls);
+        } else {
+          setGifs(DEFAULT_GIFS);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch GIFs:", err);
+        setGifs(DEFAULT_GIFS);
+      } finally {
+        setLoadingGifs(false);
+      }
+    };
+
+    const timer = setTimeout(fetchGifs, 400);
+    return () => clearTimeout(timer);
+  }, [gifQuery, showGifPicker]);
+
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessageText.trim()) return;
@@ -58,9 +114,47 @@ export function ChatPanel({
     setChatMessageText('');
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 400;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+          sendChatMessage(`[IMAGE]:${dataUrl}`)
+            .then(() => setUploadingImage(false))
+            .catch(() => setUploadingImage(false));
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <>
-      <div className="chat-messages-list">
+      <div className="chat-messages-list" style={{ position: 'relative' }}>
         {(() => {
           const combined = [
             ...chatMessages.map(m => ({ ...m, type: 'chat' as const })),
@@ -93,6 +187,8 @@ export function ChatPanel({
             }
 
             const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
+            const isMedia = msg.text.startsWith('[IMAGE]:') || msg.text.startsWith('[GIF]:');
+            
             return (
               <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -124,15 +220,194 @@ export function ChatPanel({
                     </span>
                   )}
                 </div>
-                <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
+                {isMedia ? (
+                  <img 
+                    src={msg.text.slice(msg.text.indexOf(':') + 1)} 
+                    alt="Shared media" 
+                    style={{ 
+                      maxWidth: '100%', 
+                      maxHeight: '150px', 
+                      borderRadius: '6px', 
+                      marginTop: '4px', 
+                      objectFit: 'contain', 
+                      border: '1px solid var(--border-color)',
+                      cursor: 'zoom-in'
+                    }} 
+                    onClick={() => {
+                      const url = msg.text.slice(msg.text.indexOf(':') + 1);
+                      window.open(url, '_blank');
+                    }}
+                  />
+                ) : (
+                  <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
+                )}
               </div>
             );
           });
         })()}
         <div ref={chatEndRef} />
       </div>
+
+      {/* Pickers Tool Drawers */}
+      {showEmojiPicker && (
+        <div className="emoji-drawer-container animate-fade-in" style={{
+          position: 'absolute',
+          bottom: '120px',
+          left: '12px',
+          right: '12px',
+          backgroundColor: 'var(--panel-bg)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '8px',
+          padding: '10px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, 1fr)',
+          gap: '8px',
+          zIndex: 10,
+          maxHeight: '180px',
+          overflowY: 'auto',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.6)'
+        }}>
+          {POPULAR_EMOJIS.map(emoji => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => {
+                setChatMessageText(prev => prev + emoji);
+                setShowEmojiPicker(false);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '20px',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '4px',
+                transition: 'background 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showGifPicker && (
+        <div className="gif-drawer-container animate-fade-in" style={{
+          position: 'absolute',
+          bottom: '120px',
+          left: '12px',
+          right: '12px',
+          backgroundColor: 'var(--panel-bg)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '8px',
+          padding: '10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          zIndex: 10,
+          maxHeight: '220px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.6)'
+        }}>
+          <input
+            type="text"
+            placeholder="Search GIFs..."
+            className="search-input"
+            style={{ fontSize: '12px', padding: '6px 10px', width: '100%', boxSizing: 'border-box' }}
+            value={gifQuery}
+            onChange={(e) => setGifQuery(e.target.value)}
+          />
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '6px',
+            overflowY: 'auto',
+            flex: 1,
+            maxHeight: '150px'
+          }}>
+            {loadingGifs ? (
+              <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>Loading...</div>
+            ) : gifs.map((url, i) => (
+              <img
+                key={i}
+                src={url}
+                alt="gif"
+                style={{ width: '100%', height: '50px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={() => {
+                  sendChatMessage(`[GIF]:${url}`);
+                  setShowGifPicker(false);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pickers Toolbar */}
+      <div style={{
+        display: 'flex',
+        gap: '14px',
+        padding: '6px 14px',
+        borderTop: '1px solid rgba(255,255,255,0.03)',
+        backgroundColor: 'rgba(0,0,0,0.1)',
+        alignItems: 'center'
+      }}>
+        {/* Emoji Button */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowEmojiPicker(!showEmojiPicker);
+            setShowGifPicker(false);
+          }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '4px', display: 'flex', alignItems: 'center', color: showEmojiPicker ? 'var(--primary-color)' : 'var(--text-secondary)' }}
+          title="Insert Emoji"
+        >
+          😀
+        </button>
+
+        {/* GIF Button */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowGifPicker(!showGifPicker);
+            setShowEmojiPicker(false);
+          }}
+          style={{ background: 'none', cursor: 'pointer', fontSize: '10px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', border: showGifPicker ? '1.5px solid var(--primary-color)' : '1.5px solid var(--text-secondary)', color: showGifPicker ? 'var(--primary-color)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}
+          title="Search GIFs"
+        >
+          GIF
+        </button>
+
+        {/* Photo Upload Button */}
+        <label
+          style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: uploadingImage ? 'var(--primary-color)' : 'var(--text-secondary)', fontSize: '14px' }}
+          title="Upload Photo"
+        >
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleImageUpload}
+            disabled={uploadingImage}
+          />
+          {uploadingImage ? (
+            <div className="loading-spinner" style={{ width: '12px', height: '12px', borderWidth: '2px', borderTopColor: 'var(--primary-color)' }} />
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          )}
+        </label>
+      </div>
       
-      <form onSubmit={handleSendChatMessage} className="chat-input-form">
+      <form onSubmit={handleSendChatMessage} className="chat-input-form" style={{ borderTop: 'none' }}>
         <input 
           type="text" 
           placeholder="Message the room..." 
