@@ -123,16 +123,16 @@ export function useRoomState(
     return () => unsubscribe();
   }, [roomId, pomodoroIsRunning]);
 
-  // Sync YouTube video ID when viewing someone's share
+  // Sync YouTube / Spotify video ID when viewing someone's share
   useEffect(() => {
-    if (!viewingShare || viewingShare.type !== 'youtube' || !roomId) return;
+    if (!viewingShare || (viewingShare.type !== 'youtube' && viewingShare.type !== 'spotify') || !roomId) return;
 
     const partRef = doc(db, 'rooms', roomId, 'participants', viewingShare.participantId);
     const unsubscribe = onSnapshot(partRef, (snapshot) => {
       if (!snapshot.exists()) {
         if (viewingShare.participantId !== getMyId()) {
           setViewingShare(null);
-          showToast('YouTube presenter has left. Ending session.');
+          showToast(`${viewingShare.type === 'youtube' ? 'YouTube' : 'Spotify'} presenter has left. Ending session.`);
         }
         return;
       }

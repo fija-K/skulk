@@ -59,8 +59,12 @@ export function createWrappedPlayer(
         };
 
         if (isPlaylist) {
-          playerVars.listType = 'playlist';
-          playerVars.list = playlistId;
+          if (actualVideoId) {
+            playerVars.list = playlistId;
+          } else {
+            playerVars.listType = 'playlist';
+            playerVars.list = playlistId;
+          }
         }
 
         const playerOptions: any = {

@@ -74,7 +74,7 @@ export interface Participant {
   isSpeaking: boolean;
   isPinned: boolean;
   isHost?: boolean;
-  sharing?: 'youtube' | 'whiteboard' | 'screen' | null;
+  sharing?: 'youtube' | 'whiteboard' | 'screen' | 'spotify' | null;
   sharingYoutubeId?: string | null;
   whiteboardData?: string;
   role?: 'admin' | 'host' | 'cohost' | 'member'; // admin, host, cohost, member
@@ -101,7 +101,7 @@ export interface Participant {
 
 export type ViewingShare = {
   participantId: string;
-  type: 'youtube' | 'whiteboard' | 'screen';
+  type: 'youtube' | 'whiteboard' | 'screen' | 'spotify';
   youtubeVideoId?: string;
 };
 
@@ -1357,7 +1357,7 @@ function AppContent() {
   
 
   // Tools sub-panel toggle
-  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
+  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin' | 'spotify' | 'streaming'>('none');
 
   // Fun Tools toggle & Truth or Dare synced spinner states
   // Local sync of Truth or Dare active/pending participant states from callParticipants list
@@ -1504,6 +1504,10 @@ function AppContent() {
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
   const [ytInputUrl, setYtInputUrl] = useState('');
   const [watchTogetherPlatform, setWatchTogetherPlatform] = useState<'youtube' | 'vimeo' | 'dailymotion' | 'twitch'>('youtube');
+
+  // Spotify States
+  const [spotifyUri, setSpotifyUri] = useState<string | null>(null);
+  const [spotifyInputUrl, setSpotifyInputUrl] = useState('');
 
   // Games Party States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -6855,6 +6859,25 @@ function AppContent() {
                                 myId={getMyId()}
                                 participants={callParticipants}
                               />
+                            ) : viewingShare.type === 'spotify' && viewingShare.youtubeVideoId ? (
+                              <iframe
+                                src={(() => {
+                                  let clean = (viewingShare.youtubeVideoId || '').trim();
+                                  if (clean.includes('open.spotify.com')) {
+                                    if (!clean.includes('/embed/')) {
+                                      clean = clean.replace('open.spotify.com/', 'open.spotify.com/embed/');
+                                    }
+                                  }
+                                  return clean;
+                                })()}
+                                width="100%"
+                                height="100%"
+                                frameBorder="0"
+                                allowTransparency={true}
+                                allow="encrypted-media"
+                                style={{ border: 'none', background: '#000' }}
+                                title="Spotify Music Player"
+                              />
                             ) : (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
                                 Content unavailable
@@ -6870,6 +6893,11 @@ function AppContent() {
                                   await clearMySharing();
                                   setViewingShare(null);
                                   showToast('YouTube sharing stopped');
+                                } else if (viewingShare.type === 'spotify') {
+                                  setSpotifyUri(null);
+                                  await clearMySharing();
+                                  setViewingShare(null);
+                                  showToast('Spotify sharing stopped');
                                 }
                               } else {
                                 setViewingShare(null);
@@ -7331,7 +7359,7 @@ function AppContent() {
                               </div>
                             </div>
 
-                            {/* Watch Together Card */}
+                            {/* YouTube Card */}
                             <div 
                               className={`tool-card ${youtubeVideoId ? 'active' : ''}`}
                               onClick={() => {
@@ -7347,8 +7375,30 @@ function AppContent() {
                                 </svg>
                               </div>
                               <div className="tool-card-info">
-                                <span className="tool-card-title">Watch Together</span>
+                                <span className="tool-card-title">YouTube</span>
                                 <span className="tool-card-desc">Play and stream YouTube links in call.</span>
+                              </div>
+                            </div>
+
+                            {/* Spotify Card */}
+                            <div 
+                              className={`tool-card ${spotifyUri ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveToolDetail('spotify');
+                                setActiveGameId(null);
+                              }}
+                              title="Play Spotify music together"
+                            >
+                              <div className="tool-card-icon-wrapper" style={{ color: '#1db954' }}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M9 18V5l12-2v13"></path>
+                                  <circle cx="6" cy="18" r="3"></circle>
+                                  <circle cx="18" cy="16" r="3"></circle>
+                                </svg>
+                              </div>
+                              <div className="tool-card-info">
+                                <span className="tool-card-title">Spotify Music</span>
+                                <span className="tool-card-desc">Stream Spotify tracks and playlists.</span>
                               </div>
                             </div>
 
@@ -7509,6 +7559,31 @@ function AppContent() {
                                     <span className="tool-card-desc">Spin the wheel to play Truth or Dare.</span>
                                   </div>
                                 </div>
+
+                                {/* Streaming Party Card */}
+                                <div 
+                                  className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
+                                  onClick={() => {
+                                    if (isFunLocked) {
+                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
+                                      return;
+                                    }
+                                    setActiveToolDetail('streaming');
+                                    setActiveGameId(null);
+                                  }}
+                                  title="Stream Vimeo, Dailymotion, or Twitch together"
+                                >
+                                  <div className="tool-card-icon-wrapper" style={{ color: '#a855f7' }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                    </svg>
+                                  </div>
+                                  <div className="tool-card-info">
+                                    <span className="tool-card-title">Streaming</span>
+                                    <span className="tool-card-desc">Stream Twitch, Vimeo, or Dailymotion.</span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           );
@@ -7596,59 +7671,28 @@ function AppContent() {
                               <polyline points="12 19 5 12 12 5"></polyline>
                             </svg>
                           </button>
-                          <span className="tools-sub-panel-title">Watch Together</span>
+                          <span className="tools-sub-panel-title">YouTube</span>
                         </div>
 
-                        {/* Platform Tabs Selection */}
-                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                          {(['youtube', 'vimeo', 'dailymotion', 'twitch'] as const).map((plat) => (
-                            <button
-                              key={plat}
-                              type="button"
-                              onClick={() => setWatchTogetherPlatform(plat)}
-                              style={{
-                                flex: 1,
-                                minWidth: '70px',
-                                padding: '8px 4px',
-                                fontSize: '11px',
-                                borderRadius: '6px',
-                                border: '1px solid',
-                                borderColor: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'rgba(255,255,255,0.08)',
-                                backgroundColor: watchTogetherPlatform === plat ? 'rgba(241, 196, 15, 0.1)' : 'var(--panel-bg)',
-                                color: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'var(--text-secondary)',
-                                cursor: 'pointer',
-                                fontWeight: watchTogetherPlatform === plat ? '700' : '500',
-                                textTransform: 'capitalize',
-                                transition: 'all 0.2s ease',
-                                textAlign: 'center'
-                              }}
-                            >
-                              {plat === 'youtube' ? 'YouTube' : plat === 'vimeo' ? 'Vimeo' : plat === 'dailymotion' ? 'Dailymotion' : 'Twitch'}
-                            </button>
-                          ))}
-                        </div>
-
-                        <form onSubmit={handleWatchTogetherSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <form onSubmit={(e) => {
+                          setWatchTogetherPlatform('youtube');
+                          handleWatchTogetherSubmit(e);
+                        }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           <div className="form-group">
                             <label htmlFor="ytUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
-                              {watchTogetherPlatform === 'youtube' ? 'YouTube URL or Video ID' : 
-                               watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
-                               watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
-                               'Twitch Channel or VOD URL'}
+                              YouTube URL or Video ID
                             </label>
                             <input 
                               type="text"
                               id="ytUrl"
-                              placeholder={
-                                watchTogetherPlatform === 'youtube' ? 'e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ' : 
-                                watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
-                                watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
-                                'e.g. https://www.twitch.tv/twitch'
-                              }
+                              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
                               className="search-input"
                               style={{ paddingLeft: '12px', fontSize: '13px' }}
                               value={ytInputUrl}
-                              onChange={(e) => setYtInputUrl(e.target.value)}
+                              onChange={(e) => {
+                                setWatchTogetherPlatform('youtube');
+                                setYtInputUrl(e.target.value);
+                              }}
                               required
                             />
                           </div>
@@ -7671,6 +7715,164 @@ function AppContent() {
                               style={{ width: '100%', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
                             >
                               Stop Watching
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sub-panel View: Spotify details */}
+                    {activeToolDetail === 'spotify' && (
+                      <div className="animate-fade-in">
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back to tools list">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Spotify Music</span>
+                        </div>
+
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          const input = spotifyInputUrl.trim();
+                          if (!input) return;
+                          
+                          const myId = getMyId();
+                          await updateMySharing({ sharing: 'spotify', sharingYoutubeId: input, whiteboardData: '' });
+                          setSpotifyUri(input);
+                          setViewingShare({ participantId: myId, type: 'spotify', youtubeVideoId: input });
+                          showToast('Spotify playlist shared — click your avatar to view');
+                        }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="form-group">
+                            <label htmlFor="spotifyUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                              Spotify Track/Playlist URL
+                            </label>
+                            <input 
+                              type="text"
+                              id="spotifyUrl"
+                              placeholder="e.g. https://open.spotify.com/playlist/..."
+                              className="search-input"
+                              style={{ paddingLeft: '12px', fontSize: '13px' }}
+                              value={spotifyInputUrl}
+                              onChange={(e) => setSpotifyInputUrl(e.target.value)}
+                              required
+                            />
+                          </div>
+                          <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
+                            Load Spotify
+                          </button>
+                        </form>
+                        
+                        {spotifyUri && (
+                          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>Currently Playing: <strong>{spotifyUri}</strong></span>
+                            <button 
+                              onClick={async () => {
+                                setSpotifyUri(null);
+                                await clearMySharing();
+                                setViewingShare(null);
+                                showToast('Spotify music stopped');
+                              }} 
+                              className="btn-signin" 
+                              style={{ width: '100%', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                            >
+                              Stop Spotify
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sub-panel View: Streaming details (Vimeo, Dailymotion, Twitch) */}
+                    {activeToolDetail === 'streaming' && (
+                      <div className="animate-fade-in">
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back to tools list">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Streaming Party</span>
+                        </div>
+
+                        {/* Platform Tabs Selection */}
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                          {(['vimeo', 'dailymotion', 'twitch'] as const).map((plat) => (
+                            <button
+                              key={plat}
+                              type="button"
+                              onClick={() => setWatchTogetherPlatform(plat)}
+                              style={{
+                                flex: 1,
+                                minWidth: '75px',
+                                padding: '8px 4px',
+                                fontSize: '11px',
+                                borderRadius: '6px',
+                                border: '1px solid',
+                                borderColor: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'rgba(255,255,255,0.08)',
+                                backgroundColor: watchTogetherPlatform === plat ? 'rgba(168, 85, 247, 0.1)' : 'var(--panel-bg)',
+                                color: watchTogetherPlatform === plat ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontWeight: watchTogetherPlatform === plat ? '700' : '500',
+                                textTransform: 'capitalize',
+                                transition: 'all 0.2s ease',
+                                textAlign: 'center'
+                              }}
+                            >
+                              {plat === 'vimeo' ? 'Vimeo' : plat === 'dailymotion' ? 'Dailymotion' : 'Twitch'}
+                            </button>
+                          ))}
+                        </div>
+
+                        <form onSubmit={(e) => {
+                          if (watchTogetherPlatform === 'youtube') {
+                            setWatchTogetherPlatform('vimeo');
+                          }
+                          handleWatchTogetherSubmit(e);
+                        }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="form-group">
+                            <label htmlFor="streamUrl" className="form-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                              {watchTogetherPlatform === 'vimeo' ? 'Vimeo URL or Video ID' : 
+                               watchTogetherPlatform === 'dailymotion' ? 'Dailymotion URL or Video ID' : 
+                               'Twitch Channel or VOD URL'}
+                            </label>
+                            <input 
+                              type="text"
+                              id="streamUrl"
+                              placeholder={
+                                watchTogetherPlatform === 'vimeo' ? 'e.g. https://vimeo.com/76979871' : 
+                                watchTogetherPlatform === 'dailymotion' ? 'e.g. https://www.dailymotion.com/video/x8j7o2m' : 
+                                'e.g. https://www.twitch.tv/twitch'
+                              }
+                              className="search-input"
+                              style={{ paddingLeft: '12px', fontSize: '13px' }}
+                              value={ytInputUrl}
+                              onChange={(e) => setYtInputUrl(e.target.value)}
+                              required
+                            />
+                          </div>
+                          <button type="submit" className="btn-signin" style={{ width: '100%', padding: '10px' }}>
+                            Load Stream
+                          </button>
+                        </form>
+                        
+                        {youtubeVideoId && watchTogetherPlatform !== 'youtube' && (
+                          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Currently Playing Stream ID: <strong>{youtubeVideoId}</strong></span>
+                            <button 
+                              onClick={async () => {
+                                setYoutubeVideoId(null);
+                                await clearMySharing();
+                                setViewingShare(null);
+                                showToast('Stream presentation stopped');
+                              }} 
+                              className="btn-signin" 
+                              style={{ width: '100%', backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                            >
+                              Stop Streaming
                             </button>
                           </div>
                         )}

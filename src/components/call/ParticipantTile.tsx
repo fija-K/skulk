@@ -98,23 +98,25 @@ export function ParticipantTile({
               ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
               : p.sharing === 'whiteboard'
               ? 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : p.sharing === 'spotify'
+              ? 'radial-gradient(circle, rgba(29, 185, 84, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
               : 'radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
             zIndex: 2
           }}>
             <span style={{ 
               fontSize: '14px', 
-              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : '#3b82f6',
+              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
               animation: 'pulse 2s infinite'
             }}>
-              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
             </span>
             <span style={{ 
               fontSize: '8px', 
-              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : '#3b82f6',
+              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
               fontWeight: 'bold',
               marginTop: '4px'
             }}>
-              {p.sharing === 'youtube' ? 'Watch' : p.sharing === 'whiteboard' ? 'Draw' : 'Screen'}
+              {p.sharing === 'youtube' ? 'Watch' : p.sharing === 'whiteboard' ? 'Draw' : p.sharing === 'spotify' ? 'Music' : 'Screen'}
             </span>
           </div>
         ) : (
@@ -210,6 +212,9 @@ export function ParticipantTile({
         ...p.sharing === 'youtube' ? {
           boxShadow: '0 0 16px rgba(241, 196, 15, 0.3)',
           border: '2.5px solid var(--primary-color)'
+        } : p.sharing === 'spotify' ? {
+          boxShadow: '0 0 16px rgba(29, 185, 84, 0.3)',
+          border: '2.5px solid #1db954'
         } : {},
         // Keep tiles equal size, prevent overflow/overlap, and auto-shrink to fit in gallery view
         ...(!isThumbnail && isGalleryView) ? {
@@ -336,8 +341,8 @@ export function ParticipantTile({
                 position: 'absolute',
                 bottom: '12px',
                 right: '12px',
-                backgroundColor: 'var(--primary-color)',
-                color: '#0f1013',
+                backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
+                color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
                 borderRadius: '50%',
                 width: '22px',
                 height: '22px',
@@ -355,7 +360,7 @@ export function ParticipantTile({
                   handleViewParticipantShare(p);
                 }}
               >
-                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
               </div>
             )}
           </>
@@ -368,10 +373,32 @@ export function ParticipantTile({
             backgroundColor: p.color, 
             cursor: p.sharing ? 'pointer' : 'default',
             position: 'relative',
-            boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-            border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+            boxShadow: p.sharing === 'youtube'
+              ? '0 0 12px var(--primary-color)'
+              : p.sharing === 'whiteboard'
+              ? '0 0 12px #10b981'
+              : p.sharing === 'spotify'
+              ? '0 0 12px #1db954'
+              : p.sharing
+              ? '0 0 12px #3b82f6'
+              : 'none',
+            border: p.sharing === 'youtube'
+              ? '2px solid var(--primary-color)'
+              : p.sharing === 'whiteboard'
+              ? '2px solid #10b981'
+              : p.sharing === 'spotify'
+              ? '2px solid #1db954'
+              : p.sharing
+              ? '2px solid #3b82f6'
+              : 'none',
             overflow: 'hidden',
-            background: p.sharing === 'youtube' ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)' : undefined,
+            background: p.sharing === 'youtube'
+              ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : p.sharing === 'whiteboard'
+              ? 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : p.sharing === 'spotify'
+              ? 'radial-gradient(circle, rgba(29, 185, 84, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : undefined,
             // Shrink for thumbnail strip
             ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
           }}
@@ -391,6 +418,22 @@ export function ParticipantTile({
               zIndex: 2
             }}>
               <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
+            </div>
+          ) : p.sharing === 'spotify' ? (
+            /* Pulsing music icon inside circular avatar circle */
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              animation: 'pulse 2s infinite',
+              zIndex: 2
+            }}>
+              <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: '#1db954' }}>♫</span>
             </div>
           ) : (
             <>
@@ -444,8 +487,8 @@ export function ParticipantTile({
               position: 'absolute',
               bottom: '-6px',
               right: '-6px',
-              backgroundColor: 'var(--primary-color)',
-              color: '#0f1013',
+              backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
+              color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
               borderRadius: '50%',
               width: '22px',
               height: '22px',
@@ -458,7 +501,7 @@ export function ParticipantTile({
               boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
               zIndex: 10
             }} title={`Sharing ${p.sharing} - click to view`}>
-              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
             </div>
           )}
         </div>
