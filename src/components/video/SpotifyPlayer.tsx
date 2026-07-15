@@ -3,33 +3,6 @@ import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { loadSpotifyApi } from '../../utils/helpers';
 
-export function parseSpotifyUri(url: string): string {
-  const clean = url.trim();
-  if (clean.includes('spotify.com')) {
-    try {
-      const urlObj = new URL(clean.startsWith('http') ? clean : `https://${clean}`);
-      let path = urlObj.pathname;
-      if (path.startsWith('/')) path = path.substring(1);
-      const parts = path.split('/');
-      let typeIndex = 0;
-      if (parts[0] === 'embed') {
-        typeIndex = 1;
-      }
-      const type = parts[typeIndex] || '';
-      const id = parts[typeIndex + 1] || '';
-      if (type && id) {
-        return `spotify:${type}:${id}`;
-      }
-    } catch (e) {
-      console.warn("Failed to parse Spotify web URL:", e);
-    }
-  }
-  if (clean.startsWith('spotify:')) {
-    return clean;
-  }
-  return clean;
-}
-
 export function SpotifyPlayer({
   spotifyUri,
   isPresenter,
@@ -43,7 +16,7 @@ export function SpotifyPlayer({
   roomId: string;
   myId: string;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const controllerRef = useRef<any>(null);
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
@@ -88,7 +61,7 @@ export function SpotifyPlayer({
 
     try {
       if (targetPlaying) {
-        controller.resume(); // Spotify controller uses resume() instead of play()
+        controller.resume(); // Spotify controller uses resume()
       } else {
         controller.pause();
       }
@@ -108,37 +81,23 @@ export function SpotifyPlayer({
     }, 500);
   };
 
-  // 1. Initialize Spotify Embed Controller API
+  // 1. Initialize Spotify Embed Controller on the existing iframe
   useEffect(() => {
     let active = true;
-    let timer: any = null;
     hasDoneInitialSeekRef.current = false;
 
-    if (!containerRef.current) return;
-
-    // Clear previous elements
-    containerRef.current.innerHTML = '';
-    const targetDiv = document.createElement('div');
-    targetDiv.id = `spotify-embed-target-${Date.now()}`;
-    targetDiv.style.width = '100%';
-    targetDiv.style.height = '100%';
-    containerRef.current.appendChild(targetDiv);
+    if (!iframeRef.current) return;
 
     loadSpotifyApi().then((IFrameAPI) => {
-      if (!active) return;
+      if (!active || !iframeRef.current) return;
 
-      const options = {
-        uri: parseSpotifyUri(spotifyUri),
-        width: '100%',
-        height: '100%'
-      };
+      const options = {};
 
-      IFrameAPI.createController(targetDiv, options, (EmbedController: any) => {
-        if (!active) {
-          return;
-        }
+      IFrameAPI.createController(iframeRef.current, options, (EmbedController: any) => {
+        if (!active) return;
 
         controllerRef.current = EmbedController;
+        console.log("[SPOTIFY-SYNC] Controller successfully bound to existing iframe.");
 
         // Sync to latest presenter state immediately when controller mounts
         const presenterData = lastPresenterDataRef.current;
@@ -184,7 +143,6 @@ export function SpotifyPlayer({
 
     return () => {
       active = false;
-      if (timer) clearTimeout(timer);
       controllerRef.current = null;
     };
   }, [spotifyUri, roomId]);
@@ -211,14 +169,16 @@ export function SpotifyPlayer({
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          height: '100%',
-          borderRadius: 'var(--border-radius)',
-          overflow: 'hidden'
-        }}
+      <iframe
+        ref={iframeRef}
+        src={spotifyUri}
+        width="100%"
+        height="100%"
+        frameBorder="0"
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+        style={{ borderRadius: 'var(--border-radius)', border: 'none', background: '#000' }}
+        title="Spotify Music Player"
       />
     </div>
   );
