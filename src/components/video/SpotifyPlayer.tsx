@@ -21,9 +21,12 @@ export function SpotifyPlayer({
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
+  const scrollTimeoutRef = useRef<any>(null);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.5); // Default to 50%
+  const [isScrolling, setIsScrolling] = useState(false);
 
   const presenterIdRef = useRef(presenterId);
   const isPresenterRef = useRef(isPresenter);
@@ -85,6 +88,16 @@ export function SpotifyPlayer({
     }, 500);
   };
 
+  // Handle temporary pointer-events bypass while wheeling to support iframe tracklist scrolling
+  const handleWheel = () => {
+    if (isPresenter) return;
+    setIsScrolling(true);
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      setIsScrolling(false);
+    }, 250);
+  };
+
   // 1. Initialize Spotify Embed Controller on the existing iframe
   useEffect(() => {
     let active = true;
@@ -102,6 +115,11 @@ export function SpotifyPlayer({
 
         controllerRef.current = EmbedController;
         console.log("[SPOTIFY-SYNC] Controller successfully bound to existing iframe.");
+
+        // Set default volume level
+        try {
+          EmbedController.setVolume(volume);
+        } catch (e) {}
 
         // Sync to latest presenter state immediately when controller mounts
         const presenterData = lastPresenterDataRef.current;
@@ -150,6 +168,7 @@ export function SpotifyPlayer({
 
     return () => {
       active = false;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
       controllerRef.current = null;
     };
   }, [spotifyUri, roomId]);
@@ -184,7 +203,10 @@ export function SpotifyPlayer({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
+    <div 
+      onWheel={handleWheel}
+      style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}
+    >
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <iframe
           ref={iframeRef}
@@ -207,62 +229,97 @@ export function SpotifyPlayer({
               height: '100%',
               zIndex: 10,
               background: 'transparent',
-              cursor: 'not-allowed'
+              pointerEvents: isScrolling ? 'none' : 'auto',
+              cursor: isScrolling ? 'default' : 'not-allowed'
             }}
           />
         )}
       </div>
 
-      {/* Custom Progress Bar / Player Line */}
-      {duration > 0 && (
-        <div style={{
-          padding: '10px 16px',
-          background: '#121212',
-          borderBottomLeftRadius: 'var(--border-radius)',
-          borderBottomRightRadius: 'var(--border-radius)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          color: '#b3b3b3',
-          fontFamily: 'Inter, sans-serif',
-          fontSize: '11px',
-          borderTop: '1px solid #282828'
-        }}>
+      {/* Custom Progress Bar & Volume Line */}
+      <div style={{
+        padding: '10px 16px',
+        background: '#121212',
+        borderBottomLeftRadius: 'var(--border-radius)',
+        borderBottomRightRadius: 'var(--border-radius)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px',
+        color: '#b3b3b3',
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '11px',
+        borderTop: '1px solid #282828'
+      }}>
+        {/* Time Tracking */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '80px' }}>
           <span>{formatTime(currentTime)}</span>
-          <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
-            {isPresenter ? (
-              <input
-                type="range"
-                min={0}
-                max={duration}
-                value={currentTime}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setCurrentTime(val);
-                  if (controllerRef.current) {
-                    controllerRef.current.seek(Math.floor(val));
-                    updateFirestorePlaybackState(true, val);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  accentColor: '#1db954',
-                  background: '#535353',
-                  height: '4px',
-                  borderRadius: '2px',
-                  cursor: 'pointer',
-                  outline: 'none'
-                }}
-              />
-            ) : (
-              <div style={{ width: '100%', background: '#535353', height: '4px', borderRadius: '2px', position: 'relative' }}>
-                <div style={{ width: `${progressPercent}%`, background: '#1db954', height: '100%', borderRadius: '2px' }} />
-              </div>
-            )}
-          </div>
+          <span>/</span>
           <span>{formatTime(duration)}</span>
         </div>
-      )}
+
+        {/* Progress Slider */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+          {isPresenter ? (
+            <input
+              type="range"
+              min={0}
+              max={duration || 100}
+              value={currentTime}
+              disabled={duration === 0}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setCurrentTime(val);
+                if (controllerRef.current) {
+                  controllerRef.current.seek(Math.floor(val));
+                  updateFirestorePlaybackState(true, val);
+                }
+              }}
+              style={{
+                width: '100%',
+                accentColor: '#1db954',
+                background: '#535353',
+                height: '4px',
+                borderRadius: '2px',
+                cursor: duration === 0 ? 'not-allowed' : 'pointer',
+                outline: 'none'
+              }}
+            />
+          ) : (
+            <div style={{ width: '100%', background: '#535353', height: '4px', borderRadius: '2px', position: 'relative' }}>
+              <div style={{ width: `${progressPercent}%`, background: '#1db954', height: '100%', borderRadius: '2px' }} />
+            </div>
+          )}
+        </div>
+
+        {/* Volume Control */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '100px' }}>
+          <span style={{ fontSize: '12px' }}>🔊</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setVolume(val);
+              if (controllerRef.current) {
+                controllerRef.current.setVolume(val);
+              }
+            }}
+            style={{
+              width: '60px',
+              accentColor: '#1db954',
+              background: '#535353',
+              height: '4px',
+              borderRadius: '2px',
+              cursor: 'pointer',
+              outline: 'none'
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
