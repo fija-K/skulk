@@ -188,7 +188,7 @@ export function usePresence(
           todPending: data.todPending ?? false,
           todRequestedSpin: data.todRequestedSpin || null,
           todRequestedChoice: data.todRequestedChoice || null,
-          todRequestedReset: data.todRequestedReset ?? false
+          todRequestedReset: data.todRequestedReset || null
         });
       });
 
@@ -233,7 +233,7 @@ export function usePresence(
           todPending: false,
           todRequestedSpin: null,
           todRequestedChoice: null,
-          todRequestedReset: false
+          todRequestedReset: null
         }
       ]);
     });

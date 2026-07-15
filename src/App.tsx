@@ -2220,8 +2220,6 @@ function AppContent() {
 
   const getMyId = useCallback(() => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || ''), [user, guestId]);
 
-  const activePresenter = callParticipants.find(p => p.id !== getMyId() && p.sharing);
-
   const handleViewParticipantShare = (p: Participant) => {
     if (!p.sharing) return;
     setViewingShare({
@@ -5358,7 +5356,10 @@ function AppContent() {
                     const bTime = b.joinedAt ? new Date(b.joinedAt).getTime() : Infinity;
                     return aTime - bTime;
                   });
-                  const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10);
+                  const myId = getMyId();
+                  const isAdminUser = !!(user && user.email && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(user.email.toLowerCase()));
+                  const isAlreadyInRoom = currentRoomParticipants.some(p => p.uid === myId || p.id === myId);
+                  const isRoomFull = currentRoomParticipants.length >= (room.maxParticipants || 10) && !isAdminUser && !isAlreadyInRoom;
                   const currentHostId = room.currentHostId || room.creatorId;
                   const isCreatorAdmin = (room.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') || 
                                          (room.creatorEmail && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(room.creatorEmail.toLowerCase())) ||
