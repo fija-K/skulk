@@ -167,7 +167,7 @@ export function createWrappedPlayer(
               const time = player.getCurrentTime() || 0;
               if (state === 1) {
                 onStateChange(true, time);
-              } else if (state === 2) {
+              } else if (state === 2 || state === 0) {
                 onStateChange(false, time);
               }
             }
@@ -576,9 +576,12 @@ export function UniversalVideoPlayer({
     try {
       const targetPlaylistIndex = data.ytPlaylistIndex ?? 0;
       if (player.getPlaylistIndex && player.playVideoAt) {
-        const currentIndex = player.getPlaylistIndex();
-        if (currentIndex !== targetPlaylistIndex) {
-          player.playVideoAt(targetPlaylistIndex);
+        const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
+        if (!playlist || playlist.length > 0) {
+          const currentIndex = player.getPlaylistIndex();
+          if (currentIndex !== targetPlaylistIndex) {
+            player.playVideoAt(targetPlaylistIndex);
+          }
         }
       }
     } catch (e) {
@@ -682,9 +685,12 @@ export function UniversalVideoPlayer({
       try {
         const targetPlaylistIndex = presenterData.ytPlaylistIndex ?? 0;
         if (player.getPlaylistIndex && player.playVideoAt) {
-          const currentIndex = player.getPlaylistIndex();
-          if (currentIndex !== targetPlaylistIndex) {
-            player.playVideoAt(targetPlaylistIndex);
+          const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
+          if (!playlist || playlist.length > 0) {
+            const currentIndex = player.getPlaylistIndex();
+            if (currentIndex !== targetPlaylistIndex) {
+              player.playVideoAt(targetPlaylistIndex);
+            }
           }
         }
       } catch (playlistErr) {
@@ -755,6 +761,7 @@ export function UniversalVideoPlayer({
           isPresenterRef.current,
           isLive,
           (playing, time) => {
+            if (!active) return;
             if (!isPresenterRef.current || isLive) return; // ONLY presenter writes playback updates to Firestore!
             if (!hasDoneInitialSeekRef.current) {
               console.log("[YT-SYNC] Skipping Firestore state change write because initial seek is not complete yet.");
@@ -765,6 +772,7 @@ export function UniversalVideoPlayer({
             }
           },
           (state) => {
+            if (!active) return;
             // State 1 is PLAYING, State 3 is BUFFERING.
             // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
             if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
@@ -910,6 +918,7 @@ export function UniversalVideoPlayer({
     let lastSpeed: number | null = null;
     let lastPlaylistIndex: number | null = null;
     let lastCheck = Date.now();
+    let active = true;
 
     const interval = setInterval(async () => {
       if (playerRef.current) {
@@ -959,6 +968,7 @@ export function UniversalVideoPlayer({
           const timeJumped = Math.abs(time - expectedTime) > 2.0;
 
           if (stateChanged || timeJumped || speedChanged || playlistIndexChanged) {
+            if (!active) return;
             updateFirestorePlaybackState(playing, time, speed);
             lastState = state;
             lastTime = time;
@@ -975,7 +985,10 @@ export function UniversalVideoPlayer({
       }
     }, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [isPresenter, isLive]);
 
   // Synchronize player to presenter's active state in the room via direct document subscription
