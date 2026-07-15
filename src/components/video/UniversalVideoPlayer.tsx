@@ -63,10 +63,9 @@ export function createWrappedPlayer(
           playerVars.list = playlistId;
         }
 
-        const player = new (window as any).YT.Player(targetElement, {
+        const playerOptions: any = {
           width: '100%',
           height: '100%',
-          videoId: actualVideoId || '',
           playerVars: playerVars,
           events: {
             onReady: () => {
@@ -128,7 +127,13 @@ export function createWrappedPlayer(
               }
             }
           }
-        });
+        };
+
+        if (actualVideoId) {
+          playerOptions.videoId = actualVideoId;
+        }
+
+        const player = new (window as any).YT.Player(targetElement, playerOptions);
       });
     });
   }
@@ -585,12 +590,29 @@ export function UniversalVideoPlayer({
         console.warn("Failed to restore playlist index for presenter:", playlistErr);
       }
 
-      if (targetPlaying) {
-        player.play();
-      } else {
-        player.pause();
+      let canSeek = true;
+      if (player.getDuration) {
+        const dur = await player.getDuration();
+        if (dur === 0) {
+          canSeek = false;
+          // Force play to kickstart loading/buffering
+          if (targetPlaying) {
+            player.play();
+          }
+          setTimeout(() => {
+            if (playerRef.current) syncPresenterToOwnState(playerRef.current);
+          }, 250);
+        }
       }
-      player.seekTo(correctedTime);
+
+      if (canSeek) {
+        if (targetPlaying) {
+          player.play();
+        } else {
+          player.pause();
+        }
+        player.seekTo(correctedTime);
+      }
     } catch (e) {
       console.warn("Failed to sync presenter to own state on mount:", e);
     }
