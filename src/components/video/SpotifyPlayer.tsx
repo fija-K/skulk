@@ -22,11 +22,13 @@ export function SpotifyPlayer({
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
   const scrollTimeoutRef = useRef<any>(null);
+  const isDraggingRef = useRef(false);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.5); // Default to 50%
   const [isScrolling, setIsScrolling] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   const presenterIdRef = useRef(presenterId);
   const isPresenterRef = useRef(isPresenter);
@@ -64,11 +66,12 @@ export function SpotifyPlayer({
       correctedTime += elapsedSeconds;
     }
 
-    setCurrentTime(correctedTime);
+    if (!isDraggingRef.current) {
+      setCurrentTime(correctedTime);
+    }
     isLocalChangeRef.current = true;
 
     try {
-      // Only call play/pause if the state differs from target to prevent playback glitching
       if (targetPlaying && localPausedRef.current) {
         controller.play();
       } else if (!targetPlaying && !localPausedRef.current) {
@@ -142,7 +145,13 @@ export function SpotifyPlayer({
           const { position, duration: dur, isPaused } = e.data;
           const timeSeconds = position / 1000;
 
-          setCurrentTime(timeSeconds);
+          if (!isPaused) {
+            setHasInteracted(true);
+          }
+
+          if (!isDraggingRef.current) {
+            setCurrentTime(timeSeconds);
+          }
           setDuration(dur / 1000);
           localPausedRef.current = isPaused;
 
@@ -198,7 +207,7 @@ export function SpotifyPlayer({
 
   // 3. Watcher auto-sync enforcement loop (runs every 2 seconds for watchers to handle buffering or missed states)
   useEffect(() => {
-    if (isPresenter || !roomId || !presenterId) return;
+    if (isPresenter || !roomId || !presenterId || !hasInteracted) return;
 
     let active = true;
     const interval = setInterval(() => {
@@ -235,7 +244,7 @@ export function SpotifyPlayer({
       active = false;
       clearInterval(interval);
     };
-  }, [isPresenter, presenterId, roomId, currentTime]);
+  }, [isPresenter, presenterId, roomId, currentTime, hasInteracted]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -263,7 +272,32 @@ export function SpotifyPlayer({
           style={{ borderRadius: 'var(--border-radius)', border: 'none', background: '#000' }}
           title="Spotify Music Player"
         />
-        {!isPresenter && (
+
+        {/* Informational Hint to Start Syncing */}
+        {!isPresenter && !hasInteracted && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '12px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: '#1db954',
+              color: '#fff',
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              fontFamily: 'Inter, sans-serif',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              zIndex: 20,
+              pointerEvents: 'none'
+            }}
+          >
+            🎵 Click the Play button below to sync music!
+          </div>
+        )}
+
+        {!isPresenter && hasInteracted && (
           <div
             style={{
               position: 'absolute',
@@ -311,6 +345,18 @@ export function SpotifyPlayer({
               max={duration || 100}
               value={currentTime}
               disabled={duration === 0}
+              onMouseDown={() => {
+                isDraggingRef.current = true;
+              }}
+              onTouchStart={() => {
+                isDraggingRef.current = true;
+              }}
+              onMouseUp={() => {
+                isDraggingRef.current = false;
+              }}
+              onTouchEnd={() => {
+                isDraggingRef.current = false;
+              }}
               onChange={(e) => {
                 const val = parseFloat(e.target.value);
                 setCurrentTime(val);
