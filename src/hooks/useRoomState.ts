@@ -19,6 +19,7 @@ export function useRoomState(
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [systemMessages, setSystemMessages] = useState<any[]>([]);
+  const [activeBots, setActiveBots] = useState<{ id: string; name: string; addedBy: string }[]>([]);
   const [viewingShare, setViewingShare] = useState<ViewingShare | null>(null);
 
   // Theme states or widgets can stay in App, but tools states are synced from room document:
@@ -196,6 +197,24 @@ export function useRoomState(
     return () => unsubscribe();
   }, [roomId]);
 
+  // Sync active bots
+  useEffect(() => {
+    if (!roomId) {
+      setActiveBots([]);
+      return;
+    }
+    
+    const botsRef = collection(db, 'rooms', roomId, 'bots');
+    const unsubscribe = onSnapshot(botsRef, (snapshot) => {
+      const list = snapshot.docs.map(docSnap => docSnap.data() as { id: string; name: string; addedBy: string });
+      setActiveBots(list);
+    }, (error) => {
+      console.warn("Firestore bots subscription failed:", error);
+    });
+    
+    return () => unsubscribe();
+  }, [roomId]);
+
   return {
     currentRoom,
     setCurrentRoom,
@@ -236,6 +255,9 @@ export function useRoomState(
     pomodoroSeconds,
     setPomodoroSeconds,
     pomodoroPhase,
-    setPomodoroPhase
+    setPomodoroPhase,
+    
+    // Active Bots state
+    activeBots
   };
 }

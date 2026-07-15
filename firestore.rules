@@ -80,7 +80,8 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly([
           'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
           'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
-          'spinResult', 'spinPool', 'spinCheckedIds'
+          'spinResult', 'spinPool', 'spinCheckedIds',
+          'emptySince'
         ]) &&
         (
           resource.data.creatorId == request.auth.uid ||
@@ -179,10 +180,27 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if true;
         allow create: if request.auth != null &&
-                      request.resource.data.senderId == request.auth.uid &&
-                      request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt']) &&
+                      (
+                        request.resource.data.senderId == request.auth.uid ||
+                        request.resource.data.senderId.startsWith('bot_')
+                      ) &&
+                      request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt', 'mentionedId']) &&
                       exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid));
         allow update, delete: if false;
+      }
+
+      // 10. Study Buddy Bots subcollection
+      match /bots/{botId} {
+        allow read: if true;
+        allow create: if request.auth != null &&
+                      exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)) &&
+                      request.resource.data.keys().hasOnly(['id', 'name', 'addedBy', 'addedByName', 'createdAt']);
+        allow delete: if request.auth != null &&
+                      (
+                        get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'] ||
+                        get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid
+                      );
+        allow update: if false;
       }
 
       // 6. JoinRequests subcollection: anyone can create/delete their own request document, mods can update (approve/deny)

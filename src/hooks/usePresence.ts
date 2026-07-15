@@ -7,6 +7,7 @@ import {
   setDoc, 
   updateDoc, 
   runTransaction, 
+  getDocs,
   onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -80,6 +81,12 @@ export function usePresence(
           console.log("leavePresence transaction: presence doc does not exist.");
         }
       });
+
+      const snapshot = await getDocs(collection(db, 'rooms', roomIdToLeave, 'participants'));
+      if (snapshot.empty) {
+        await updateDoc(doc(db, 'rooms', roomIdToLeave), { emptySince: Date.now() });
+        console.log(`[CLEANUP] Room ${roomIdToLeave} marked as empty.`);
+      }
     } catch (e) {
       console.error('Error removing presence document:', e);
     }
@@ -92,6 +99,7 @@ export function usePresence(
     hasSeenSelfInListRef.current = false;
 
     try {
+      await updateDoc(doc(db, 'rooms', room.id), { emptySince: null }).catch(() => {});
       const presenceRef = doc(db, 'rooms', room.id, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,

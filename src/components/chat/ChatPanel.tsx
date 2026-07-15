@@ -6,9 +6,10 @@ interface ChatPanelProps {
   chatMessages: ChatMessage[];
   systemMessages: any[];
   callParticipants: Participant[];
-  sendChatMessage: (text: string) => Promise<void>;
+  sendChatMessage: (text: string, mentionedId?: string) => Promise<void>;
   callTab: string;
   handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
+  activeBots: { id: string; name: string; addedBy: string }[];
 }
 
 const POPULAR_EMOJIS = [
@@ -33,9 +34,14 @@ export function ChatPanel({
   callParticipants,
   sendChatMessage,
   callTab,
-  handleOpenProfile
+  handleOpenProfile,
+  activeBots
 }: ChatPanelProps) {
   const [chatMessageText, setChatMessageText] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearchText, setMentionSearchText] = useState('');
+  const [mentionedId, setMentionedId] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll chat to bottom
@@ -186,8 +192,46 @@ export function ChatPanel({
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessageText.trim()) return;
-    await sendChatMessage(chatMessageText);
+
+    let finalMentionedId = mentionedId;
+    if (!finalMentionedId) {
+      const match = chatMessageText.match(/@(\w+)/);
+      if (match) {
+        const name = match[1];
+        const matchedBot = activeBots.find(b => b.name.toLowerCase() === name.toLowerCase());
+        if (matchedBot) {
+          finalMentionedId = `bot_${matchedBot.id}`;
+        } else {
+          const matchedUser = callParticipants.find(p => p.name.replace(' (You)', '').toLowerCase() === name.toLowerCase());
+          if (matchedUser) {
+            finalMentionedId = matchedUser.id;
+          }
+        }
+      }
+    }
+
+    await sendChatMessage(chatMessageText, finalMentionedId || undefined);
     setChatMessageText('');
+    setMentionedId(null);
+    setShowMentionDropdown(false);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setChatMessageText(val);
+
+    const cursorPosition = e.target.selectionStart || 0;
+    const beforeCursor = val.slice(0, cursorPosition);
+    const lastAtIdx = beforeCursor.lastIndexOf('@');
+
+    if (lastAtIdx !== -1 && !beforeCursor.slice(lastAtIdx).includes(' ')) {
+      const searchText = beforeCursor.slice(lastAtIdx + 1);
+      setShowMentionDropdown(true);
+      setMentionSearchText(searchText);
+    } else {
+      setShowMentionDropdown(false);
+      setMentionSearchText('');
+    }
   };
 
   const processAndSendImage = (file: File) => {
@@ -349,16 +393,32 @@ export function ChatPanel({
               );
             }
 
-            const role = msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member';
+            const isBot = msg.senderRole === 'bot' || msg.senderId?.startsWith('bot_');
+            const role = isBot ? 'bot' : (msg.senderRole || (callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender)?.role) || 'member');
             const isMedia = msg.text.startsWith('[IMAGE]:') || msg.text.startsWith('[GIF]:') || msg.text.startsWith('[STICKER]:');
             
             return (
-              <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+              <div 
+                key={msg.id} 
+                className="chat-message-item animate-fade-in" 
+                style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '3px', 
+                  padding: '8px 12px', 
+                  borderBottom: '1px solid rgba(255,255,255,0.02)',
+                  ...isBot ? {
+                    backgroundColor: 'rgba(29, 185, 84, 0.02)',
+                    borderLeft: '3px solid #1db954'
+                  } : {}
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span 
                     className="chat-sender" 
-                    style={{ fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                    style={{ fontWeight: 700, fontSize: '13px', cursor: isBot ? 'default' : 'pointer' }}
                     onClick={() => {
+                      if (isBot) return;
                       if (handleOpenProfile) {
                         const participant = callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender);
                         handleOpenProfile({
@@ -377,12 +437,16 @@ export function ChatPanel({
                     <span className={`role-badge-${role}`} style={{
                       fontSize: '8px',
                       fontWeight: 'bold',
-                      padding: '1px 4px',
+                      padding: '1.5px 5px',
                       borderRadius: '3px',
                       border: '1px solid',
                       textTransform: 'uppercase',
                       lineHeight: '1.2',
-                      ...role === 'admin' ? {
+                      ...role === 'bot' ? {
+                        backgroundColor: 'rgba(29, 185, 84, 0.15)',
+                        borderColor: '#1db954',
+                        color: '#1db954'
+                      } : role === 'admin' ? {
                         backgroundColor: 'rgba(241, 196, 15, 0.15)',
                         borderColor: 'var(--primary-color, #f1c40f)',
                         color: 'var(--primary-color, #f1c40f)'
@@ -396,7 +460,7 @@ export function ChatPanel({
                         color: '#10b981'
                       }
                     }}>
-                      {role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                      {role === 'bot' ? '🤖 Study Buddy' : role === 'admin' ? '👑 Admin' : role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
                     </span>
                   )}
                 </div>
@@ -817,14 +881,130 @@ export function ChatPanel({
         </label>
       </div>
       
+      {showMentionDropdown && (
+        <div
+          className="mention-dropdown-overlay"
+          style={{
+            position: 'absolute',
+            bottom: '50px',
+            left: '12px',
+            right: '12px',
+            backgroundColor: 'var(--panel-bg, #1a1b20)',
+            border: '1px solid var(--border-color, #282a36)',
+            borderRadius: '8px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
+            zIndex: 100,
+            maxHeight: '200px',
+            overflowY: 'auto',
+            padding: '4px 0'
+          }}
+        >
+          {(() => {
+            const filteredBots = activeBots
+              .filter(b => b.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
+              .map(b => ({ id: b.id, name: b.name, type: 'bot' as const, photoURL: null, initials: '🤖', color: '#1db954' }));
+            
+            const filteredUsers = callParticipants
+              .filter(p => p.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
+              .map(p => ({
+                id: p.id,
+                name: p.name.replace(' (You)', ''),
+                type: 'user' as const,
+                photoURL: p.photoURL,
+                initials: p.initials,
+                color: p.color
+              }));
+
+            const combined = [...filteredBots, ...filteredUsers];
+
+            if (combined.length === 0) {
+              return (
+                <div style={{ padding: '8px 12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  No matches found
+                </div>
+              );
+            }
+
+            return combined.map(item => {
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    const val = chatMessageText;
+                    const cursorPosition = inputRef.current?.selectionStart || 0;
+                    const beforeCursor = val.slice(0, cursorPosition);
+                    const lastAtIdx = beforeCursor.lastIndexOf('@');
+                    const beforeAt = val.slice(0, lastAtIdx);
+                    const afterCursor = val.slice(cursorPosition);
+                    
+                    const newText = `${beforeAt}@${item.name} ${afterCursor}`;
+                    setChatMessageText(newText);
+                    setMentionedId(item.type === 'bot' ? `bot_${item.id}` : item.id);
+                    setShowMentionDropdown(false);
+                    inputRef.current?.focus();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    transition: 'background 0.2s',
+                    color: 'var(--text-primary)'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  {item.photoURL ? (
+                    <img 
+                      src={item.photoURL} 
+                      alt={item.name} 
+                      style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover' }} 
+                    />
+                  ) : (
+                    <div style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '50%',
+                      backgroundColor: item.color,
+                      color: item.type === 'bot' ? '#0f1013' : '#fff',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {item.initials}
+                    </div>
+                  )}
+
+                  <span style={{ fontWeight: 600 }}>{item.name}</span>
+                  {item.type === 'bot' ? (
+                    <span style={{ fontSize: '9px', background: 'rgba(29, 185, 84, 0.15)', color: '#1db954', border: '1px solid rgba(29, 185, 84, 0.3)', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                      🤖 Buddy
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '9px', background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                      User
+                    </span>
+                  )}
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
+      
       <form onSubmit={handleSendChatMessage} className="chat-input-form" style={{ borderTop: 'none' }}>
         <input 
+          ref={inputRef}
           type="text" 
           placeholder="Message the room..." 
           className="search-input"
           style={{ paddingLeft: '14px', fontSize: '13px' }}
           value={chatMessageText}
-          onChange={(e) => setChatMessageText(e.target.value)}
+          onChange={handleInputChange}
           onPaste={handlePaste}
           required
         />

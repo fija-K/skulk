@@ -35,6 +35,7 @@ import { parseMediaUrl, isDrmBlockedUrl, loadYoutubeApi, loadVimeoApi, loadTwitc
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
 import { SpotifyPlayer } from './components/video/SpotifyPlayer';
 import { ChatPanel } from './components/chat/ChatPanel';
+import { StudyBuddiesPanel } from './components/chat/StudyBuddiesPanel';
 import { WhiteboardView } from './components/whiteboard/WhiteboardView';
 import { TruthOrDareUI, SpinWheelUI } from './components/games/GamesView';
 import { ParticipantTile } from './components/call/ParticipantTile';
@@ -62,6 +63,7 @@ export interface Room {
   currentHostId?: string;
   currentHostName?: string;
   isLocalOnly?: boolean;
+  emptySince?: number;
 }
 
 export interface Participant {
@@ -110,9 +112,10 @@ export interface ChatMessage {
   id: string;
   sender: string;
   senderId?: string;
-  senderRole?: 'admin' | 'host' | 'cohost' | 'member';
+  senderRole?: 'admin' | 'host' | 'cohost' | 'member' | 'bot';
   text: string;
   createdAt?: string;
+  mentionedId?: string;
 }
 
 export default function App() {
@@ -159,7 +162,7 @@ interface PipWindowContentProps {
   unreadChatCount: number;
   chatMessages: ChatMessage[];
   systemMessages: any[];
-  sendChatMessage: (text: string) => Promise<void>;
+  sendChatMessage: (text: string, mentionedId?: string) => Promise<void>;
 }
 
 function PipWindowContent({
@@ -948,8 +951,15 @@ function AppContent() {
         setRooms(getLocalRooms());
       } else {
         const list: Room[] = [];
-        snapshot.forEach(doc => {
-          list.push({ id: doc.id, ...doc.data() } as Room);
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.emptySince && Date.now() - data.emptySince > 5 * 60 * 1000) {
+            deleteDoc(docSnap.ref).catch((err) => {
+              console.warn("Failed to delete expired empty room:", docSnap.id, err);
+            });
+          } else {
+            list.push({ id: docSnap.id, ...data } as Room);
+          }
         });
         // Sort client-side by effective start time (createdAt for instant, scheduledDate/Time for scheduled)
         list.sort((a, b) => {
@@ -1271,7 +1281,8 @@ function AppContent() {
     pomodoroSeconds,
     setPomodoroSeconds,
     pomodoroPhase,
-    setPomodoroPhase
+    setPomodoroPhase,
+    activeBots
   } = useRoomState(roomId || null, user, guestId, localJoinTimeRef, showToast, handleLeaveCall);
 
   const {
@@ -1368,7 +1379,7 @@ function AppContent() {
   
 
   // Tools sub-panel toggle
-  const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin' | 'spotify' | 'streaming'>('none');
+  const [activeToolDetail, setActiveToolDetail] = useState<any>('none');
 
   // Fun Tools toggle & Truth or Dare synced spinner states
   // Local sync of Truth or Dare active/pending participant states from callParticipants list
@@ -2563,6 +2574,15 @@ function AppContent() {
             } catch (err) {
               console.warn("Direct document fetch failed, using local room representation:", err);
             }
+          }
+          if (roomObj && roomObj.emptySince && Date.now() - roomObj.emptySince > 5 * 60 * 1000) {
+            try {
+              await deleteDoc(doc(db, 'rooms', roomObj.id));
+            } catch (e) {}
+            showToast("⚠️ This room has expired (empty for more than 5 minutes).");
+            isEnteringRoomRef.current = null;
+            navigate('/');
+            return;
           }
           if (!roomObj) {
             roomObj = {
@@ -4324,8 +4344,7 @@ function AppContent() {
     showToast('Profile updated!');
   };
 
-  // Reusable chat sending function for both main app and PiP window
-  const sendChatMessage = async (text: string) => {
+  const sendChatMessage = async (text: string, mentionedId?: string) => {
     if (!text.trim() || !currentRoom) return;
 
     const senderName = user ? user.displayName || 'Google User' : guestName;
@@ -4341,9 +4360,60 @@ function AppContent() {
       text: text.trim(),
       createdAt: new Date().toISOString()
     };
+    if (mentionedId) {
+      newMsg.mentionedId = mentionedId;
+    }
 
     try {
       await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), newMsg);
+
+      if (mentionedId && mentionedId.startsWith('bot_')) {
+        const botName = mentionedId.replace('bot_', '');
+        const history = chatMessages.slice(-10).map(m => ({
+          senderRole: m.senderRole,
+          text: m.text
+        }));
+
+        fetch('/api/study-buddy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            botId: botName,
+            message: text.trim(),
+            chatHistory: history
+          })
+        })
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to call backend');
+          }
+          
+          const botMsgId = (Date.now() + 10).toString();
+          const botMsg: ChatMessage = {
+            id: botMsgId,
+            sender: botName,
+            senderId: mentionedId,
+            senderRole: 'bot' as any,
+            text: data.reply,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+        })
+        .catch(async (err) => {
+          console.error("Study Buddy response generation failed:", err);
+          const botMsgId = (Date.now() + 10).toString();
+          const botMsg: ChatMessage = {
+            id: botMsgId,
+            sender: botName,
+            senderId: mentionedId,
+            senderRole: 'bot' as any,
+            text: `⚠️ Error: ${err.message || 'Generation failed'}. Make sure GEMINI_API_KEY or OPENAI_API_KEY is configured in your server/environment.`,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+        });
+      }
     } catch (err) {
       console.warn("Failed to write chat to Firestore, fallback locally:", err);
       setChatMessages(prev => [...prev, newMsg]);
@@ -7223,6 +7293,7 @@ function AppContent() {
                     sendChatMessage={sendChatMessage}
                     callTab={callTab}
                     handleOpenProfile={handleOpenProfile}
+                    activeBots={activeBots}
                   />
                 )}
 
@@ -7586,6 +7657,33 @@ function AppContent() {
                            </div>
                         </div>
 
+                        {/* Section 1.5: Group Buddies */}
+                        <div>
+                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                            Group Buddies
+                          </h4>
+                          
+                          <div className="tools-cards-grid">
+                            {/* Study Buddies Card */}
+                            <div 
+                              className={`tool-card ${activeToolDetail === 'buddies' ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveToolDetail('buddies');
+                                setActiveGameId(null);
+                              }}
+                              title="Invite virtual study buddies to this room"
+                            >
+                              <div className="tool-card-icon-wrapper" style={{ color: 'var(--primary-color, #f1c40f)' }}>
+                                🤖
+                              </div>
+                              <div className="tool-card-info">
+                                <span className="tool-card-title">Study Buddies</span>
+                                <span className="tool-card-desc">Add virtual study companions to chat.</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Section 2: Fun Section (Disabled for everyone if toggle is OFF) */}
                         {(() => {
                           const isFunLocked = !allowFunTools;
@@ -7750,6 +7848,19 @@ function AppContent() {
                           </button>
                         </form>
                       </div>
+                    )}
+
+                    {/* Sub-panel View: Study Buddies */}
+                    {activeToolDetail === 'buddies' && currentRoom && (
+                      <StudyBuddiesPanel
+                        roomId={roomDocId(currentRoom)}
+                        activeBots={activeBots}
+                        myId={getMyId()}
+                        myName={user ? user.displayName || 'Google User' : guestName}
+                        myRole={callParticipants.find(p => p.id === getMyId())?.role || determineRole(currentRoom.creatorId)}
+                        showToast={showToast}
+                        onClose={() => setActiveToolDetail('none')}
+                      />
                     )}
 
                     {/* Sub-panel View 1: YouTube details */}
