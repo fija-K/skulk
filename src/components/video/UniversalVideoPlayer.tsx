@@ -556,6 +556,46 @@ export function UniversalVideoPlayer({
     isLocalChangeRef.current = false;
   };
 
+  const syncPresenterToOwnState = async (player: AbstractPlayer) => {
+    try {
+      const presenterData = getPresenterState();
+      if (!presenterData) return;
+
+      const targetPlaying = presenterData.ytPlaying ?? false;
+      const targetTime = presenterData.ytTime ?? 0;
+      const targetTimestamp = presenterData.ytUpdateTimestamp ?? Date.now();
+      const speed = presenterData.ytSpeed ?? 1;
+
+      let elapsed = 0;
+      if (targetPlaying) {
+        elapsed = Date.now() - targetTimestamp;
+      }
+      const correctedTime = targetTime + (targetPlaying ? (elapsed / 1000) * speed : 0);
+
+      // Restore playlist index if applicable
+      try {
+        const targetPlaylistIndex = presenterData.ytPlaylistIndex ?? 0;
+        if (player.getPlaylistIndex && player.playVideoAt) {
+          const currentIndex = player.getPlaylistIndex();
+          if (currentIndex !== targetPlaylistIndex) {
+            player.playVideoAt(targetPlaylistIndex);
+          }
+        }
+      } catch (playlistErr) {
+        console.warn("Failed to restore playlist index for presenter:", playlistErr);
+      }
+
+      if (targetPlaying) {
+        player.play();
+      } else {
+        player.pause();
+      }
+      player.seekTo(correctedTime);
+    } catch (e) {
+      console.warn("Failed to sync presenter to own state on mount:", e);
+    }
+  };
+
   useEffect(() => {
     let active = true;
     hasDoneInitialSeekRef.current = false;
@@ -570,58 +610,69 @@ export function UniversalVideoPlayer({
     targetDiv.style.height = '100%';
     containerRef.current.appendChild(targetDiv);
 
-    createWrappedPlayer(
-      platform,
-      targetDiv,
-      videoId,
-      isPresenter,
-      isLive,
-      (playing, time) => {
-        if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
-        if (!isLocalChangeRef.current) {
-          updateFirestorePlaybackState(playing, time);
-        }
-      },
-      (state) => {
-        // State 1 is PLAYING, State 3 is BUFFERING.
-        // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
-        if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
-          hasDoneInitialSeekRef.current = true;
-          const presenterData = lastPresenterDataRef.current || getPresenterState();
-          if (presenterData && playerRef.current) {
-            console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
-            syncToPresenterState(presenterData, playerRef.current);
+    const apiLoadPromise = platform === 'youtube' ? loadYoutubeApi() : Promise.resolve();
+    apiLoadPromise.then(() => {
+      if (!active) return;
+
+      createWrappedPlayer(
+        platform,
+        targetDiv,
+        videoId,
+        isPresenter,
+        isLive,
+        (playing, time) => {
+          if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
+          if (!isLocalChangeRef.current) {
+            updateFirestorePlaybackState(playing, time);
+          }
+        },
+        (state) => {
+          // State 1 is PLAYING, State 3 is BUFFERING.
+          // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
+          if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
+            hasDoneInitialSeekRef.current = true;
+            const presenterData = lastPresenterDataRef.current || getPresenterState();
+            if (playerRef.current) {
+              console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
+              if (isPresenter) {
+                syncPresenterToOwnState(playerRef.current);
+              } else if (presenterData) {
+                syncToPresenterState(presenterData, playerRef.current);
+              }
+            }
           }
         }
-      }
-    ).then((wrappedPlayer) => {
-      if (!active) {
-        wrappedPlayer.destroy();
-        return;
-      }
-      playerRef.current = wrappedPlayer;
+      ).then((wrappedPlayer) => {
+        if (!active) {
+          wrappedPlayer.destroy();
+          return;
+        }
+        playerRef.current = wrappedPlayer;
 
-      // Check for playlist videos immediately and with a small interval
-      if (wrappedPlayer.getPlaylist) {
-        const checkPlaylist = () => {
-          if (!active) return;
-          const list = wrappedPlayer.getPlaylist?.();
-          if (list && list.length > 0) {
-            setPlaylistVideos(list);
-          } else {
-            setTimeout(checkPlaylist, 500);
-          }
-        };
-        checkPlaylist();
-      }
+        // Check for playlist videos immediately and with a small interval
+        if (wrappedPlayer.getPlaylist) {
+          const checkPlaylist = () => {
+            if (!active) return;
+            const list = wrappedPlayer.getPlaylist?.();
+            if (list && list.length > 0) {
+              setPlaylistVideos(list);
+            } else {
+              setTimeout(checkPlaylist, 500);
+            }
+          };
+          checkPlaylist();
+        }
 
-      // Sync to latest presenter state immediately when player mounts
-      const presenterData = lastPresenterDataRef.current || getPresenterState();
-      if (presenterData) {
-        syncToPresenterState(presenterData, wrappedPlayer);
-      }
-    }).catch(err => {
-      console.error("Failed to load player:", err);
+        // Sync to latest presenter state immediately when player mounts
+        const presenterData = lastPresenterDataRef.current || getPresenterState();
+        if (isPresenter) {
+          syncPresenterToOwnState(wrappedPlayer);
+        } else if (presenterData) {
+          syncToPresenterState(presenterData, wrappedPlayer);
+        }
+      }).catch(err => {
+        console.error("Failed to load player:", err);
+      });
     });
 
     return () => {
@@ -877,7 +928,7 @@ export function UniversalVideoPlayer({
           onClick={() => setShowPlaylistSidebar(true)}
           style={{
             position: 'absolute',
-            top: '10px',
+            top: '55px',
             right: '10px',
             backgroundColor: 'rgba(10,11,14,0.85)',
             border: '1px solid var(--border-color)',
