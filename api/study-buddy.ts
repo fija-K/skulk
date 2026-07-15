@@ -125,21 +125,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const status = error.status;
 
     if (messageStr.includes('MISSING_API_KEY')) {
-      return res.status(401).json({ error: 'API key is missing in server environment variables.' });
+      return res.status(401).json({ error: 'API key is missing in server environment variables.', details: messageStr });
     }
     if (messageStr.includes('INVALID_API_KEY') || status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID')) {
-      return res.status(403).json({ error: 'The provided API key is invalid or unauthorized.' });
+      return res.status(403).json({ error: 'The provided API key is invalid or unauthorized.', details: messageStr });
     }
     if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED')) {
-      return res.status(429).json({ error: 'Rate limit or API quota exceeded. Please try again later.' });
+      return res.status(429).json({ error: 'Rate limit or API quota exceeded. Please try again later.', details: messageStr });
     }
     if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED') || status === 503) {
-      return res.status(503).json({ error: 'No compatible or stable Gemini models are currently available.' });
+      return res.status(503).json({ error: 'No compatible or stable Gemini models are currently available.', details: messageStr });
     }
     if (status === 400 || messageStr.includes('400') || messageStr.includes('INVALID_ARGUMENT')) {
-      return res.status(400).json({ error: 'Invalid request or prompt structure sent to the AI model.' });
+      return res.status(400).json({ error: 'Invalid request or prompt structure sent to the AI model.', details: messageStr });
     }
 
-    return res.status(500).json({ error: error.message || 'An unexpected internal server error occurred during response generation.' });
+    return res.status(500).json({ error: 'An unexpected internal server error occurred during response generation.', details: messageStr });
   }
 }

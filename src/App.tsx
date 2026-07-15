@@ -4386,7 +4386,8 @@ function AppContent() {
         .then(async (response) => {
           const data = await response.json();
           if (!response.ok) {
-            throw new Error(data.error || 'Failed to call backend');
+            const errorMsg = data.details ? `${data.error} Details: ${data.details}` : (data.error || 'Failed to call backend');
+            throw new Error(errorMsg);
           }
           
           const botMsgId = (Date.now() + 10).toString();
