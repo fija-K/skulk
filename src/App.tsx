@@ -6356,69 +6356,47 @@ function AppContent() {
               }}
               onDisconnected={() => {
                 setLkConnectStatus('disconnected');
+                // Skip if user intentionally clicked "Leave Room" or if room/token is already cleared
+                if (!liveKitToken || !currentRoom) return;
+
+                console.warn("Unexpected terminal disconnection from LiveKit. Scheduling retry...");
+                setActiveLkToken(null); // Unmount current connection to allow retry/remount
+                setLkConnectStatus('error'); // Trigger the custom retry backoff useEffect
               }}
               onError={(err) => {
                 console.error("LiveKit connection error event:", err);
                 setLkConnectStatus('error');
-                setActiveLkToken(null); // Instantly halts LiveKitRoom's internal retry loop
+                // Do NOT set activeLkToken to null here. Allow SDK internal reconnects/failovers.
               }}
               style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', width: '100%', overflow: 'hidden' }}
             >
-            {lkConnectStatus !== 'connected' ? (
+            {lkConnectStatus === 'error' && lkRetryCount >= 10 ? (
               <div className="call-layout animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, backgroundColor: 'var(--bg-color)', color: 'var(--text-primary)', gap: '20px', padding: '24px', textAlign: 'center' }}>
-                {lkConnectStatus === 'error' && lkRetryCount >= 10 ? (
-                  <div style={{ maxWidth: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                    <div style={{ fontSize: '48px' }}>⚠️</div>
-                    <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Connection Failed</h3>
-                    <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-                      Could not establish a connection to the audio/video server. Please check your network connection and try again.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setLkRetryCount(0);
-                        setLkConnectStatus('connecting');
-                        setActiveLkToken(liveKitToken);
-                      }}
-                      className="btn-create"
-                      style={{ padding: '10px 24px', fontSize: '14px', marginTop: '8px' }}
-                    >
-                      Retry Connection
-                    </button>
-                    <button
-                      onClick={handleLeaveCall}
-                      className="btn-signin"
-                      style={{ padding: '8px 20px', fontSize: '13px', marginTop: '4px' }}
-                    >
-                      Exit Room
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                    <div 
-                      style={{ 
-                        width: '40px', 
-                        height: '40px', 
-                        borderRadius: '50%',
-                        border: '3px solid rgba(255,255,255,0.1)', 
-                        borderTopColor: 'var(--primary-color)', 
-                        animation: 'spin 1s linear infinite' 
-                      }}
-                    />
-                    <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                      {lkRetryCount > 0 
-                        ? `Connection lost. Retrying (attempt ${lkRetryCount}/10)...` 
-                        : "joining..."
-                      }
-                    </span>
-                    <button
-                      onClick={handleLeaveCall}
-                      className="btn-signin"
-                      style={{ padding: '6px 16px', fontSize: '12px', marginTop: '12px' }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
+                <div style={{ maxWidth: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                  <div style={{ fontSize: '48px' }}>⚠️</div>
+                  <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Connection Failed</h3>
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                    Could not establish a connection to the audio/video server. Please check your network connection and try again.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setLkRetryCount(0);
+                      setLkConnectStatus('connecting');
+                      setActiveLkToken(liveKitToken);
+                    }}
+                    className="btn-create"
+                    style={{ padding: '10px 24px', fontSize: '14px', marginTop: '8px' }}
+                  >
+                    Retry Connection
+                  </button>
+                  <button
+                    onClick={handleLeaveCall}
+                    className="btn-signin"
+                    style={{ padding: '8px 20px', fontSize: '13px', marginTop: '4px' }}
+                  >
+                    Exit Room
+                  </button>
+                </div>
               </div>
             ) : (
               <>
@@ -6430,8 +6408,8 @@ function AppContent() {
                     if (micError !== mic) setMicError(mic);
                   }} 
                 />
-                <RoomAudioRenderer />
-                <LocalScreenShareLinker screenShareStream={screenShareStream} />
+                {activeLkToken && <RoomAudioRenderer />}
+                {activeLkToken && <LocalScreenShareLinker screenShareStream={screenShareStream} />}
             
             {isMiniModeActive ? (
               <div className="mini-mode-placeholder animate-fade-in" style={{
@@ -6635,6 +6613,79 @@ function AppContent() {
               )}
             </div>
           </div>
+
+          {/* Dynamic Connection Status Alert Banner */}
+          {lkConnectStatus !== 'connected' && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: lkConnectStatus === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(241, 196, 15, 0.15)',
+              borderBottom: `1px solid ${lkConnectStatus === 'error' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(241, 196, 15, 0.2)'}`,
+              padding: '8px 16px',
+              fontSize: '13px',
+              color: lkConnectStatus === 'error' ? '#f87171' : 'var(--primary-color)',
+              gap: '12px',
+              zIndex: 90
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {lkConnectStatus === 'error' ? (
+                  <span>⚠️ <strong>Audio/Video Connection Failed</strong> (Attempt {lkRetryCount}/10)</span>
+                ) : (
+                  <>
+                    <div style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      border: '2px solid currentColor',
+                      borderTopColor: 'transparent',
+                      animation: 'spin 1s linear infinite',
+                      display: 'inline-block',
+                      flexShrink: 0
+                    }} />
+                    <span>Connecting to audio/video streaming... (You can still chat and use tools)</span>
+                  </>
+                )}
+              </div>
+              {lkConnectStatus === 'error' && (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button 
+                    onClick={() => {
+                      setLkRetryCount(0);
+                      setLkConnectStatus('connecting');
+                      setActiveLkToken(liveKitToken);
+                    }}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Retry
+                  </button>
+                  <button 
+                    onClick={handleLeaveCall}
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Leave
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Call Body */}
           <div className="call-main-content">
