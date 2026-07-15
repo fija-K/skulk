@@ -100,7 +100,7 @@ service cloud.firestore {
         allow read: if true;
         allow create: if request.auth != null && 
                       participantId == request.auth.uid &&
-                      request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
+                      request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
                       (
                         (request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId && request.resource.data.role == 'host') ||
                         ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
@@ -112,7 +112,7 @@ service cloud.firestore {
         allow update: if request.auth != null && 
                       (
                         (
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
+                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
                           (
                             (participantId == request.auth.uid && 
                              (request.resource.data.role == resource.data.role || 
@@ -157,7 +157,7 @@ service cloud.firestore {
                         // Allow watchers to edit whiteboard if allowed by the presenter
                         (
                           participantId != request.auth.uid &&
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
+                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['whiteboardData']) &&
                           resource.data.sharing == 'whiteboard' &&
                           resource.data.whiteboardEditAllowed == true &&
