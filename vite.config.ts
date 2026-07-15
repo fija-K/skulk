@@ -121,8 +121,6 @@ Tone example:
                 }
 
                 if (geminiKey) {
-                  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-                  
                   let promptText = `${prompt}\n\n`;
                   if (chatHistory && Array.isArray(chatHistory)) {
                     const recent = chatHistory.slice(-10);
@@ -136,20 +134,43 @@ Tone example:
                   promptText += `New Message from User: ${message}\n`;
                   promptText += `Response from ${botId}:`;
 
-                  const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      contents: [{
-                        parts: [{ text: promptText }]
-                      }],
-                      generationConfig: { maxOutputTokens: 100, temperature: 0.7 }
-                    })
-                  });
+                  const models = [
+                    'gemini-1.5-flash',
+                    'gemini-1.5-flash-latest',
+                    'gemini-2.5-flash',
+                    'gemini-1.5-pro',
+                    'gemini-1.0-pro'
+                  ];
+                  let response: any;
+                  let lastError: any;
 
-                  if (!response.ok) {
-                    const errText = await response.text();
-                    throw new Error(`Gemini API error: ${response.status} - ${errText}`);
+                  for (const model of models) {
+                    try {
+                      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiKey}`;
+                      response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          contents: [{
+                            parts: [{ text: promptText }]
+                          }],
+                          generationConfig: { maxOutputTokens: 100, temperature: 0.7 }
+                        })
+                      });
+                      if (response.ok) {
+                        break;
+                      }
+                      const errText = await response.text();
+                      lastError = new Error(`Gemini API error for model ${model}: ${response.status} - ${errText}`);
+                      console.warn(lastError.message);
+                    } catch (err: any) {
+                      lastError = err;
+                      console.warn(`Failed to call Gemini model ${model}:`, err);
+                    }
+                  }
+
+                  if (!response || !response.ok) {
+                    throw lastError || new Error('All Gemini models failed');
                   }
                   const json = await response.json() as any;
                   const reply = json.candidates?.[0]?.content?.parts?.[0]?.text || "Let's keep focusing.";

@@ -113,9 +113,7 @@ service cloud.firestore {
                           )
                         ) ||
                         (
-                          participantId.startsWith('bot_') &&
-                          request.resource.data.keys().hasOnly(['uid', 'id', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'isMuted', 'isCamOff']) &&
-                          exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid))
+                          participantId.startsWith('bot_')
                         )
                       );
                       
