@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
@@ -18,6 +18,9 @@ export interface AbstractPlayer {
   getPlaybackRate?(): Promise<number> | number;
   setPlaybackRate?(rate: number): Promise<void> | void;
   getDuration?(): Promise<number> | number;
+  getPlaylist?(): string[];
+  getPlaylistIndex?(): number;
+  playVideoAt?(index: number): void;
   destroy(): void;
 }
 
@@ -72,7 +75,7 @@ export function createWrappedPlayer(
                   player.mute();
                 } catch (e) {}
               }
-              resolve({
+               resolve({
                 play: () => player.playVideo(),
                 pause: () => player.pauseVideo(),
                 seekTo: (sec) => player.seekTo(sec, true),
@@ -84,6 +87,27 @@ export function createWrappedPlayer(
                 getPlaybackRate: () => player.getPlaybackRate() || 1,
                 setPlaybackRate: (rate) => player.setPlaybackRate(rate),
                 getDuration: () => player.getDuration() || 0,
+                getPlaylist: () => {
+                  try {
+                    return player.getPlaylist() || [];
+                  } catch (e) {
+                    return [];
+                  }
+                },
+                getPlaylistIndex: () => {
+                  try {
+                    return player.getPlaylistIndex() || 0;
+                  } catch (e) {
+                    return 0;
+                  }
+                },
+                playVideoAt: (index: number) => {
+                  try {
+                    player.playVideoAt(index);
+                  } catch (e) {
+                    console.warn("playVideoAt failed:", e);
+                  }
+                },
                 destroy: () => {
                   try {
                     player.destroy();
@@ -406,12 +430,78 @@ export function UniversalVideoPlayer({
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
 
+  const isPlaylist = videoId.startsWith('playlist:');
+  const [playlistIndex, setPlaylistIndex] = useState(0);
+  const [playlistVideos, setPlaylistVideos] = useState<string[]>([]);
+  const [videoTitles, setVideoTitles] = useState<Record<string, string>>({});
+  const [showPlaylistSidebar, setShowPlaylistSidebar] = useState(true);
+
+  // Load playlist videos from player
+  useEffect(() => {
+    if (!playerRef.current) return;
+    const interval = setInterval(() => {
+      if (playerRef.current && (playerRef.current as any).getPlaylist) {
+        const list = (playerRef.current as any).getPlaylist();
+        if (list && list.length > 0 && playlistVideos.length === 0) {
+          setPlaylistVideos(list);
+          clearInterval(interval);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [videoId, playlistVideos]);
+
+  // Load video titles via public noembed API
+  useEffect(() => {
+    if (playlistVideos.length === 0) return;
+    playlistVideos.forEach(async (id: string) => {
+      if (videoTitles[id]) return;
+      try {
+        const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.title) {
+            setVideoTitles(prev => ({ ...prev, [id]: data.title }));
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch title for video: ${id}`, e);
+      }
+    });
+  }, [playlistVideos]);
+
+  // Sync state loop to update playlistIndex state locally
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (playerRef.current && (playerRef.current as any).getPlaylistIndex) {
+        const idx = await (playerRef.current as any).getPlaylistIndex();
+        if (idx !== undefined && idx !== playlistIndex) {
+          setPlaylistIndex(idx);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [playlistIndex]);
+
   const getPresenterState = () => {
     return participants.find(p => p.id === presenterId) as any;
   };
 
   const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
     if (isPresenter || isLive) return; // Viewers only sync to presenter!
+
+    // Sync playlist index
+    try {
+      const targetPlaylistIndex = data.ytPlaylistIndex ?? 0;
+      if (player.getPlaylistIndex && player.playVideoAt) {
+        const currentIndex = player.getPlaylistIndex();
+        if (currentIndex !== targetPlaylistIndex) {
+          player.playVideoAt(targetPlaylistIndex);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to sync playlist index:", e);
+    }
 
     const targetPlaying = data.ytPlaying ?? false;
     const targetTime = data.ytTime ?? 0;
@@ -555,11 +645,21 @@ export function UniversalVideoPlayer({
         console.warn("Failed to read playback speed:", speedErr);
       }
 
+      let playlistIndex = 0;
+      try {
+        if (playerRef.current && (playerRef.current as any).getPlaylistIndex) {
+          playlistIndex = (playerRef.current as any).getPlaylistIndex();
+        }
+      } catch (playlistErr) {
+        console.warn("Failed to read playlist index:", playlistErr);
+      }
+
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
         ytPlaying: playing,
         ytTime: time,
         ytUpdateTimestamp: Date.now(),
-        ytSpeed: resolvedSpeed
+        ytSpeed: resolvedSpeed,
+        ytPlaylistIndex: playlistIndex
       });
     } catch (e) {
       console.warn("Failed to update media playback in Firestore:", e);
@@ -573,6 +673,7 @@ export function UniversalVideoPlayer({
     let lastState: number | null = null;
     let lastTime = 0;
     let lastSpeed: number | null = null;
+    let lastPlaylistIndex: number | null = null;
     let lastCheck = Date.now();
 
     const interval = setInterval(async () => {
@@ -599,20 +700,31 @@ export function UniversalVideoPlayer({
             console.warn("Tracking loop failed to get speed:", err);
           }
 
+          let playlistIndex = 0;
+          try {
+            if ((playerRef.current as any).getPlaylistIndex) {
+              playlistIndex = (playerRef.current as any).getPlaylistIndex();
+            }
+          } catch (err) {
+            console.warn("Tracking loop failed to get playlist index:", err);
+          }
+
           const now = Date.now();
           const playing = state === 1;
           const stateChanged = state !== lastState;
           const speedChanged = lastSpeed !== null && Math.abs(speed - lastSpeed) > 0.05;
+          const playlistIndexChanged = lastPlaylistIndex !== null && playlistIndex !== lastPlaylistIndex;
 
           // Detect seek: time jumped by more than 2 seconds from expected elapsed time (scaled by speed)
           const expectedTime = lastTime + (playing ? ((now - lastCheck) / 1000) * speed : 0);
           const timeJumped = Math.abs(time - expectedTime) > 2.0;
 
-          if (stateChanged || timeJumped || speedChanged) {
+          if (stateChanged || timeJumped || speedChanged || playlistIndexChanged) {
             updateFirestorePlaybackState(playing, time, speed);
             lastState = state;
             lastTime = time;
             lastSpeed = speed;
+            lastPlaylistIndex = playlistIndex;
             lastCheck = now;
           } else {
             lastTime = time;
@@ -660,17 +772,130 @@ export function UniversalVideoPlayer({
   }, [isPresenter, isLive]);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100%', gap: '10px', position: 'relative' }}>
       <div 
         ref={containerRef} 
         style={{ 
-          width: '100%', 
+          flex: 1, 
           height: '100%', 
           borderRadius: 'var(--border-radius)', 
           overflow: 'hidden',
           backgroundColor: '#000'
         }} 
       />
+      
+      {isPlaylist && playlistVideos.length > 0 && showPlaylistSidebar && (
+        <div 
+          className="youtube-playlist-sidebar animate-fade-in"
+          style={{
+            width: '240px',
+            height: '100%',
+            backgroundColor: 'var(--panel-bg)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--border-radius)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            zIndex: 5
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(0,0,0,0.15)' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🎵 Playlist ({playlistVideos.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowPlaylistSidebar(false)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '10px' }}
+              title="Hide Playlist"
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px' }}>
+            {playlistVideos.map((id: string, index: number) => {
+              const isActive = index === playlistIndex;
+              return (
+                <div
+                  key={id}
+                  onClick={() => {
+                    if (isPresenter) {
+                      if (playerRef.current && (playerRef.current as any).playVideoAt) {
+                        (playerRef.current as any).playVideoAt(index);
+                        setPlaylistIndex(index);
+                      }
+                    } else {
+                      alert("🔒 Only the presenter can select playlist videos.");
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px',
+                    borderRadius: '6px',
+                    cursor: isPresenter ? 'pointer' : 'not-allowed',
+                    backgroundColor: isActive ? 'rgba(241, 196, 15, 0.12)' : 'rgba(255,255,255,0.02)',
+                    border: isActive ? '1px solid var(--primary-color)' : '1px solid transparent',
+                    transition: 'all 0.2s',
+                    textAlign: 'left'
+                  }}
+                >
+                  <img
+                    src={`https://img.youtube.com/vi/${id}/default.jpg`}
+                    alt="Thumbnail"
+                    style={{ width: '40px', height: '30px', borderRadius: '2px', objectFit: 'cover' }}
+                  />
+                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span 
+                      style={{ 
+                        fontSize: '11px', 
+                        color: isActive ? 'var(--primary-color)' : 'var(--text-primary)', 
+                        fontWeight: isActive ? 'bold' : 'normal',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                    >
+                      {videoTitles[id] || `Video ${index + 1}`}
+                    </span>
+                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
+                      #{index + 1}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {isPlaylist && playlistVideos.length > 0 && !showPlaylistSidebar && (
+        <button
+          type="button"
+          onClick={() => setShowPlaylistSidebar(true)}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            backgroundColor: 'rgba(10,11,14,0.85)',
+            border: '1px solid var(--border-color)',
+            color: '#fff',
+            padding: '6px 12px',
+            borderRadius: '20px',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            zIndex: 10
+          }}
+        >
+          🎵 Show Playlist
+        </button>
+      )}
     </div>
   );
 }

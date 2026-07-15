@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import JSZip from 'jszip';
 import type { ChatMessage, Participant } from '../../App';
 
 interface ChatPanelProps {
@@ -42,13 +43,79 @@ export function ChatPanel({
   // Pickers states
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
-  const [gifTab, setGifTab] = useState<'gifs' | 'stickers'>('gifs');
+  const [gifTab, setGifTab] = useState<'gifs' | 'stickers' | 'favorites'>('gifs');
   const [gifQuery, setGifQuery] = useState('');
   const [gifs, setGifs] = useState<string[]>([]);
   const [loadingGifs, setLoadingGifs] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [activeExpandedImageUrl, setActiveExpandedImageUrl] = useState<string | null>(null);
+  
+  const [favoriteMedias, setFavoriteMedias] = useState<{ url: string; type: 'gifs' | 'stickers' }[]>(() => {
+    try {
+      const saved = localStorage.getItem('skulk_favorite_medias');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [downloadingPack, setDownloadingPack] = useState(false);
+
+  const toggleFavorite = (url: string, type: 'gifs' | 'stickers') => {
+    setFavoriteMedias(prev => {
+      const exists = prev.some(f => f.url === url);
+      let updated;
+      if (exists) {
+        updated = prev.filter(f => f.url !== url);
+      } else {
+        updated = [...prev, { url, type }];
+      }
+      localStorage.setItem('skulk_favorite_medias', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const isFavorited = (url: string) => {
+    return favoriteMedias.some(f => f.url === url);
+  };
+
+  const handleDownloadStickers = async () => {
+    if (gifs.length === 0) return;
+    setDownloadingPack(true);
+    try {
+      const zip = new JSZip();
+      const folderName = `skulk-stickers-${gifQuery.trim() || 'trending'}`;
+      const folder = zip.folder(folderName);
+      
+      const fetchPromises = gifs.map(async (url, idx) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const blob = await response.blob();
+          const filename = `sticker_${idx + 1}.gif`;
+          folder?.file(filename, blob);
+        } catch (err) {
+          console.error(`Failed to download sticker from ${url}:`, err);
+        }
+      });
+      
+      await Promise.all(fetchPromises);
+      const content = await zip.generateAsync({ type: 'blob' });
+      
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${folderName}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      console.error("Failed to generate sticker pack ZIP:", err);
+      alert("❌ Failed to create sticker pack ZIP. Please try again.");
+    } finally {
+      setDownloadingPack(false);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -94,7 +161,9 @@ export function ChatPanel({
         const res = await fetch(url);
         if (res.ok) {
           const json = await res.json();
-          const urls = json.data.map((item: any) => `https://i.giphy.com/${item.id}.gif`);
+          const urls = json.data.map((item: any) => 
+            item.images?.fixed_height?.url || item.images?.original?.url || `https://i.giphy.com/${item.id}.gif`
+          );
           setGifs(urls);
         } else {
           setGifs(DEFAULT_GIFS);
@@ -455,7 +524,7 @@ export function ChatPanel({
           boxShadow: '0 4px 16px rgba(0,0,0,0.6)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button
                 type="button"
                 onClick={() => setGifTab('gifs')}
@@ -488,23 +557,67 @@ export function ChatPanel({
               >
                 Stickers
               </button>
+              <button
+                type="button"
+                onClick={() => setGifTab('favorites')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: gifTab === 'favorites' ? 'var(--primary-color)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  borderBottom: gifTab === 'favorites' ? '2px solid var(--primary-color)' : '2px solid transparent'
+                }}
+              >
+                ❤️ Fvts
+              </button>
             </div>
-            <button 
-              type="button" 
-              onClick={() => setShowGifPicker(false)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}
-            >
-              ✕
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {gifTab === 'stickers' && gifs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDownloadStickers}
+                  disabled={downloadingPack}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'var(--primary-color)',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
+                  title="Download all stickers in this view as a ZIP pack"
+                >
+                  {downloadingPack ? '⏳ Downloading...' : '⬇️ Download Pack'}
+                </button>
+              )}
+              <button 
+                type="button" 
+                onClick={() => setShowGifPicker(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <input
-            type="text"
-            placeholder={gifTab === 'gifs' ? "Search GIFs..." : "Search Stickers..."}
-            className="search-input"
-            style={{ fontSize: '12px', padding: '6px 10px', width: '100%', boxSizing: 'border-box' }}
-            value={gifQuery}
-            onChange={(e) => setGifQuery(e.target.value)}
-          />
+          {gifTab !== 'favorites' && (
+            <input
+              type="text"
+              placeholder={gifTab === 'gifs' ? "Search GIFs..." : "Search Stickers..."}
+              className="search-input"
+              style={{ fontSize: '12px', padding: '6px 10px', width: '100%', boxSizing: 'border-box' }}
+              value={gifQuery}
+              onChange={(e) => setGifQuery(e.target.value)}
+            />
+          )}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, 1fr)',
@@ -513,27 +626,112 @@ export function ChatPanel({
             flex: 1,
             maxHeight: '150px'
           }}>
-            {loadingGifs ? (
+            {gifTab === 'favorites' ? (
+              favoriteMedias.length === 0 ? (
+                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  No favorites added yet. Click the ❤️ icon on any GIF or Sticker to save it here!
+                </div>
+              ) : (
+                favoriteMedias.map((item, idx) => (
+                  <div key={idx} style={{ position: 'relative', width: '100%', height: '50px' }}>
+                    <img
+                      src={item.url}
+                      alt={item.type === 'gifs' ? 'gif' : 'sticker'}
+                      style={{ 
+                        width: '100%', 
+                        height: '50px', 
+                        objectFit: item.type === 'gifs' ? 'cover' : 'contain', 
+                        borderRadius: '4px', 
+                        cursor: 'pointer',
+                        backgroundColor: item.type === 'stickers' ? 'rgba(255,255,255,0.03)' : 'transparent'
+                      }}
+                      onClick={() => {
+                        const prefix = item.type === 'gifs' ? 'GIF' : 'STICKER';
+                        sendChatMessage(`[${prefix}]:${item.url}`);
+                        setShowGifPicker(false);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(item.url, item.type);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '2px',
+                        right: '2px',
+                        background: 'rgba(10,11,14,0.7)',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '18px',
+                        height: '18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        padding: 0,
+                        fontSize: '10px',
+                        zIndex: 2,
+                        color: '#ef4444'
+                      }}
+                      title="Remove from favorites"
+                    >
+                      ❤️
+                    </button>
+                  </div>
+                ))
+              )
+            ) : loadingGifs ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>Loading...</div>
             ) : gifs.map((url, i) => (
-              <img
-                key={i}
-                src={url}
-                alt={gifTab === 'gifs' ? "gif" : "sticker"}
-                style={{ 
-                  width: '100%', 
-                  height: '50px', 
-                  objectFit: gifTab === 'gifs' ? 'cover' : 'contain', 
-                  borderRadius: '4px', 
-                  cursor: 'pointer',
-                  backgroundColor: gifTab === 'stickers' ? 'rgba(255,255,255,0.03)' : 'transparent'
-                }}
-                onClick={() => {
-                  const prefix = gifTab === 'gifs' ? 'GIF' : 'STICKER';
-                  sendChatMessage(`[${prefix}]:${url}`);
-                  setShowGifPicker(false);
-                }}
-              />
+              <div key={i} style={{ position: 'relative', width: '100%', height: '50px' }}>
+                <img
+                  src={url}
+                  alt={gifTab === 'gifs' ? "gif" : "sticker"}
+                  style={{ 
+                    width: '100%', 
+                    height: '50px', 
+                    objectFit: gifTab === 'gifs' ? 'cover' : 'contain', 
+                    borderRadius: '4px', 
+                    cursor: 'pointer',
+                    backgroundColor: gifTab === 'stickers' ? 'rgba(255,255,255,0.03)' : 'transparent'
+                  }}
+                  onClick={() => {
+                    const prefix = gifTab === 'gifs' ? 'GIF' : 'STICKER';
+                    sendChatMessage(`[${prefix}]:${url}`);
+                    setShowGifPicker(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(url, gifTab === 'gifs' ? 'gifs' : 'stickers');
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    right: '2px',
+                    background: 'rgba(10,11,14,0.7)',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '18px',
+                    height: '18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: '10px',
+                    zIndex: 2,
+                    color: isFavorited(url) ? '#ef4444' : '#fff'
+                  }}
+                  title={isFavorited(url) ? "Remove from favorites" : "Add to favorites"}
+                >
+                  {isFavorited(url) ? '❤️' : '🤍'}
+                </button>
+              </div>
             ))}
           </div>
         </div>
