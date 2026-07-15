@@ -7300,159 +7300,200 @@ function AppContent() {
                 {/* 2B. People Tab Panel */}
                 {callTab === 'people' && (
                   <div className="people-list animate-fade-in">
-                    {callParticipants.map((p) => {
-                      const isUser = p.id === getMyId();
-                      const showMuted = isUser ? isMicMuted : p.isMuted;
+                    {(() => {
+                      const list = [...callParticipants];
+                      activeBots.forEach((bot) => {
+                        if (!list.some(p => p.id === `bot_${bot.id}`)) {
+                          list.push({
+                            id: `bot_${bot.id}`,
+                            uid: `bot_${bot.id}`,
+                            name: bot.name,
+                            initials: '🤖',
+                            color: '#1db954',
+                            isMuted: true,
+                            isCamOff: true,
+                            role: 'bot',
+                            isBot: true
+                          } as any);
+                        }
+                      });
                       
-                      return (
-                        <div key={p.id} className="person-row">
-                          <div className="person-info">
-                            <div 
-                              className="person-avatar" 
-                              style={{ 
-                                backgroundColor: p.color, 
-                                position: 'relative',
-                                cursor: 'pointer',
-                                border: p.sharing ? '1px solid var(--primary-color)' : 'none'
-                              }}
-                              onClick={() => {
-                                if (p.sharing) {
-                                  handleViewParticipantShare(p);
-                                } else {
+                      return list.map((item) => {
+                        const p = item as any;
+                        const isBot = p.role === 'bot' || p.isBot;
+                        const isUser = p.id === getMyId();
+                        const showMuted = isUser ? isMicMuted : p.isMuted;
+                        
+                        return (
+                          <div key={p.id} className="person-row">
+                            <div className="person-info">
+                              <div 
+                                className="person-avatar" 
+                                style={{ 
+                                  backgroundColor: p.color, 
+                                  position: 'relative',
+                                  cursor: 'pointer',
+                                  border: p.sharing ? '1px solid var(--primary-color)' : 'none'
+                                }}
+                                onClick={() => {
+                                  if (isBot) {
+                                    handleOpenProfile({
+                                      id: p.id,
+                                      name: p.name,
+                                      initials: p.initials,
+                                      color: p.color,
+                                      photoURL: null
+                                    }, 'card');
+                                  } else if (p.sharing) {
+                                    handleViewParticipantShare(p);
+                                  } else {
+                                    handleOpenProfile({
+                                      id: p.uid || p.id,
+                                      name: p.name.replace(' (You)', ''),
+                                      initials: p.initials,
+                                      color: p.color || '#3b82f6',
+                                      photoURL: p.photoURL
+                                    }, 'card');
+                                  }
+                                }}
+                              >
+                                {p.photoURL ? (
+                                  <img src={p.photoURL} alt={p.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
+                                ) : p.initials}
+                                {p.sharing && !isBot && (
+                                  <span style={{
+                                    position: 'absolute',
+                                    bottom: '-4px',
+                                    right: '-4px',
+                                    backgroundColor: 'var(--primary-color)',
+                                    color: '#0f1013',
+                                    borderRadius: '50%',
+                                    width: '12px',
+                                    height: '12px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '7px',
+                                    fontWeight: 'bold',
+                                    border: '1px solid var(--card-bg, #1a1c23)'
+                                  }}>
+                                    {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+                                  </span>
+                                )}
+                              </div>
+                              <div 
+                                className="person-name-wrapper" 
+                                style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+                                onClick={() => {
                                   handleOpenProfile({
                                     id: p.uid || p.id,
                                     name: p.name.replace(' (You)', ''),
                                     initials: p.initials,
                                     color: p.color || '#3b82f6',
-                                    photoURL: p.photoURL
+                                    photoURL: p.photoURL || null
                                   }, 'card');
-                                }
-                              }}
-                            >
-                              {p.initials}
-                              {p.sharing && (
-                                <span style={{
-                                  position: 'absolute',
-                                  bottom: '-4px',
-                                  right: '-4px',
-                                  backgroundColor: 'var(--primary-color)',
-                                  color: '#0f1013',
-                                  borderRadius: '50%',
-                                  width: '12px',
-                                  height: '12px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '7px',
-                                  fontWeight: 'bold',
-                                  border: '1px solid var(--card-bg, #1a1c23)'
-                                }}>
-                                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
-                                </span>
-                              )}
-                            </div>
-                            <div 
-                              className="person-name-wrapper" 
-                              style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-                              onClick={() => {
-                                handleOpenProfile({
-                                  id: p.uid || p.id,
-                                  name: p.name.replace(' (You)', ''),
-                                  initials: p.initials,
-                                  color: p.color || '#3b82f6',
-                                  photoURL: p.photoURL
-                                }, 'card');
-                              }}
-                            >
-                              <span className="person-name">
-                                {p.name}
-                              </span>
-                              {p.role && p.role !== 'member' && (
-                                <span className={`role-badge-${p.role}`} style={{
-                                  fontSize: '9px',
-                                  fontWeight: 'bold',
-                                  padding: '1px 4px',
-                                  borderRadius: '3px',
-                                  border: '1px solid',
-                                  textTransform: 'uppercase',
-                                  lineHeight: '1',
-                                  marginLeft: '6px',
-                                  ...p.role === 'admin' ? {
-                                    backgroundColor: 'rgba(241, 196, 15, 0.15)',
-                                    borderColor: 'var(--primary-color, #f1c40f)',
-                                    color: 'var(--primary-color, #f1c40f)'
-                                  } : p.role === 'host' ? {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                                    borderColor: '#3b82f6',
-                                    color: '#3b82f6'
-                                  } : {
-                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                    borderColor: '#10b981',
-                                    color: '#10b981'
-                                  }
-                                }}>
-                                  {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="person-status-icons" style={{ display: 'flex', alignItems: 'center' }}>
-                            {user && !isUser && (
-                              <button
-                                onClick={() => handleToggleFollow(p.id)}
-                                style={{
-                                  background: 'none',
-                                  border: followingUserIds.includes(p.id) ? '1px solid var(--border-color)' : '1px solid var(--primary-color)',
-                                  borderRadius: '4px',
-                                  padding: '2px 8px',
-                                  fontSize: '10px',
-                                  fontWeight: 'bold',
-                                  color: followingUserIds.includes(p.id) ? 'var(--text-secondary)' : 'var(--primary-color)',
-                                  cursor: 'pointer',
-                                  marginRight: '8px',
-                                  lineHeight: '1.2',
-                                  display: 'inline-flex',
-                                  alignItems: 'center'
                                 }}
                               >
-                                {followingUserIds.includes(p.id) ? 'Following' : 'Follow'}
-                              </button>
-                            )}
-                            {/* mic icon status */}
-                            <svg className={`person-status-icon ${showMuted ? 'muted' : ''}`} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              {showMuted ? (
-                                <>
-                                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                                </>
+                                <span className="person-name">
+                                  {p.name}
+                                </span>
+                                {p.role && p.role !== 'member' && (
+                                  <span className={p.role === 'bot' ? 'role-badge-bot' : `role-badge-${p.role}`} style={{
+                                    fontSize: '9px',
+                                    fontWeight: 'bold',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    border: '1px solid',
+                                    textTransform: 'uppercase',
+                                    lineHeight: '1',
+                                    marginLeft: '6px',
+                                    ...p.role === 'admin' ? {
+                                      backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                                      borderColor: 'var(--primary-color, #f1c40f)',
+                                      color: 'var(--primary-color, #f1c40f)'
+                                    } : p.role === 'host' ? {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                      borderColor: '#3b82f6',
+                                      color: '#3b82f6'
+                                    } : p.role === 'bot' ? {
+                                      backgroundColor: 'rgba(29, 185, 84, 0.15)',
+                                      borderColor: '#1db954',
+                                      color: '#1db954'
+                                    } : {
+                                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                      borderColor: '#10b981',
+                                      color: '#10b981'
+                                    }
+                                  }}>
+                                    {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : p.role === 'bot' ? '🤖 Buddy' : '🛡️ Co-host'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="person-status-icons" style={{ display: 'flex', alignItems: 'center' }}>
+                              {!isBot && user && !isUser && (
+                                <button
+                                  onClick={() => handleToggleFollow(p.id)}
+                                  style={{
+                                    background: 'none',
+                                    border: followingUserIds.includes(p.id) ? '1px solid var(--border-color)' : '1px solid var(--primary-color)',
+                                    borderRadius: '4px',
+                                    padding: '2px 8px',
+                                    fontSize: '10px',
+                                    fontWeight: 'bold',
+                                    color: followingUserIds.includes(p.id) ? 'var(--text-secondary)' : 'var(--primary-color)',
+                                    cursor: 'pointer',
+                                    marginRight: '8px',
+                                    lineHeight: '1.2',
+                                    display: 'inline-flex',
+                                    alignItems: 'center'
+                                  }}
+                                >
+                                  {followingUserIds.includes(p.id) ? 'Following' : 'Follow'}
+                                </button>
+                              )}
+                              {isBot ? (
+                                <span style={{ fontSize: '10px', opacity: 0.6, marginRight: '4px' }}>Active</span>
                               ) : (
                                 <>
-                                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                                  <line x1="12" y1="19" x2="12" y2="23"></line>
-                                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                                  {/* mic icon status */}
+                                  <svg className={`person-status-icon ${showMuted ? 'muted' : ''}`} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    {showMuted ? (
+                                      <>
+                                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                                      </>
+                                    )}
+                                  </svg>
+                                  {/* camera icon status */}
+                                  <svg className="person-status-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    {isUser && isCamOff ? (
+                                      <>
+                                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                                        <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8a2 2 0 0 1-.18.83l-4-4"></path>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                                        <circle cx="12" cy="13" r="4"></circle>
+                                      </>
+                                    )}
+                                  </svg>
                                 </>
                               )}
-                            </svg>
-                            {/* camera icon status */}
-                            <svg className="person-status-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              {isUser && isCamOff ? (
-                                <>
-                                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                                  <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8a2 2 0 0 1-.18.83l-4-4"></path>
-                                </>
-                              ) : (
-                                <>
-                                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                                  <circle cx="12" cy="13" r="4"></circle>
-                                </>
-                              )}
-                            </svg>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 )}
 

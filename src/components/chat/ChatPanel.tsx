@@ -416,17 +416,16 @@ export function ChatPanel({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span 
                     className="chat-sender" 
-                    style={{ fontWeight: 700, fontSize: '13px', cursor: isBot ? 'default' : 'pointer' }}
+                    style={{ fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
                     onClick={() => {
-                      if (isBot) return;
                       if (handleOpenProfile) {
                         const participant = callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender);
                         handleOpenProfile({
-                          id: msg.senderId || (participant ? participant.id : ""),
+                          id: isBot ? `bot_${msg.sender}` : (msg.senderId || (participant ? participant.id : "")),
                           name: msg.sender.replace(' (You)', ''),
-                          initials: participant ? participant.initials : msg.sender.substring(0, 2).toUpperCase(),
-                          color: participant ? participant.color : '#3b82f6',
-                          photoURL: participant ? participant.photoURL : null
+                          initials: isBot ? '🤖' : (participant ? participant.initials : msg.sender.substring(0, 2).toUpperCase()),
+                          color: isBot ? '#1db954' : (participant ? participant.color : '#3b82f6'),
+                          photoURL: isBot ? null : (participant ? participant.photoURL : null)
                         }, 'card');
                       }
                     }}

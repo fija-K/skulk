@@ -43,7 +43,7 @@ export function UserProfileCard({
 
   // Sync bio in real time
   useEffect(() => {
-    if (!targetUser.id) return;
+    if (!targetUser.id || targetUser.id.startsWith('bot_')) return;
     const userRef = doc(db, 'users', targetUser.id);
     const unsubscribe = onSnapshot(userRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -65,6 +65,7 @@ export function UserProfileCard({
 
   // Sync list of followers, following, or connections
   useEffect(() => {
+    if (targetUser.id.startsWith('bot_')) return;
     if (view !== 'followers' && view !== 'following' && view !== 'connections') return;
     setIsListLoading(true);
 
@@ -203,7 +204,7 @@ export function UserProfileCard({
         </button>
 
         {/* 1. Main Profile Card View */}
-        {view === 'card' && (
+        {view === 'card' && !targetUser.id.startsWith('bot_') && (
           <div style={{ textAlign: 'center' }}>
             {/* Avatar Circle */}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
@@ -321,6 +322,132 @@ export function UserProfileCard({
                   🛡️ Report User
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {view === 'card' && targetUser.id.startsWith('bot_') && (
+          <div style={{ textAlign: 'center' }}>
+            {/* Avatar Circle */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <div 
+                style={{
+                  width: '96px',
+                  height: '96px',
+                  borderRadius: '50%',
+                  backgroundColor: '#1db954',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '48px',
+                  fontWeight: 'bold',
+                  color: '#0f1013',
+                  border: '2px solid var(--border-color)'
+                }}
+              >
+                🤖
+              </div>
+            </div>
+
+            {/* Name and Badge */}
+            <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0 0 4px 0', color: 'var(--text-primary, #ffffff)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              {targetUser.name}
+              <span style={{
+                fontSize: '9px',
+                fontWeight: 'bold',
+                padding: '2px 6px',
+                borderRadius: '3px',
+                border: '1px solid rgba(29, 185, 84, 0.4)',
+                backgroundColor: 'rgba(29, 185, 84, 0.1)',
+                color: '#1db954',
+                textTransform: 'uppercase'
+              }}>
+                Buddy
+              </span>
+            </h3>
+
+            {/* Subtitle */}
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
+              Virtual Companion
+            </div>
+
+            {/* Bio/Description */}
+            <p style={{
+              fontSize: '13px',
+              color: 'var(--text-primary, #e2e8f0)',
+              margin: '0 0 16px 0',
+              padding: '0 8px',
+              lineHeight: '1.4'
+            }}>
+              {(() => {
+                const botName = targetUser.name;
+                const desc = {
+                  Kei: 'Calm, strategic, treats study as a game to win through efficiency.',
+                  Sol: 'Quiet, blunt, hyper-analytical. Speaks in matter-of-fact observations.',
+                  Rei: 'Intense, frames study as a high-stakes challenge.',
+                  Mika: 'Bubbly, over-the-top supportive and warm.',
+                  Kai: 'Ambitious, confident, pushes you to be the best.',
+                  Nyx: 'Quiet, unsettling calm, introspective observations.',
+                  Yuna: 'composed, calls out excuses with quiet precision.',
+                  Wren: 'Soft-spoken, patient mentor. Progress over perfection.'
+                }[botName as 'Kei' | 'Sol' | 'Rei' | 'Mika' | 'Kai' | 'Nyx' | 'Yuna' | 'Wren'] || 'Your virtual study companion.';
+                return desc;
+              })()}
+            </p>
+
+            {/* Tone Quote */}
+            <div style={{
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              fontStyle: 'italic',
+              background: 'rgba(0,0,0,0.15)',
+              padding: '10px 12px',
+              borderRadius: '6px',
+              border: '1px solid rgba(255,255,255,0.02)',
+              marginBottom: '20px'
+            }}>
+              &ldquo;{(() => {
+                const botName = targetUser.name;
+                const tone = {
+                  Kei: 'Procrastinating won\'t change the deadline. What\'s the plan?',
+                  Sol: 'You have been idle for 4 minutes. Concerning.',
+                  Rei: 'Every minute you waste is a bet against yourself. Don\'t fold.',
+                  Mika: 'yayyy you\'re back!! let\'s gooo what are we studying today!!',
+                  Kai: 'Good students study. Great students study when they don\'t want to. Which one are you?',
+                  Nyx: 'You keep checking your phone. I notice.',
+                  Yuna: 'You said you\'d start \'5 minutes ago\' fifteen minutes ago.',
+                  Wren: 'No rush. Even 10 minutes of focus counts as progress.'
+                }[botName as 'Kei' | 'Sol' | 'Rei' | 'Mika' | 'Kai' | 'Nyx' | 'Yuna' | 'Wren'] || 'Let\'s focus.';
+                return tone;
+              })()}&rdquo;
+            </div>
+
+            {/* Stats list */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
+              gap: '8px',
+              borderTop: '1px solid var(--border-color)',
+              paddingTop: '16px',
+              marginTop: '16px'
+            }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--primary-color)' }}>
+                  {(() => {
+                    const stats = { Kei: '98%', Sol: '95%', Rei: '100%', Mika: '85%', Kai: '99%', Nyx: '92%', Yuna: '97%', Wren: '90%' };
+                    return stats[targetUser.name as keyof typeof stats] || '95%';
+                  })()}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Focus Drive</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: '800', color: '#1db954' }}>Instant</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Response</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: '800', color: '#3b82f6' }}>100%</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Accountability</div>
+              </div>
             </div>
           </div>
         )}
