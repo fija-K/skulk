@@ -1152,6 +1152,7 @@ function AppContent() {
   const currentSessionIdRef = useRef<string | null>(null);
   const isEvictedRef = useRef(false);
   const isEnteringRoomRef = useRef<string | null>(null);
+  const prefetchedLkTokenRef = useRef<{ roomId: string; token: string } | null>(null);
   
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
@@ -2312,14 +2313,24 @@ function AppContent() {
     }
   };
 
+  const prefetchRoomToken = async (roomId: string) => {
+    try {
+      const myId = getMyId();
+      const myName = user ? user.displayName || 'Google User' : guestName;
+      const res = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${myId}&name=${encodeURIComponent(myName)}`);
+      const data = await res.json();
+      if (data.token) {
+        prefetchedLkTokenRef.current = { roomId, token: data.token };
+        console.log(`[SPEED-OPT] Token pre-fetched successfully for room: ${roomId}`);
+      }
+    } catch (e) {
+      console.warn("[SPEED-OPT] Failed to pre-fetch token:", e);
+    }
+  };
+
   // Setup conference shell room data
   const enterCallRoom = async (room: Room) => {
     isEvictedRef.current = false;
-    if (globalPendingLeavePromise) {
-      try {
-        await globalPendingLeavePromise;
-      } catch (e) {}
-    }
     const normalizedRoom = { ...room, id: roomDocId(room) };
     const myId = getMyId();
     const newSessionId = Math.random().toString(36).substring(2, 10);
@@ -2338,7 +2349,31 @@ function AppContent() {
 
     currentSessionIdRef.current = newSessionId;
     hasSeenSelfInListRef.current = false; // Reset on initial join
-    if (myId) {
+
+    // 1. Transition UI state immediately so stage opens instantly!
+    setCurrentRoom(normalizedRoom);
+    setIsMicMuted(true);
+    setIsCamOff(true);
+    setIsGalleryView(true);
+    setCallTab('chat');
+    setViewingShare(null);
+    setChatMessages([]);
+    setUnreadChatCount(0);
+    isChatInitialLoadRef.current = true;
+
+    // 2. Setup parallel promise chain
+    // Promise A: Clean up any previous room leave operations in the background
+    const leavePromise = (async () => {
+      if (globalPendingLeavePromise) {
+        try {
+          await globalPendingLeavePromise;
+        } catch (e) {}
+      }
+    })();
+
+    // Promise B: Firestore checks (role and presence document write)
+    const presencePromise = (async () => {
+      if (!myId) return;
       let myRole = determineRole(normalizedRoom.creatorId);
       if (myRole !== 'admin') {
         try {
@@ -2382,55 +2417,39 @@ function AppContent() {
         }));
       } catch (err) {
         console.error('[DISCONNECT-DEBUG] enterCallRoom setDoc error:', err);
-        console.warn("Failed to set presence in Firestore, joining locally:", err);
       }
-    }
+    })();
 
-    setCurrentRoom(normalizedRoom);
-    setIsMicMuted(true);
-    setIsCamOff(true);
-    setIsGalleryView(true);
-    setCallTab('chat');
-    setViewingShare(null);
-    setChatMessages([]);
-    setUnreadChatCount(0);
-    isChatInitialLoadRef.current = true;
-
-    // Fetch LiveKit Token
-    try {
-      const myId = getMyId();
-      const myName = user ? user.displayName || 'Google User' : guestName;
-      const res = await fetch(`/api/get-livekit-token?room=${normalizedRoom.id}&identity=${myId}&name=${encodeURIComponent(myName)}`);
-      const data = await res.json();
-      if (data.token) {
-        setLiveKitToken(data.token);
-        setActiveLkToken(data.token);
-        setLkConnectStatus('connecting');
-        setLkRetryCount(0);
-      } else {
-        showToast("⚠️ Failed to connect to LiveKit server");
+    // Promise C: LiveKit token fetch (uses prefetched token if matching room, otherwise fetches)
+    const tokenPromise = (async () => {
+      if (prefetchedLkTokenRef.current && prefetchedLkTokenRef.current.roomId === normalizedRoom.id) {
+        console.log(`[SPEED-OPT] Using pre-fetched LiveKit token for room: ${normalizedRoom.id}`);
+        const token = prefetchedLkTokenRef.current.token;
+        prefetchedLkTokenRef.current = null; // Consume it
+        return token;
       }
-    } catch (e) {
-      console.warn("Failed to fetch token:", e);
-      showToast("⚠️ Failed to fetch LiveKit token");
-    }
 
-    // Set initial presence (both true or false depending on your preference, we default to unmuted/on)
-    if (myId) {
       try {
-        await updateDoc(doc(db, 'rooms', normalizedRoom.id, 'participants', myId), {
-          isMuted: true,
-          isCamOff: true,
-          mutedBy: myId,
-          camOffBy: myId,
-          micOn: false,
-          camOn: false,
-          micRestricted: false,
-          camRestricted: false
-        });
+        const myName = user ? user.displayName || 'Google User' : guestName;
+        const res = await fetch(`/api/get-livekit-token?room=${normalizedRoom.id}&identity=${myId}&name=${encodeURIComponent(myName)}`);
+        const data = await res.json();
+        return data.token || null;
       } catch (e) {
-        console.error('[DISCONNECT-DEBUG] enterCallRoom updateDoc error:', e);
+        console.warn("Failed to fetch token in enterCallRoom:", e);
+        return null;
       }
+    })();
+
+    // Await all parallel operations
+    const [, , lkToken] = await Promise.all([leavePromise, presencePromise, tokenPromise]);
+
+    if (lkToken) {
+      setLiveKitToken(lkToken);
+      setActiveLkToken(lkToken);
+      setLkConnectStatus('connecting');
+      setLkRetryCount(0);
+    } else {
+      showToast("⚠️ Failed to connect to LiveKit server");
     }
   };
 
@@ -2482,6 +2501,7 @@ function AppContent() {
       if (!currentRoom || currentRoomId !== roomId) {
         if (isEnteringRoomRef.current === roomId) return;
         isEnteringRoomRef.current = roomId;
+        prefetchRoomToken(roomId);
 
         const match = rooms.find(r => getRoomIdFromLink(r.link) === roomId);
 
@@ -3993,6 +4013,7 @@ function AppContent() {
       
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
+      prefetchRoomToken(newRoomObj.id);
     } catch (err: any) {
       console.warn('Error saving room to Firestore, falling back to local creation:', err);
       setIsFirestoreBlocked(true);
@@ -4004,6 +4025,7 @@ function AppContent() {
       });
       setGeneratedRoomLink(roomLink);
       setModalStep('confirmation');
+      prefetchRoomToken(newRoomObj.id);
       showToast(`⚠️ Firestore Write Blocked. Room created locally (Offline Fallback).`);
     }
   };
@@ -6144,7 +6166,7 @@ function AppContent() {
                     <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                       {lkRetryCount > 0 
                         ? `Connection lost. Retrying (attempt ${lkRetryCount}/10)...` 
-                        : "Connecting to study room..."
+                        : "joining..."
                       }
                     </span>
                     <button
@@ -7859,7 +7881,7 @@ function AppContent() {
                 animation: 'spin 1s linear infinite' 
               }}
             />
-            <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Joining study room...</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>joining...</span>
           </div>
         )
       } />
