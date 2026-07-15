@@ -573,11 +573,14 @@ export function UniversalVideoPlayer({
     if (isPresenterRef.current || isLive) return; // Viewers only sync to presenter!
 
     // Sync playlist index
+    let playlistLoaded = true;
     try {
       const targetPlaylistIndex = data.ytPlaylistIndex ?? 0;
       if (player.getPlaylistIndex && player.playVideoAt) {
         const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
-        if (!playlist || playlist.length > 0) {
+        if (isPlaylist && (!playlist || playlist.length === 0)) {
+          playlistLoaded = false;
+        } else if (!playlist || playlist.length > 0) {
           const currentIndex = player.getPlaylistIndex();
           if (currentIndex !== targetPlaylistIndex) {
             player.playVideoAt(targetPlaylistIndex);
@@ -628,10 +631,10 @@ export function UniversalVideoPlayer({
     // 3. Sync seek/current time (with safe metadata duration check)
     try {
       const currentTime = await player.getCurrentTime();
-      let canSeek = true;
+      let canSeek = playlistLoaded;
       if (player.getDuration) {
         const dur = await player.getDuration();
-        if (dur === 0) {
+        if (dur === 0 || !playlistLoaded) {
           canSeek = false;
           // Force a play command to kickstart the player buffering if it's stuck in UNSTARTED/CUED
           if (targetPlaying) {
@@ -682,11 +685,14 @@ export function UniversalVideoPlayer({
       let correctedTime = targetTime + (targetPlaying ? (elapsed / 1000) * speed : 0);
 
       // Restore playlist index if applicable
+      let playlistLoaded = true;
       try {
         const targetPlaylistIndex = presenterData.ytPlaylistIndex ?? 0;
         if (player.getPlaylistIndex && player.playVideoAt) {
           const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
-          if (!playlist || playlist.length > 0) {
+          if (isPlaylist && (!playlist || playlist.length === 0)) {
+            playlistLoaded = false;
+          } else if (!playlist || playlist.length > 0) {
             const currentIndex = player.getPlaylistIndex();
             if (currentIndex !== targetPlaylistIndex) {
               player.playVideoAt(targetPlaylistIndex);
@@ -697,10 +703,10 @@ export function UniversalVideoPlayer({
         console.warn("Failed to restore playlist index for presenter:", playlistErr);
       }
 
-      let canSeek = true;
+      let canSeek = playlistLoaded;
       if (player.getDuration) {
         const dur = await player.getDuration();
-        if (dur === 0) {
+        if (dur === 0 || !playlistLoaded) {
           canSeek = false;
           // Force play to kickstart loading/buffering
           if (targetPlaying) {
