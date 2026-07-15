@@ -7304,12 +7304,24 @@ function AppContent() {
                       const list = [...callParticipants];
                       activeBots.forEach((bot) => {
                         if (!list.some(p => p.id === `bot_${bot.id}`)) {
+                          const botPhotoURL = {
+                            Kei: '/buddies/kei.jpg',
+                            Sol: '/buddies/sol.png',
+                            Rei: '/buddies/rei.jpg',
+                            Mika: '/buddies/mika.jpg',
+                            Kai: '/buddies/kai.jpg',
+                            Nyx: '/buddies/nyx.jpg',
+                            Yuna: '/buddies/yuna.jpg',
+                            Wren: '/buddies/wren.jpg'
+                          }[bot.id] || null;
+
                           list.push({
                             id: `bot_${bot.id}`,
                             uid: `bot_${bot.id}`,
                             name: bot.name,
                             initials: '🤖',
                             color: '#1db954',
+                            photoURL: botPhotoURL,
                             isMuted: true,
                             isCamOff: true,
                             role: 'bot',

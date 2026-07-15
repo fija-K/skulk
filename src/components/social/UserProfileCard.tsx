@@ -342,10 +342,20 @@ export function UserProfileCard({
                   fontSize: '48px',
                   fontWeight: 'bold',
                   color: '#0f1013',
-                  border: '2px solid var(--border-color)'
+                  border: '2px solid var(--border-color)',
+                  overflow: 'hidden'
                 }}
               >
-                🤖
+                {targetUser.photoURL ? (
+                  <img 
+                    src={targetUser.photoURL} 
+                    alt={targetUser.name} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  '🤖'
+                )}
               </div>
             </div>
 

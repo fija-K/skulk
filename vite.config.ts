@@ -2,10 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { AccessToken } from 'livekit-server-sdk';
 import { loadEnv } from 'vite';
+import { generateText } from './api/lib/ai.js';
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || env.GEMINI_API_KEY;
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || env.OPENAI_API_KEY;
   return {
     plugins: [
       react(),
@@ -134,48 +137,39 @@ Tone example:
                   promptText += `New Message from User: ${message}\n`;
                   promptText += `Response from ${botId}:`;
 
-                  const models = [
-                    'gemini-1.5-flash',
-                    'gemini-1.5-flash-latest',
-                    'gemini-2.5-flash',
-                    'gemini-1.5-pro',
-                    'gemini-1.0-pro'
-                  ];
-                  let response: any;
-                  let modelErrors: string[] = [];
+                  try {
+                    const reply = await generateText(promptText);
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ reply }));
+                  } catch (error: any) {
+                    console.error('Study Buddy local proxy generation failed:', error);
+                    const messageStr = error.message || '';
+                    const status = error.status;
 
-                  for (const model of models) {
-                    try {
-                      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-                      response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          contents: [{
-                            parts: [{ text: promptText }]
-                          }],
-                          generationConfig: { maxOutputTokens: 100, temperature: 0.7 }
-                        })
-                      });
-                      if (response.ok) {
-                        break;
-                      }
-                      const errText = await response.text();
-                      modelErrors.push(`${model}: ${response.status} - ${errText}`);
-                      console.warn(`Failed Gemini model ${model}: ${response.status} - ${errText}`);
-                    } catch (err: any) {
-                      modelErrors.push(`${model}: Error - ${err.message}`);
-                      console.warn(`Failed to call Gemini model ${model}:`, err);
+                    let resStatus = 500;
+                    let resError = messageStr || 'An unexpected internal server error occurred during response generation.';
+
+                    if (messageStr.includes('MISSING_API_KEY')) {
+                      resStatus = 401;
+                      resError = 'API key is missing in server environment variables.';
+                    } else if (messageStr.includes('INVALID_API_KEY') || status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID')) {
+                      resStatus = 403;
+                      resError = 'The provided API key is invalid or unauthorized.';
+                    } else if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED')) {
+                      resStatus = 429;
+                      resError = 'Rate limit or API quota exceeded. Please try again later.';
+                    } else if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED') || status === 503) {
+                      resStatus = 503;
+                      resError = 'No compatible or stable Gemini models are currently available.';
+                    } else if (status === 400 || messageStr.includes('400') || messageStr.includes('INVALID_ARGUMENT')) {
+                      resStatus = 400;
+                      resError = 'Invalid request or prompt structure sent to the AI model.';
                     }
-                  }
 
-                  if (!response || !response.ok) {
-                    throw new Error(`All Gemini models failed:\n${modelErrors.join('\n')}`);
+                    res.statusCode = resStatus;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ error: resError }));
                   }
-                  const json = await response.json() as any;
-                  const reply = json.candidates?.[0]?.content?.parts?.[0]?.text || "Let's keep focusing.";
-                  res.setHeader('Content-Type', 'application/json');
-                  res.end(JSON.stringify({ reply: reply.trim() }));
                 } else {
                   const url = 'https://api.openai.com/v1/chat/completions';
                   const messages: any[] = [{ role: 'system', content: prompt }];

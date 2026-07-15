@@ -6,17 +6,18 @@ export interface BotInfo {
   name: string;
   desc: string;
   tone: string;
+  photoURL: string;
 }
 
 const ALL_BOTS: BotInfo[] = [
-  { id: 'Kei', name: 'Kei', desc: 'Calm, strategic, treats study as a game to win through efficiency.', tone: 'Procrastinating won\'t change the deadline. What\'s the plan?' },
-  { id: 'Sol', name: 'Sol', desc: 'Quiet, blunt, hyper-analytical. Speaks in matter-of-fact observations.', tone: 'You have been idle for 4 minutes. Concerning.' },
-  { id: 'Rei', name: 'Rei', desc: 'Intense, frames study as a high-stakes challenge.', tone: 'Every minute you waste is a bet against yourself. Don\'t fold.' },
-  { id: 'Mika', name: 'Mika', desc: 'Bubbly, over-the-top supportive and warm.', tone: 'yayyy you\'re back!! let\'s gooo what are we studying today!!' },
-  { id: 'Kai', name: 'Kai', desc: 'Ambitious, confident, pushes you to be the best.', tone: 'Good students study. Great students study when they don\'t want to. Which one are you?' },
-  { id: 'Nyx', name: 'Nyx', desc: 'Quiet, unsettling calm, introspective observations.', tone: 'You keep checking your phone. I notice.' },
-  { id: 'Yuna', name: 'Yuna', desc: 'composed, calls out excuses with quiet precision.', tone: 'You said you\'d start \'5 minutes ago\' fifteen minutes ago.' },
-  { id: 'Wren', name: 'Wren', desc: 'Soft-spoken, patient mentor. Progress over perfection.', tone: 'No rush. Even 10 minutes of focus counts as progress.' }
+  { id: 'Kei', name: 'Kei', desc: 'Calm, strategic, treats study as a game to win through efficiency.', tone: 'Procrastinating won\'t change the deadline. What\'s the plan?', photoURL: '/buddies/kei.jpg' },
+  { id: 'Sol', name: 'Sol', desc: 'Quiet, blunt, hyper-analytical. Speaks in matter-of-fact observations.', tone: 'You have been idle for 4 minutes. Concerning.', photoURL: '/buddies/sol.png' },
+  { id: 'Rei', name: 'Rei', desc: 'Intense, frames study as a high-stakes challenge.', tone: 'Every minute you waste is a bet against yourself. Don\'t fold.', photoURL: '/buddies/rei.jpg' },
+  { id: 'Mika', name: 'Mika', desc: 'Bubbly, over-the-top supportive and warm.', tone: 'yayyy you\'re back!! let\'s gooo what are we studying today!!', photoURL: '/buddies/mika.jpg' },
+  { id: 'Kai', name: 'Kai', desc: 'Ambitious, confident, pushes you to be the best.', tone: 'Good students study. Great students study when they don\'t want to. Which one are you?', photoURL: '/buddies/kai.jpg' },
+  { id: 'Nyx', name: 'Nyx', desc: 'Quiet, unsettling calm, introspective observations.', tone: 'You keep checking your phone. I notice.', photoURL: '/buddies/nyx.jpg' },
+  { id: 'Yuna', name: 'Yuna', desc: 'composed, calls out excuses with quiet precision.', tone: 'You said you\'d start \'5 minutes ago\' fifteen minutes ago.', photoURL: '/buddies/yuna.jpg' },
+  { id: 'Wren', name: 'Wren', desc: 'Soft-spoken, patient mentor. Progress over perfection.', tone: 'No rush. Even 10 minutes of focus counts as progress.', photoURL: '/buddies/wren.jpg' }
 ];
 
 export function StudyBuddiesPanel({
@@ -61,7 +62,7 @@ export function StudyBuddiesPanel({
         name: bot.name,
         initials: '🤖',
         color: '#1db954',
-        photoURL: null,
+        photoURL: bot.photoURL,
         role: 'bot',
         joinedAt: new Date().toISOString(),
         isMuted: true,

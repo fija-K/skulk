@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { generateText } from './lib/ai.js';
 
 const BOT_PROMPTS: Record<string, string> = {
   Kei: `You are Kei, a calm and calculating study companion. You speak in short, precise sentences, treating studying like a strategic game to be won through efficiency. You rarely show excitement, but you notice everything — including when the user is stalling. Keep replies under 1-2 lines. Stay strictly on-topic: studying, focus, motivation, user's current task. If the user brings up off-topic content, acknowledge briefly in 1 line, then redirect back to studying. Never tutor or provide answers/solutions. Do not break character or mention AI.
@@ -62,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const openaiKey = process.env.OPENAI_API_KEY;
 
   if (!geminiKey && !openaiKey) {
-    return res.status(500).json({ error: 'LLM credentials not configured. Please define GEMINI_API_KEY or OPENAI_API_KEY.' });
+    return res.status(401).json({ error: 'LLM credentials not configured. Please define GEMINI_API_KEY or OPENAI_API_KEY.' });
   }
 
   try {
@@ -80,51 +81,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       promptText += `New Message from User: ${message}\n`;
       promptText += `Response from ${botId}:`;
 
-      const models = [
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-2.5-flash',
-        'gemini-1.5-pro',
-        'gemini-1.0-pro'
-      ];
-      let response: any;
-      let modelErrors: string[] = [];
-
-      for (const model of models) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-          response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{ text: promptText }]
-              }],
-              generationConfig: {
-                maxOutputTokens: 100,
-                temperature: 0.7
-              }
-            })
-          });
-          if (response.ok) {
-            break;
-          }
-          const errText = await response.text();
-          modelErrors.push(`${model}: ${response.status} - ${errText}`);
-          console.warn(`Failed Gemini model ${model}: ${response.status} - ${errText}`);
-        } catch (err: any) {
-          modelErrors.push(`${model}: Error - ${err.message}`);
-          console.warn(`Failed to call Gemini model ${model}:`, err);
-        }
-      }
-
-      if (!response || !response.ok) {
-        throw new Error(`All Gemini models failed:\n${modelErrors.join('\n')}`);
-      }
-
-      const json = await response.json();
-      const reply = json.candidates?.[0]?.content?.parts?.[0]?.text || "I'm busy studying. Let's focus.";
-      return res.status(200).json({ reply: reply.trim() });
+      const reply = await generateText(promptText);
+      return res.status(200).json({ reply });
     } else {
       const url = 'https://api.openai.com/v1/chat/completions';
       
@@ -162,7 +120,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ reply: reply.trim() });
     }
   } catch (error: any) {
-    console.error('LLM API generation failed:', error);
-    return res.status(500).json({ error: error.message || 'Generation failed' });
+    console.error('Study Buddy generation failed:', error);
+    const messageStr = error.message || '';
+    const status = error.status;
+
+    if (messageStr.includes('MISSING_API_KEY')) {
+      return res.status(401).json({ error: 'API key is missing in server environment variables.' });
+    }
+    if (messageStr.includes('INVALID_API_KEY') || status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID')) {
+      return res.status(403).json({ error: 'The provided API key is invalid or unauthorized.' });
+    }
+    if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED')) {
+      return res.status(429).json({ error: 'Rate limit or API quota exceeded. Please try again later.' });
+    }
+    if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED') || status === 503) {
+      return res.status(503).json({ error: 'No compatible or stable Gemini models are currently available.' });
+    }
+    if (status === 400 || messageStr.includes('400') || messageStr.includes('INVALID_ARGUMENT')) {
+      return res.status(400).json({ error: 'Invalid request or prompt structure sent to the AI model.' });
+    }
+
+    return res.status(500).json({ error: error.message || 'An unexpected internal server error occurred during response generation.' });
   }
 }
