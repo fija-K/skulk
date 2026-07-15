@@ -1130,6 +1130,19 @@ function AppContent() {
   const [lkRetryCount, setLkRetryCount] = useState(0);
   const stableServerUrl = useMemo(() => import.meta.env.VITE_LIVEKIT_URL, []);
   
+  const liveKitRoomOptions = useMemo(() => ({
+    adaptiveStream: true,
+    dynacast: true,
+    publishDefaults: {
+      simulcast: true,
+      videoSimulcastLayers: [
+        VideoPresets.h180,
+        VideoPresets.h360,
+        VideoPresets.h720
+      ]
+    }
+  }), []);
+  
   // Sidebar tabs in-call panel
   const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools'>('chat');
 
@@ -6073,18 +6086,7 @@ function AppContent() {
               serverUrl={stableServerUrl}
               audio={false}
               video={false}
-              options={useMemo(() => ({
-                adaptiveStream: true,
-                dynacast: true,
-                publishDefaults: {
-                  simulcast: true,
-                  videoSimulcastLayers: [
-                    VideoPresets.h180,
-                    VideoPresets.h360,
-                    VideoPresets.h720
-                  ]
-                }
-              }), [])}
+              options={liveKitRoomOptions}
               onConnected={() => {
                 setLkConnectStatus('connected');
                 setLkRetryCount(0);
