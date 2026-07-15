@@ -49,6 +49,12 @@ export function ParticipantTile({
   const showCamOff = isUser ? isCamOff : p.isCamOff;
   const isSpeaking = p.isSpeaking && !showMuted;
 
+  // Determine if menu should open upwards to prevent clipping at the bottom of the screen
+  const indexInList = callParticipants.findIndex(part => part.id === p.id);
+  const totalCount = callParticipants.length;
+  const rowSize = totalCount <= 4 ? 2 : 3;
+  const isBottomRow = indexInList >= 0 && (indexInList >= totalCount - rowSize);
+
   // If it's a thumbnail strip tile:
   if (isThumbnail) {
     const isSpotlightActive = p.id === spotlightParticipantId;
@@ -524,7 +530,7 @@ export function ParticipantTile({
           
           {/* Option Dropdown List */}
           {activeMenuParticipantId === p.id && (
-            <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px' }} onClick={e => e.stopPropagation()}>
+            <div className="tile-actions-menu animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px', ...isBottomRow ? { bottom: '40px', top: 'auto' } : { top: '40px', bottom: 'auto' } }} onClick={e => e.stopPropagation()}>
               {/* Mute action */}
               {checkCanMute(callParticipants.find(part => part.id === myId)?.role || 'member', p.role || 'member') && (
                 <button 

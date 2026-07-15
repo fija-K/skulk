@@ -422,7 +422,22 @@ function PipWindowContent({
                       }}
                     >
                       <span style={{ fontSize: '10px', fontWeight: 700, color: isMe ? '#f1c40f' : '#94a3b8' }}>{msg.sender}</span>
-                      <span style={{ fontSize: '11px', color: '#e2e8f0', wordBreak: 'break-word', marginTop: '1px' }}>{msg.text}</span>
+                      {msg.text.startsWith('[IMAGE]:') || msg.text.startsWith('[GIF]:') || msg.text.startsWith('[STICKER]:') ? (
+                        <img 
+                          src={msg.text.slice(msg.text.indexOf(':') + 1)} 
+                          alt="Shared media" 
+                          style={{ 
+                            maxWidth: '100%', 
+                            maxHeight: '120px', 
+                            borderRadius: '4px', 
+                            marginTop: '2px', 
+                            objectFit: 'contain', 
+                            border: '1px solid rgba(255,255,255,0.1)' 
+                          }} 
+                        />
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#e2e8f0', wordBreak: 'break-word', marginTop: '1px' }}>{msg.text}</span>
+                      )}
                     </div>
                   );
                 })
@@ -3114,28 +3129,66 @@ function AppContent() {
     }
   };
 
+  const playJoinSound = () => {
+    const audio = new Audio('/assets/audio/join.mp3');
+    audio.volume = 0.5;
+    audio.play()
+      .catch((err) => {
+        console.log("Audio asset /assets/audio/join.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          const ctx = new AudioContextClass();
+          
+          const playTone = (freq: number, startDelay: number, duration: number) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
+            gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
+            gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + startDelay + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startDelay + duration);
+            osc.start(ctx.currentTime + startDelay);
+            osc.stop(ctx.currentTime + startDelay + duration);
+          };
+          playTone(523.25, 0, 0.25);   // C5
+          playTone(659.25, 0.08, 0.3); // E5
+        } catch (e) {
+          console.warn("Failed to play synthesized join sound:", e);
+        }
+      });
+  };
+
   const playLeaveSound = () => {
-    try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextClass) return;
-      const ctx = new AudioContextClass();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(500, ctx.currentTime);
-      osc.frequency.setValueAtTime(320, ctx.currentTime + 0.12);
-      
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-    } catch (e) {
-      console.warn("Failed to play leave sound:", e);
-    }
+    const audio = new Audio('/assets/audio/leave.mp3');
+    audio.volume = 0.5;
+    audio.play()
+      .catch((err) => {
+        console.log("Audio asset /assets/audio/leave.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          const ctx = new AudioContextClass();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(500, ctx.currentTime);
+          osc.frequency.setValueAtTime(320, ctx.currentTime + 0.12);
+          
+          gain.gain.setValueAtTime(0.12, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+          
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.25);
+        } catch (e) {
+          console.warn("Failed to play leave sound:", e);
+        }
+      });
   };
 
   const prevMessagesCountRef = useRef(0);
@@ -3153,11 +3206,20 @@ function AppContent() {
 
   const prevParticipantsRef = useRef<Participant[]>([]);
   useEffect(() => {
-    if (prevParticipantsRef.current.length > 0 && callParticipants.length < prevParticipantsRef.current.length) {
-      const currentIds = callParticipants.map(p => p.id);
-      const leftUser = prevParticipantsRef.current.find(p => !currentIds.includes(p.id));
-      if (leftUser && leftUser.id !== getMyId()) {
-        playLeaveSound();
+    if (prevParticipantsRef.current.length > 0) {
+      if (callParticipants.length > prevParticipantsRef.current.length) {
+        const prevIds = prevParticipantsRef.current.map(p => p.id);
+        const joinedUser = callParticipants.find(p => !prevIds.includes(p.id));
+        if (joinedUser && joinedUser.id !== getMyId()) {
+          playJoinSound();
+        }
+      }
+      else if (callParticipants.length < prevParticipantsRef.current.length) {
+        const currentIds = callParticipants.map(p => p.id);
+        const leftUser = prevParticipantsRef.current.find(p => !currentIds.includes(p.id));
+        if (leftUser && leftUser.id !== getMyId()) {
+          playLeaveSound();
+        }
       }
     }
     prevParticipantsRef.current = callParticipants;
