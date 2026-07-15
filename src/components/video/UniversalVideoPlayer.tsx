@@ -38,12 +38,12 @@ export function createWrappedPlayer(
       if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before YouTube Player could load");
       }
-      const isPlaylist = videoId.startsWith('playlist:');
+      const isPlaylist = videoId && typeof videoId === 'string' ? videoId.startsWith('playlist:') : false;
       let playlistId = '';
-      let actualVideoId = videoId;
-      if (isPlaylist) {
+      let actualVideoId = videoId || '';
+      if (isPlaylist && videoId) {
         const parts = videoId.split(':');
-        playlistId = parts[1];
+        playlistId = parts[1] || '';
         actualVideoId = parts[2] || '';
       }
 
@@ -66,7 +66,7 @@ export function createWrappedPlayer(
         const player = new (window as any).YT.Player(targetElement, {
           width: '100%',
           height: '100%',
-          ...(!isPlaylist || actualVideoId ? { videoId: actualVideoId } : {}),
+          videoId: actualVideoId || '',
           playerVars: playerVars,
           events: {
             onReady: () => {
@@ -436,20 +436,7 @@ export function UniversalVideoPlayer({
   const [videoTitles, setVideoTitles] = useState<Record<string, string>>({});
   const [showPlaylistSidebar, setShowPlaylistSidebar] = useState(true);
 
-  // Load playlist videos from player
-  useEffect(() => {
-    if (!playerRef.current) return;
-    const interval = setInterval(() => {
-      if (playerRef.current && (playerRef.current as any).getPlaylist) {
-        const list = (playerRef.current as any).getPlaylist();
-        if (list && list.length > 0 && playlistVideos.length === 0) {
-          setPlaylistVideos(list);
-          clearInterval(interval);
-        }
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [videoId, playlistVideos]);
+
 
   // Load video titles via public noembed API
   useEffect(() => {
@@ -613,6 +600,20 @@ export function UniversalVideoPlayer({
         return;
       }
       playerRef.current = wrappedPlayer;
+
+      // Check for playlist videos immediately and with a small interval
+      if (wrappedPlayer.getPlaylist) {
+        const checkPlaylist = () => {
+          if (!active) return;
+          const list = wrappedPlayer.getPlaylist?.();
+          if (list && list.length > 0) {
+            setPlaylistVideos(list);
+          } else {
+            setTimeout(checkPlaylist, 500);
+          }
+        };
+        checkPlaylist();
+      }
 
       // Sync to latest presenter state immediately when player mounts
       const presenterData = lastPresenterDataRef.current || getPresenterState();

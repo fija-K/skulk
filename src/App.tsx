@@ -1172,6 +1172,7 @@ function AppContent() {
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
   const [selectedProfile, setSelectedProfile] = useState<{
     id: string;
     name: string;
@@ -1192,6 +1193,12 @@ function AppContent() {
 
   function showToast(msg: string) {
     setToastMessage(msg);
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 10000);
   }
 
   let leavePresenceFn: (roomIdToLeave: string, sessionIdToDelete?: string | null) => Promise<void> = async () => {};

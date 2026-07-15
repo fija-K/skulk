@@ -973,12 +973,10 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 }
 
 .participants-container.grid-layout {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   max-width: 800px;
 }
 
 .participants-container.gallery-layout {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   max-width: 100%;
 }
 
@@ -1085,7 +1083,6 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   background-color: var(--panel-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  aspect-ratio: 16/10;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1094,7 +1091,7 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   overflow: visible;
   transition: all var(--transition-speed) ease;
   width: 100%;
-  height: auto;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   box-sizing: border-box;
@@ -1246,13 +1243,15 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 }
 
 /* When camera is off */
-.participant-tile.camera-off .tile-video-wrapper {
+.participant-tile.camera-off .tile-video-wrapper,
+.spotlight-thumbnail-tile.camera-off .tile-video-wrapper {
   opacity: 0;
   transform: scale(0.95);
   pointer-events: none;
 }
 
-.participant-tile.camera-off .tile-avatar-wrapper {
+.participant-tile.camera-off .tile-avatar-wrapper,
+.spotlight-thumbnail-tile.camera-off .tile-avatar-wrapper {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;

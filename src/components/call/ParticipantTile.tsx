@@ -61,7 +61,13 @@ export function ParticipantTile({
     return (
       <div 
         className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''} ${showCamOff ? 'camera-off' : ''}`}
-        onClick={() => setSpotlightParticipantId(p.id)}
+        onClick={() => {
+          if (p.sharing) {
+            handleViewParticipantShare(p);
+          } else {
+            setSpotlightParticipantId(p.id);
+          }
+        }}
         style={{ 
           cursor: 'pointer',
           position: 'relative',
@@ -210,8 +216,7 @@ export function ParticipantTile({
           width: '100%',
           height: '100%',
           maxWidth: '100%',
-          maxHeight: '100%',
-          aspectRatio: '16/10'
+          maxHeight: '100%'
         } : {}
       }}
     >
