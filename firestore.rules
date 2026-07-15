@@ -113,7 +113,7 @@ service cloud.firestore {
                           )
                         ) ||
                         (
-                          participantId.startsWith('bot_')
+                          participantId.matches('^bot_.*')
                         )
                       );
                       
@@ -175,8 +175,8 @@ service cloud.firestore {
                       
         allow delete: if request.auth != null && 
                       (
-                        participantId == request.auth.uid ||
-                        participantId.startsWith('bot_') ||
+                         participantId == request.auth.uid ||
+                         participantId.matches('^bot_.*') ||
                         (
                           participantId != request.auth.uid &&
                           isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role)
@@ -189,8 +189,8 @@ service cloud.firestore {
         allow read: if true;
         allow create: if request.auth != null &&
                       (
-                        request.resource.data.senderId == request.auth.uid ||
-                        request.resource.data.senderId.startsWith('bot_')
+                         request.resource.data.senderId == request.auth.uid ||
+                         request.resource.data.senderId.matches('^bot_.*')
                       ) &&
                       request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt', 'mentionedId']) &&
                       exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid));
