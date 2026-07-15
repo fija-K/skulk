@@ -137,7 +137,7 @@ export function useRoomState(
         return;
       }
       const data = snapshot.data();
-      if (data.sharingYoutubeId) {
+      if (data.sharingYoutubeId && viewingShare.participantId !== getMyId()) {
         setViewingShare((prev: ViewingShare | null) => prev ? { ...prev, youtubeVideoId: data.sharingYoutubeId } : null);
       }
       if (!data.sharing && viewingShare.participantId !== getMyId()) {
