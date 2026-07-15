@@ -6243,7 +6243,7 @@ function AppContent() {
                 </button>
               </div>
             ) : (
-              <>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
               {/* Call Header */}
               <div className="call-top-bar">
             <div className="call-room-info">
@@ -7147,7 +7147,28 @@ function AppContent() {
                               </div>
                             </div>
 
-
+                            {/* Deadline Clock Card */}
+                            <div 
+                              className={`tool-card ${deadlineIsRunning ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveToolDetail('deadline');
+                                setActiveGameId(null);
+                              }}
+                              title="Step-by-step deadline session timer"
+                            >
+                              <div className="tool-card-icon-wrapper" style={{ color: deadlineIsRunning ? 'var(--primary-color)' : 'inherit' }}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="10"></circle>
+                                  <polyline points="12 6 12 12 15 15"></polyline>
+                                </svg>
+                              </div>
+                              <div className="tool-card-info">
+                                <span className="tool-card-title">Deadline Clock</span>
+                                <span className="tool-card-desc">
+                                  {deadlineIsRunning ? 'Running steps deadline timer...' : 'Add steps and start countdown.'}
+                                </span>
+                              </div>
+                            </div>
 
                             {/* Loose Timer Card */}
                             <div 
@@ -7863,7 +7884,7 @@ function AppContent() {
             )}
 
           </div>
-          </>
+          </div>
           )}
 
           {renderPipWindow()}
