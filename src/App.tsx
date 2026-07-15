@@ -33,6 +33,7 @@ import { VideoPresets } from 'livekit-client';
 
 import { parseMediaUrl, isDrmBlockedUrl, loadYoutubeApi, loadVimeoApi, loadTwitchApi } from './utils/helpers';
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
+import { SpotifyPlayer } from './components/video/SpotifyPlayer';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { WhiteboardView } from './components/whiteboard/WhiteboardView';
 import { TruthOrDareUI, SpinWheelUI } from './components/games/GamesView';
@@ -6928,8 +6929,8 @@ function AppContent() {
                                 participants={callParticipants}
                               />
                             ) : viewingShare.type === 'spotify' && viewingShare.youtubeVideoId ? (
-                              <iframe
-                                src={(() => {
+                              <SpotifyPlayer
+                                spotifyUri={(() => {
                                   let clean = (viewingShare.youtubeVideoId || '').trim();
                                   if (clean.includes('open.spotify.com')) {
                                     if (!clean.includes('/embed/')) {
@@ -6938,13 +6939,10 @@ function AppContent() {
                                   }
                                   return clean;
                                 })()}
-                                width="100%"
-                                height="100%"
-                                frameBorder="0"
-                                allowTransparency={true}
-                                allow="encrypted-media"
-                                style={{ border: 'none', background: '#000' }}
-                                title="Spotify Music Player"
+                                isPresenter={viewingShare.participantId === getMyId()}
+                                presenterId={viewingShare.participantId}
+                                roomId={roomDocId(currentRoom!)}
+                                myId={getMyId()}
                               />
                             ) : (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>

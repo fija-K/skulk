@@ -164,3 +164,27 @@ export function loadDailymotionApi(): Promise<void> {
   
   return dailymotionApiPromise;
 }
+
+let spotifyApiPromise: Promise<any> | null = null;
+export function loadSpotifyApi(): Promise<any> {
+  if (spotifyApiPromise) return spotifyApiPromise;
+  
+  spotifyApiPromise = new Promise((resolve) => {
+    if ((window as any).SpotifyIframeApi) {
+      resolve((window as any).SpotifyIframeApi);
+      return;
+    }
+    
+    const prevCallback = (window as any).onSpotifyIframeApiReady;
+    (window as any).onSpotifyIframeApiReady = (IFrameAPI: any) => {
+      if (prevCallback) prevCallback(IFrameAPI);
+      resolve(IFrameAPI);
+    };
+    
+    const tag = document.createElement('script');
+    tag.src = 'https://open.spotify.com/embed/iframe-api';
+    document.head.appendChild(tag);
+  });
+  
+  return spotifyApiPromise;
+}
