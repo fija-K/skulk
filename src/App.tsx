@@ -1333,8 +1333,6 @@ function AppContent() {
   // const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
   
-  const activePresenter = callParticipants.find(p => p.id !== getMyId() && p.sharing);
-  
 
   // Tools sub-panel toggle
   const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -2221,6 +2219,8 @@ function AppContent() {
 
 
   const getMyId = useCallback(() => user ? user.uid : (guestId || localStorage.getItem('skulk_guest_id') || ''), [user, guestId]);
+
+  const activePresenter = callParticipants.find(p => p.id !== getMyId() && p.sharing);
 
   const handleViewParticipantShare = (p: Participant) => {
     if (!p.sharing) return;
