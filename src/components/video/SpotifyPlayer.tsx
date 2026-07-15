@@ -30,6 +30,7 @@ export function SpotifyPlayer({
 
   const presenterIdRef = useRef(presenterId);
   const isPresenterRef = useRef(isPresenter);
+  const localPausedRef = useRef(true);
 
   // Keep refs up-to-date on every render
   presenterIdRef.current = presenterId;
@@ -67,9 +68,10 @@ export function SpotifyPlayer({
     isLocalChangeRef.current = true;
 
     try {
-      if (targetPlaying) {
+      // Only call play/pause if the state differs from target to prevent playback glitching
+      if (targetPlaying && localPausedRef.current) {
         controller.play();
-      } else {
+      } else if (!targetPlaying && !localPausedRef.current) {
         controller.pause();
       }
     } catch (e) {
@@ -142,6 +144,7 @@ export function SpotifyPlayer({
 
           setCurrentTime(timeSeconds);
           setDuration(dur / 1000);
+          localPausedRef.current = isPaused;
 
           if (isPresenterRef.current) {
             // Presenter tracking logic
@@ -192,6 +195,47 @@ export function SpotifyPlayer({
 
     return () => unsubscribe();
   }, [isPresenter, presenterId, roomId]);
+
+  // 3. Watcher auto-sync enforcement loop (runs every 2 seconds for watchers to handle buffering or missed states)
+  useEffect(() => {
+    if (isPresenter || !roomId || !presenterId) return;
+
+    let active = true;
+    const interval = setInterval(() => {
+      if (!active) return;
+      
+      const presenterData = lastPresenterDataRef.current;
+      const controller = controllerRef.current;
+      if (!presenterData || !controller) return;
+
+      const targetPlaying = presenterData.ytPlaying ?? false;
+      const targetTime = presenterData.ytTime ?? 0;
+      const targetTimestamp = presenterData.ytUpdateTimestamp ?? Date.now();
+
+      let correctedTime = targetTime;
+      if (targetPlaying && targetTimestamp) {
+        const elapsedSeconds = (Date.now() - targetTimestamp) / 1000;
+        correctedTime += elapsedSeconds;
+      }
+
+      if (isLocalChangeRef.current) return;
+
+      const localTime = currentTime;
+      const localPlaying = !localPausedRef.current;
+      const stateMismatched = localPlaying !== targetPlaying;
+      const timeDrift = Math.abs(localTime - correctedTime);
+
+      if (stateMismatched || timeDrift > 4.5) {
+        console.log("[SPOTIFY-SYNC] Enforcing auto-sync correction. Drift:", timeDrift, "State mismatch:", stateMismatched);
+        syncToPresenterState(presenterData, controller);
+      }
+    }, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [isPresenter, presenterId, roomId, currentTime]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
