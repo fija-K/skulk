@@ -22,6 +22,8 @@ export interface AbstractPlayer {
   getPlaylistIndex?(): number;
   playVideoAt?(index: number): void;
   loadVideo?(videoId: string): void;
+  mute?(): void;
+  unMute?(): void;
   destroy(): void;
 }
 
@@ -140,6 +142,16 @@ export function createWrappedPlayer(
                     console.warn("loadVideo failed:", e);
                   }
                 },
+                mute: () => {
+                  try {
+                    player.mute();
+                  } catch (e) {}
+                },
+                unMute: () => {
+                  try {
+                    player.unMute();
+                  } catch (e) {}
+                },
                 destroy: () => {
                   try {
                     player.destroy();
@@ -226,6 +238,12 @@ export function createWrappedPlayer(
           },
           getPlaybackRate: () => player.getPlaybackRate().catch(() => 1),
           setPlaybackRate: (rate: number) => player.setPlaybackRate(rate).catch(() => {}),
+          mute: () => {
+            player.setVolume(0).catch(() => {});
+          },
+          unMute: () => {
+            player.setVolume(1).catch(() => {});
+          },
           destroy: () => {
             try {
               player.unload();
@@ -339,6 +357,16 @@ export function createWrappedPlayer(
           },
           getPlaybackRate: () => 1,
           setPlaybackRate: () => {},
+          mute: () => {
+            try {
+              player.setMute(true);
+            } catch (e) {}
+          },
+          unMute: () => {
+            try {
+              player.setMute(false);
+            } catch (e) {}
+          },
           destroy: () => {
             try {
               player.destroy();
@@ -441,6 +469,16 @@ export function createWrappedPlayer(
                 return isPaused ? 2 : 1;
               }
             },
+            mute: () => {
+              try {
+                player.setMuted(true);
+              } catch (e) {}
+            },
+            unMute: () => {
+              try {
+                player.setMuted(false);
+              } catch (e) {}
+            },
             destroy: () => {
               targetElement.innerHTML = '';
             }
@@ -477,6 +515,15 @@ export function UniversalVideoPlayer({
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
+
+  const presenterIdRef = useRef(presenterId);
+  const participantsRef = useRef(participants);
+  const isPresenterRef = useRef(isPresenter);
+
+  // Keep refs up-to-date on every render
+  presenterIdRef.current = presenterId;
+  participantsRef.current = participants;
+  isPresenterRef.current = isPresenter;
 
   const isPlaylist = videoId.startsWith('playlist:');
   const [playlistIndex, setPlaylistIndex] = useState(0);
@@ -519,11 +566,11 @@ export function UniversalVideoPlayer({
   }, [playlistIndex]);
 
   const getPresenterState = () => {
-    return participants.find(p => p.id === presenterId) as any;
+    return participantsRef.current.find(p => p.id === presenterIdRef.current) as any;
   };
 
   const syncToPresenterState = async (data: any, player: AbstractPlayer) => {
-    if (isPresenter || isLive) return; // Viewers only sync to presenter!
+    if (isPresenterRef.current || isLive) return; // Viewers only sync to presenter!
 
     // Sync playlist index
     try {
@@ -691,10 +738,10 @@ export function UniversalVideoPlayer({
           platform,
           targetDiv,
           videoId,
-          isPresenter,
+          isPresenterRef.current,
           isLive,
           (playing, time) => {
-            if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
+            if (!isPresenterRef.current || isLive) return; // ONLY presenter writes playback updates to Firestore!
             if (!isLocalChangeRef.current) {
               updateFirestorePlaybackState(playing, time);
             }
@@ -707,7 +754,7 @@ export function UniversalVideoPlayer({
               const presenterData = lastPresenterDataRef.current || getPresenterState();
               if (playerRef.current) {
                 console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
-                if (isPresenter) {
+                if (isPresenterRef.current) {
                   syncPresenterToOwnState(playerRef.current);
                 } else if (presenterData) {
                   syncToPresenterState(presenterData, playerRef.current);
@@ -743,7 +790,7 @@ export function UniversalVideoPlayer({
 
           // Sync to latest presenter state immediately when player mounts
           const presenterData = lastPresenterDataRef.current || getPresenterState();
-          if (isPresenter) {
+          if (isPresenterRef.current) {
             syncPresenterToOwnState(wrappedPlayer);
           } else if (presenterData) {
             syncToPresenterState(presenterData, wrappedPlayer);
@@ -762,7 +809,18 @@ export function UniversalVideoPlayer({
         playerRef.current = null;
       }
     };
-  }, [videoIdDependency, platform, isPresenter, isLive, presenterId, roomId]);
+  }, [videoIdDependency, platform, isLive, roomId]);
+
+  // Dynamically mute/unmute player when switching between presenting/watching without recreating the iframe
+  useEffect(() => {
+    if (playerRef.current) {
+      if (isPresenter) {
+        try { playerRef.current.unMute?.(); } catch (e) {}
+      } else {
+        try { playerRef.current.mute?.(); } catch (e) {}
+      }
+    }
+  }, [isPresenter]);
 
   // Sync video updates dynamically for reusable players (like YouTube)
   useEffect(() => {
