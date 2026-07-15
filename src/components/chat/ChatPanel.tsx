@@ -48,6 +48,7 @@ export function ChatPanel({
   const [loadingGifs, setLoadingGifs] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [activeExpandedImageUrl, setActiveExpandedImageUrl] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -123,6 +124,9 @@ export function ChatPanel({
       alert("❌ Image is too large. Please select an image under 5MB.");
       return;
     }
+
+    const confirmSend = window.confirm("Do you want to send this image?");
+    if (!confirmSend) return;
 
     setUploadingImage(true);
     const reader = new FileReader();
@@ -322,7 +326,7 @@ export function ChatPanel({
                     }} 
                     onClick={() => {
                       const url = msg.text.slice(msg.text.indexOf(':') + 1);
-                      window.open(url, '_blank');
+                      setActiveExpandedImageUrl(url);
                     }}
                   />
                 ) : (
@@ -613,6 +617,70 @@ export function ChatPanel({
           </svg>
         </button>
       </form>
+      {activeExpandedImageUrl && (
+        <div 
+          className="image-modal-overlay animate-fade-in"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(10, 11, 14, 0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '24px',
+            backdropFilter: 'blur(8px)'
+          }}
+          onClick={() => setActiveExpandedImageUrl(null)}
+        >
+          <div 
+            style={{ position: 'relative', maxWidth: '90%', maxHeight: '90%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setActiveExpandedImageUrl(null)}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: '0',
+                background: 'rgba(255,255,255,0.1)',
+                border: 'none',
+                color: '#fff',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                fontSize: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background 0.2s',
+                zIndex: 1001
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.2)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+            >
+              ✕
+            </button>
+            <img 
+              src={activeExpandedImageUrl} 
+              alt="Expanded shared media" 
+              style={{
+                maxWidth: '100%',
+                maxHeight: '80vh',
+                objectFit: 'contain',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.8)'
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

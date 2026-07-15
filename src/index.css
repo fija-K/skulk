@@ -1093,6 +1093,11 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   position: relative;
   overflow: visible;
   transition: all var(--transition-speed) ease;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
 }
 
 .participant-tile.user-tile {

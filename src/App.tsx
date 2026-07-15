@@ -2384,16 +2384,12 @@ function AppContent() {
     isChatInitialLoadRef.current = true;
 
     // 2. Setup parallel promise chain
-    // Promise A: Clean up any previous room leave operations in the background
-    const leavePromise = (async () => {
-      if (globalPendingLeavePromise) {
-        try {
-          await globalPendingLeavePromise;
-        } catch (e) {}
-      }
-    })();
+    // Promise A: Clean up any previous room leave operations in the background (DO NOT block LiveKit connection)
+    if (globalPendingLeavePromise) {
+      globalPendingLeavePromise.catch(() => {});
+    }
 
-    // Promise B: Firestore checks (role and presence document write)
+    // Promise B: Firestore checks (role and presence document write) (DO NOT block LiveKit connection)
     const presencePromise = (async () => {
       if (!myId) return;
       let myRole = determineRole(normalizedRoom.creatorId);
@@ -2462,8 +2458,8 @@ function AppContent() {
       }
     })();
 
-    // Await all parallel operations
-    const [, , lkToken] = await Promise.all([leavePromise, presencePromise, tokenPromise]);
+    // Await ONLY the LiveKit token promise to initiate the connection immediately
+    const lkToken = await tokenPromise;
 
     if (lkToken) {
       setLiveKitToken(lkToken);
@@ -2473,6 +2469,11 @@ function AppContent() {
     } else {
       showToast("⚠️ Failed to connect to LiveKit server");
     }
+
+    // Keep presencePromise running in background and catch any failures
+    presencePromise.catch(err => {
+      console.warn("Background presence update failed:", err);
+    });
   };
 
   const toggleMic = async () => {
@@ -3073,36 +3074,46 @@ function AppContent() {
     setActiveToolDetail('none');
   };
 
+  const pomodoroTimerRef = useRef({ minutes: 0, seconds: 0, phase: 'focus' as 'focus' | 'break' });
+  useEffect(() => {
+    pomodoroTimerRef.current = { 
+      minutes: pomodoroMinutes, 
+      seconds: pomodoroSeconds, 
+      phase: pomodoroPhase 
+    };
+  }, [pomodoroMinutes, pomodoroSeconds, pomodoroPhase]);
+
   // Pomodoro countdown effect
   useEffect(() => {
-    let interval: any = null;
-    if (pomodoroIsRunning) {
-      interval = setInterval(() => {
-        if (pomodoroSeconds > 0) {
-          setPomodoroSeconds(prev => prev - 1);
-        } else if (pomodoroMinutes > 0) {
-          setPomodoroMinutes(prev => prev - 1);
-          setPomodoroSeconds(59);
+    if (!pomodoroIsRunning) return;
+    
+    const interval = setInterval(() => {
+      const { minutes, seconds, phase } = pomodoroTimerRef.current;
+      if (seconds > 0) {
+        setPomodoroSeconds(seconds - 1);
+      } else if (minutes > 0) {
+        setPomodoroMinutes(minutes - 1);
+        setPomodoroSeconds(59);
+      } else {
+        // Transition phase
+        if (phase === 'focus') {
+          setPomodoroPhase('break');
+          setPomodoroMinutes(pomodoroBreakLength);
+          setPomodoroSeconds(0);
+          showToast('Focus session complete! Time for a short break.');
+          playBreakSound();
         } else {
-          // Transition phase
-          if (pomodoroPhase === 'focus') {
-            setPomodoroPhase('break');
-            setPomodoroMinutes(pomodoroBreakLength);
-            setPomodoroSeconds(0);
-            showToast('Focus session complete! Time for a short break.');
-          } else {
-            setPomodoroPhase('focus');
-            setPomodoroMinutes(pomodoroFocusLength);
-            setPomodoroSeconds(0);
-            showToast('Break complete! Back to focus.');
-          }
+          setPomodoroPhase('focus');
+          setPomodoroMinutes(pomodoroFocusLength);
+          setPomodoroSeconds(0);
+          showToast('Break complete! Back to focus.');
+          playStepSound();
         }
-      }, 1000);
-    } else {
-      clearInterval(interval);
-    }
+      }
+    }, 1000);
+
     return () => clearInterval(interval);
-  }, [pomodoroIsRunning, pomodoroMinutes, pomodoroSeconds, pomodoroPhase, pomodoroFocusLength, pomodoroBreakLength]);
+  }, [pomodoroIsRunning, pomodoroFocusLength, pomodoroBreakLength]);
 
   // Web Audio API Sound Generation Helpers
   const playMessageSound = () => {
@@ -3187,6 +3198,69 @@ function AppContent() {
           osc.stop(ctx.currentTime + 0.25);
         } catch (e) {
           console.warn("Failed to play leave sound:", e);
+        }
+      });
+  };
+
+  const playBreakSound = () => {
+    const audio = new Audio('/assets/audio/break.mp3');
+    audio.volume = 0.5;
+    audio.play()
+      .catch((err) => {
+        console.log("Audio asset /assets/audio/break.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          const ctx = new AudioContextClass();
+          const playNote = (freq: number, startTime: number, duration: number) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startTime);
+            gain.gain.setValueAtTime(0.1, ctx.currentTime + startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + duration);
+            osc.start(ctx.currentTime + startTime);
+            osc.stop(ctx.currentTime + startTime + duration);
+          };
+          playNote(659.25, 0, 0.3);
+          playNote(523.25, 0.15, 0.3);
+          playNote(392.00, 0.3, 0.4);
+        } catch (e) {
+          console.warn("Failed to play synthesized break sound:", e);
+        }
+      });
+  };
+
+  const playStepSound = () => {
+    const audio = new Audio('/assets/audio/step.mp3');
+    audio.volume = 0.5;
+    audio.play()
+      .catch((err) => {
+        console.log("Audio asset /assets/audio/step.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          const ctx = new AudioContextClass();
+          const playNote = (freq: number, startTime: number, duration: number) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startTime);
+            gain.gain.setValueAtTime(0.08, ctx.currentTime + startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + duration);
+            osc.start(ctx.currentTime + startTime);
+            osc.stop(ctx.currentTime + startTime + duration);
+          };
+          playNote(523.25, 0, 0.15);
+          playNote(659.25, 0.08, 0.15);
+          playNote(783.99, 0.16, 0.15);
+          playNote(1046.50, 0.24, 0.3);
+        } catch (e) {
+          console.warn("Failed to play synthesized step sound:", e);
         }
       });
   };
@@ -3791,27 +3865,32 @@ function AppContent() {
     }
   };
 
+  const deadlineTimerRef = useRef({ minutes: 0, seconds: 0 });
+  useEffect(() => {
+    deadlineTimerRef.current = { minutes: deadlineTimerMinutes, seconds: deadlineTimerSeconds };
+  }, [deadlineTimerMinutes, deadlineTimerSeconds]);
+
   // Mini Deadline Clock Timer Effect
   useEffect(() => {
-    let interval: any = null;
-    if (deadlineIsRunning) {
-      interval = setInterval(() => {
-        if (deadlineTimerSeconds > 0) {
-          setDeadlineTimerSeconds(prev => prev - 1);
-        } else if (deadlineTimerMinutes > 0) {
-          setDeadlineTimerMinutes(prev => prev - 1);
-          setDeadlineTimerSeconds(59);
-        } else {
-          // Time is up!
-          setDeadlineIsRunning(false);
-          showToast(`Deadline reached for ${deadlineSteps[deadlineActiveIndex]?.name || 'current step'}!`);
-        }
-      }, 1000);
-    } else {
-      clearInterval(interval);
-    }
+    if (!deadlineIsRunning) return;
+    
+    const interval = setInterval(() => {
+      const { minutes, seconds } = deadlineTimerRef.current;
+      if (seconds > 0) {
+        setDeadlineTimerSeconds(seconds - 1);
+      } else if (minutes > 0) {
+        setDeadlineTimerMinutes(minutes - 1);
+        setDeadlineTimerSeconds(59);
+      } else {
+        // Time is up!
+        setDeadlineIsRunning(false);
+        showToast(`Deadline reached for ${deadlineSteps[deadlineActiveIndex]?.name || 'current step'}!`);
+        playStepSound();
+      }
+    }, 1000);
+
     return () => clearInterval(interval);
-  }, [deadlineIsRunning, deadlineTimerMinutes, deadlineTimerSeconds, deadlineActiveIndex, deadlineSteps]);
+  }, [deadlineIsRunning, deadlineActiveIndex, deadlineSteps]);
 
   const startDeadlineTimer = () => {
     const currentStep = deadlineSteps[deadlineActiveIndex];
@@ -3839,8 +3918,10 @@ function AppContent() {
       setDeadlineTimerMinutes(nextStep ? nextStep.minutes : 0);
       setDeadlineTimerSeconds(0);
       showToast(`Advanced to next step: ${nextStep?.name}`);
+      playStepSound();
     } else {
       showToast('All deadline steps completed!');
+      playStepSound();
     }
   };
 
@@ -4464,11 +4545,14 @@ function AppContent() {
 
 
   const getGalleryGridTemplate = (count: number) => {
-    if (count === 1) return { columns: '1fr', rows: '1fr' };
+    if (count <= 1) return { columns: '1fr', rows: '1fr' };
     if (count === 2) return { columns: 'repeat(2, 1fr)', rows: '1fr' };
-    if (count <= 4) return { columns: 'repeat(2, 1fr)', rows: 'repeat(2, 1fr)' };
-    if (count <= 6) return { columns: 'repeat(3, 1fr)', rows: 'repeat(2, 1fr)' };
-    return { columns: 'repeat(3, 1fr)', rows: 'repeat(3, 1fr)' };
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    return {
+      columns: `repeat(${cols}, 1fr)`,
+      rows: `repeat(${rows}, 1fr)`
+    };
   };
 
   // Filtered rooms based on name search
@@ -6935,7 +7019,7 @@ function AppContent() {
 
                       return 0;
                     });
-                    const displayedParticipants = sortedParticipants.slice(0, 8);
+                    const displayedParticipants = sortedParticipants.slice(0, 16);
 
                     const count = displayedParticipants.length;
                     const gridConfig = getGalleryGridTemplate(count);
@@ -6943,15 +7027,16 @@ function AppContent() {
                     return (
                       <div 
                         className={`participants-container ${isGalleryView ? 'gallery-layout' : 'grid-layout'}`}
-                        style={isGalleryView ? {
+                        style={{
                           gridTemplateColumns: gridConfig.columns,
                           gridTemplateRows: gridConfig.rows,
                           width: '100%',
                           height: '100%',
                           maxHeight: '100%',
                           justifyItems: 'center',
-                          alignItems: 'center'
-                        } : {}}
+                          alignItems: 'center',
+                          ...(!isGalleryView ? { maxWidth: '800px', margin: '0 auto' } : {})
+                        }}
                       >
                         {displayedParticipants.map((p) => (
                           <ParticipantTile
