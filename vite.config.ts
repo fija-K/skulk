@@ -142,7 +142,7 @@ Tone example:
                     'gemini-1.0-pro'
                   ];
                   let response: any;
-                  let lastError: any;
+                  let modelErrors: string[] = [];
 
                   for (const model of models) {
                     try {
@@ -161,16 +161,16 @@ Tone example:
                         break;
                       }
                       const errText = await response.text();
-                      lastError = new Error(`Gemini API error for model ${model}: ${response.status} - ${errText}`);
-                      console.warn(lastError.message);
+                      modelErrors.push(`${model}: ${response.status} - ${errText}`);
+                      console.warn(`Failed Gemini model ${model}: ${response.status} - ${errText}`);
                     } catch (err: any) {
-                      lastError = err;
+                      modelErrors.push(`${model}: Error - ${err.message}`);
                       console.warn(`Failed to call Gemini model ${model}:`, err);
                     }
                   }
 
                   if (!response || !response.ok) {
-                    throw lastError || new Error('All Gemini models failed');
+                    throw new Error(`All Gemini models failed:\n${modelErrors.join('\n')}`);
                   }
                   const json = await response.json() as any;
                   const reply = json.candidates?.[0]?.content?.parts?.[0]?.text || "Let's keep focusing.";

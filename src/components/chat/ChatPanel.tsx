@@ -904,7 +904,7 @@ export function ChatPanel({
               .map(b => ({ id: b.id, name: b.name, type: 'bot' as const, photoURL: null, initials: '🤖', color: '#1db954' }));
             
             const filteredUsers = callParticipants
-              .filter(p => p.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
+              .filter(p => p.role !== 'bot' && !p.id.startsWith('bot_') && p.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
               .map(p => ({
                 id: p.id,
                 name: p.name.replace(' (You)', ''),
