@@ -262,45 +262,87 @@ function getModelVersion(name: string): number[] {
   return [0, 0];
 }
 
+// Error category helpers
+function isTemporaryError(error: any): boolean {
+  const message = (error.message || '').toUpperCase();
+  const status = error.status;
+  
+  return status === 503 || 
+         status === 429 || 
+         message.includes('UNAVAILABLE') || 
+         message.includes('RESOURCE_EXHAUSTED') || 
+         message.includes('QUOTA EXCEEDED') ||
+         message.includes('INTERNAL') || 
+         message.includes('DEADLINE_EXCEEDED') || 
+         message.includes('HIGH DEMAND') ||
+         message.includes('TEMPORARY');
+}
+
+function isModelNotFoundError(error: any): boolean {
+  const message = (error.message || '').toUpperCase();
+  const status = error.status;
+
+  return status === 404 || 
+         message.includes('NOT_FOUND') || 
+         message.includes('UNSUPPORTED') || 
+         message.includes('FAILED_PRECONDITION');
+}
+
 // ----------------------------------------------------------------
-// Centralized generateText Helper (Dynamic self-Healing)
+// Centralized generateText Helper (Dynamic self-Healing & Retries)
 // ----------------------------------------------------------------
 export async function generateText(promptText: string): Promise<string> {
   let modelName = await GeminiService.getSelectedModel();
+  let attempt = 0;
+  const maxRetries = 3;
+  const baseDelayMs = 1000;
 
-  try {
-    const start = Date.now();
-    const result = await GeminiService.callGenerate(modelName, promptText);
-    console.info(`[Gemini SDK] Successfully generated text using ${modelName} in ${Date.now() - start}ms`);
-    return result;
-  } catch (error: any) {
-    console.warn(`[Gemini SDK] Generation failed with model ${modelName}:`, error.message);
-
-    // Identify if the failure is a recoverable model-selection/availability error
-    const isRecoverableModelError = 
-      error.message?.includes('NOT_FOUND') ||
-      error.message?.includes('not found') ||
-      error.message?.includes('unsupported') ||
-      error.message?.includes('unavailable') ||
-      error.status === 404 ||
-      error.status === 503;
-
-    if (isRecoverableModelError) {
-      console.warn(`[Gemini SDK] Recoverable model failure detected. Clearing cache to trigger re-discovery...`);
-      GeminiService.clearCache();
-
-      // Resolve a new model dynamically
-      modelName = await GeminiService.getSelectedModel();
-      console.info(`[Gemini SDK] Retrying generation once with newly selected model: ${modelName}`);
-
-      // Retry exactly once
+  while (true) {
+    try {
       const start = Date.now();
+      console.info(`[Gemini SDK] Attempting text generation using ${modelName}...`);
       const result = await GeminiService.callGenerate(modelName, promptText);
-      console.info(`[Gemini SDK] Retry successful using ${modelName} in ${Date.now() - start}ms`);
+      console.info(`[Gemini SDK] [Success] Generated text using ${modelName} in ${Date.now() - start}ms`);
       return result;
-    }
+    } catch (error: any) {
+      attempt++;
+      const messageStr = error.message || '';
+      const status = error.status;
+      
+      const isAuth = status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID') || messageStr.includes('INVALID_API_KEY');
+      const isModelNotFound = isModelNotFoundError(error);
+      const isTemp = isTemporaryError(error);
 
-    // Re-throw authentication, permission, quota, or invalid-request errors
-    throw error;
+      if (isAuth) {
+        console.error(`[Gemini SDK] [Authentication Error] Permanent failure: Invalid or missing API key.`);
+        throw error;
+      }
+
+      if (isModelNotFound) {
+        console.warn(`[Gemini SDK] [Permanent Model Error] Model ${modelName} returned a model-not-found or unsupported error. Evicting cache.`);
+        GeminiService.clearCache();
+        
+        if (attempt <= maxRetries) {
+          modelName = await GeminiService.getSelectedModel();
+          console.info(`[Gemini SDK] [Retry] Retrying generation (Attempt ${attempt}/${maxRetries}) with newly selected model: ${modelName}`);
+          continue;
+        }
+      }
+
+      if (isTemp) {
+        console.warn(`[Gemini SDK] [Temporary Service Error] Model ${modelName} is temporarily overloaded or rate limited. Error: ${messageStr}`);
+        
+        if (attempt <= maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1);
+          console.info(`[Gemini SDK] [Retryable] Waiting ${delay}ms before retrying same model ${modelName} (Attempt ${attempt}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+
+      // If all retries failed or it's a non-retryable error, throw it
+      console.error(`[Gemini SDK] [Permanent Failure] All attempts exhausted. Final attempt failed with:`, messageStr);
+      throw error;
+    }
   }
 }

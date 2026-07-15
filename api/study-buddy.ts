@@ -130,10 +130,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (messageStr.includes('INVALID_API_KEY') || status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID')) {
       return res.status(403).json({ error: 'The provided API key is invalid or unauthorized.', details: messageStr });
     }
-    if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED')) {
-      return res.status(429).json({ error: 'Rate limit or API quota exceeded. Please try again later.', details: messageStr });
+    if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED') ||
+        status === 503 || messageStr.includes('503') || messageStr.includes('UNAVAILABLE') || messageStr.includes('temporary') || messageStr.includes('overloaded')) {
+      return res.status(503).json({ error: 'Gemini is temporarily unavailable due to high demand. Please try again shortly.', details: messageStr });
     }
-    if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED') || status === 503) {
+    if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED')) {
       return res.status(503).json({ error: 'No compatible or stable Gemini models are currently available.', details: messageStr });
     }
     if (status === 400 || messageStr.includes('400') || messageStr.includes('INVALID_ARGUMENT')) {
