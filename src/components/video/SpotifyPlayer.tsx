@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { loadSpotifyApi } from '../../utils/helpers';
@@ -21,6 +21,9 @@ export function SpotifyPlayer({
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
+
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const presenterIdRef = useRef(presenterId);
   const isPresenterRef = useRef(isPresenter);
@@ -57,6 +60,7 @@ export function SpotifyPlayer({
       correctedTime += elapsedSeconds;
     }
 
+    setCurrentTime(correctedTime);
     isLocalChangeRef.current = true;
 
     try {
@@ -115,8 +119,11 @@ export function SpotifyPlayer({
         // Listen to playback state changes on the controller
         EmbedController.on('playback_update', (e: any) => {
           if (!active) return;
-          const { position, isPaused } = e.data;
+          const { position, duration: dur, isPaused } = e.data;
           const timeSeconds = position / 1000;
+
+          setCurrentTime(timeSeconds);
+          setDuration(dur / 1000);
 
           if (isPresenterRef.current) {
             // Presenter tracking logic
@@ -167,19 +174,95 @@ export function SpotifyPlayer({
     return () => unsubscribe();
   }, [isPresenter, presenterId, roomId]);
 
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  const formatTime = (secs: number) => {
+    if (isNaN(secs) || secs < 0) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
-      <iframe
-        ref={iframeRef}
-        src={spotifyUri}
-        width="100%"
-        height="100%"
-        frameBorder="0"
-        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-        loading="lazy"
-        style={{ borderRadius: 'var(--border-radius)', border: 'none', background: '#000' }}
-        title="Spotify Music Player"
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <iframe
+          ref={iframeRef}
+          src={spotifyUri}
+          width="100%"
+          height="100%"
+          frameBorder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"
+          style={{ borderRadius: 'var(--border-radius)', border: 'none', background: '#000' }}
+          title="Spotify Music Player"
+        />
+        {!isPresenter && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 10,
+              background: 'transparent',
+              cursor: 'not-allowed'
+            }}
+          />
+        )}
+      </div>
+
+      {/* Custom Progress Bar / Player Line */}
+      {duration > 0 && (
+        <div style={{
+          padding: '10px 16px',
+          background: '#121212',
+          borderBottomLeftRadius: 'var(--border-radius)',
+          borderBottomRightRadius: 'var(--border-radius)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          color: '#b3b3b3',
+          fontFamily: 'Inter, sans-serif',
+          fontSize: '11px',
+          borderTop: '1px solid #282828'
+        }}>
+          <span>{formatTime(currentTime)}</span>
+          <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
+            {isPresenter ? (
+              <input
+                type="range"
+                min={0}
+                max={duration}
+                value={currentTime}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setCurrentTime(val);
+                  if (controllerRef.current) {
+                    controllerRef.current.seek(Math.floor(val));
+                    updateFirestorePlaybackState(true, val);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  accentColor: '#1db954',
+                  background: '#535353',
+                  height: '4px',
+                  borderRadius: '2px',
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              />
+            ) : (
+              <div style={{ width: '100%', background: '#535353', height: '4px', borderRadius: '2px', position: 'relative' }}>
+                <div style={{ width: `${progressPercent}%`, background: '#1db954', height: '100%', borderRadius: '2px' }} />
+              </div>
+            )}
+          </div>
+          <span>{formatTime(duration)}</span>
+        </div>
+      )}
     </div>
   );
 }
