@@ -29,6 +29,7 @@ import {
   useParticipants
 } from '@livekit/components-react';
 import '@livekit/components-styles';
+import { VideoPresets } from 'livekit-client';
 
 import { parseMediaUrl, isDrmBlockedUrl } from './utils/helpers';
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
@@ -6072,6 +6073,18 @@ function AppContent() {
               serverUrl={stableServerUrl}
               audio={false}
               video={false}
+              options={useMemo(() => ({
+                adaptiveStream: true,
+                dynacast: true,
+                publishDefaults: {
+                  simulcast: true,
+                  videoSimulcastLayers: [
+                    VideoPresets.h180,
+                    VideoPresets.h360,
+                    VideoPresets.h720
+                  ]
+                }
+              }), [])}
               onConnected={() => {
                 setLkConnectStatus('connected');
                 setLkRetryCount(0);
@@ -7952,25 +7965,22 @@ function AppContent() {
             {/* Modal Header */}
             <div className="modal-header">
               <h2 className="modal-title">{modalStep === 'form' ? 'Create room' : 'Success'}</h2>
-              {/* Only show close X on form step */}
-              {modalStep === 'form' && (
-                <button onClick={closeModal} className="modal-close-btn" aria-label="Close modal">
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    strokeWidth="2" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </button>
-              )}
+              <button onClick={closeModal} className="modal-close-btn" aria-label="Close modal">
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="20" 
+                  height="20" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
             </div>
 
             {modalStep === 'form' ? (
@@ -8213,7 +8223,7 @@ function AppContent() {
                   border: '1px solid var(--input-border)', 
                   borderRadius: 'var(--btn-radius)', 
                   padding: '4px',
-                  marginBottom: '32px'
+                  marginBottom: '8px'
                 }}>
                   <a 
                     href={`/room/${generatedRoomLink.split('/').pop()}`}
@@ -8256,15 +8266,6 @@ function AppContent() {
                     {isCopied ? 'Copied!' : 'Copy link'}
                   </button>
                 </div>
-
-                {/* Done close button */}
-                <button 
-                  onClick={closeModal} 
-                  className="btn-create" 
-                  style={{ width: '100%', padding: '12px 16px', fontSize: '15px', justifyContent: 'center' }}
-                >
-                  Done
-                </button>
               </div>
             )}
 
