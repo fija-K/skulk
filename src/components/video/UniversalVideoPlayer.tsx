@@ -21,6 +21,7 @@ export interface AbstractPlayer {
   getPlaylist?(): string[];
   getPlaylistIndex?(): number;
   playVideoAt?(index: number): void;
+  loadVideo?(videoId: string): void;
   destroy(): void;
 }
 
@@ -41,10 +42,12 @@ export function createWrappedPlayer(
       const isPlaylist = videoId && typeof videoId === 'string' ? videoId.startsWith('playlist:') : false;
       let playlistId = '';
       let actualVideoId = videoId || '';
+      let urlIndex = NaN;
       if (isPlaylist && videoId) {
         const parts = videoId.split(':');
         playlistId = parts[1] || '';
         actualVideoId = parts[2] || '';
+        urlIndex = parts[3] ? parseInt(parts[3], 10) : NaN;
       }
 
       return new Promise<AbstractPlayer>((resolve) => {
@@ -59,11 +62,10 @@ export function createWrappedPlayer(
         };
 
         if (isPlaylist) {
-          if (actualVideoId) {
-            playerVars.list = playlistId;
-          } else {
-            playerVars.listType = 'playlist';
-            playerVars.list = playlistId;
+          playerVars.listType = 'playlist';
+          playerVars.list = playlistId;
+          if (!isNaN(urlIndex) && urlIndex > 0) {
+            playerVars.index = urlIndex - 1;
           }
         }
 
@@ -114,6 +116,30 @@ export function createWrappedPlayer(
                     console.warn("playVideoAt failed:", e);
                   }
                 },
+                loadVideo: (vid: string) => {
+                  try {
+                    const isPlay = vid && typeof vid === 'string' ? vid.startsWith('playlist:') : false;
+                    if (isPlay) {
+                      const parts = vid.split(':');
+                      const plistId = parts[1] || '';
+                      const indexVal = parts[3] ? parseInt(parts[3], 10) : NaN;
+                      const startIndex = (!isNaN(indexVal) && indexVal > 0) ? indexVal - 1 : 0;
+                      player.loadPlaylist({
+                        list: plistId,
+                        listType: 'playlist',
+                        index: startIndex,
+                        suggestedQuality: 'default'
+                      });
+                    } else {
+                      player.loadVideoById({
+                        videoId: vid,
+                        suggestedQuality: 'default'
+                      });
+                    }
+                  } catch (e) {
+                    console.warn("loadVideo failed:", e);
+                  }
+                },
                 destroy: () => {
                   try {
                     player.destroy();
@@ -136,7 +162,7 @@ export function createWrappedPlayer(
           }
         };
 
-        if (actualVideoId) {
+        if (!isPlaylist && actualVideoId) {
           playerOptions.videoId = actualVideoId;
         }
 
@@ -635,10 +661,14 @@ export function UniversalVideoPlayer({
     }
   };
 
+  const lastLoadedVideoIdRef = useRef<string>(videoId);
+  const videoIdDependency = platform === 'youtube' ? 'youtube' : videoId;
+
   useEffect(() => {
     let active = true;
     let timer: any = null;
     hasDoneInitialSeekRef.current = false;
+    lastLoadedVideoIdRef.current = videoId;
 
     if (!containerRef.current) return;
     
@@ -692,6 +722,11 @@ export function UniversalVideoPlayer({
           }
           playerRef.current = wrappedPlayer;
 
+          // If videoId changed while the player was initializing, load it now!
+          if (lastLoadedVideoIdRef.current !== videoId && (wrappedPlayer as any).loadVideo) {
+            (wrappedPlayer as any).loadVideo(lastLoadedVideoIdRef.current);
+          }
+
           // Check for playlist videos immediately and with a small interval
           if (wrappedPlayer.getPlaylist) {
             const checkPlaylist = () => {
@@ -727,7 +762,17 @@ export function UniversalVideoPlayer({
         playerRef.current = null;
       }
     };
-  }, [videoId, platform, isPresenter, isLive, presenterId]);
+  }, [videoIdDependency, platform, isPresenter, isLive, presenterId, roomId]);
+
+  // Sync video updates dynamically for reusable players (like YouTube)
+  useEffect(() => {
+    if (videoId === lastLoadedVideoIdRef.current) return;
+    lastLoadedVideoIdRef.current = videoId;
+
+    if (playerRef.current && (playerRef.current as any).loadVideo) {
+      (playerRef.current as any).loadVideo(videoId);
+    }
+  }, [videoId]);
 
   const updateFirestorePlaybackState = async (playing: boolean, time: number, speed?: number) => {
     try {

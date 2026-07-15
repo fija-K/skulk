@@ -19,8 +19,12 @@ export function parseMediaUrl(url: string): ParsedMedia | null {
     const playlistMatch = cleanUrl.match(playlistRegex);
     const playlistId = playlistMatch ? playlistMatch[1] : '';
 
+    const indexRegex = /[?&]index=(\d+)/;
+    const indexMatch = cleanUrl.match(indexRegex);
+    const indexVal = indexMatch ? indexMatch[1] : '';
+
     if (playlistId) {
-      return { platform: 'youtube', videoId: `playlist:${playlistId}${videoId ? ':' + videoId : ''}` };
+      return { platform: 'youtube', videoId: `playlist:${playlistId}:${videoId}:${indexVal}` };
     }
     if (videoId) {
       return { platform: 'youtube', videoId };
