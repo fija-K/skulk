@@ -35,20 +35,36 @@ export function createWrappedPlayer(
       if (!targetElement || !targetElement.parentNode) {
         throw new Error("Element detached before YouTube Player could load");
       }
+      const isPlaylist = videoId.startsWith('playlist:');
+      let playlistId = '';
+      let actualVideoId = videoId;
+      if (isPlaylist) {
+        const parts = videoId.split(':');
+        playlistId = parts[1];
+        actualVideoId = parts[2] || '';
+      }
+
       return new Promise<AbstractPlayer>((resolve) => {
+        const playerVars: any = {
+          autoplay: 1,
+          controls: 1,
+          disablekb: 0,
+          rel: 0,
+          mute: isPresenter ? 0 : 1,
+          origin: window.location.origin,
+          enablejsapi: 1
+        };
+
+        if (isPlaylist) {
+          playerVars.listType = 'playlist';
+          playerVars.list = playlistId;
+        }
+
         const player = new (window as any).YT.Player(targetElement, {
           width: '100%',
           height: '100%',
-          videoId: videoId,
-          playerVars: {
-            autoplay: 1,
-            controls: 1,
-            disablekb: 0,
-            rel: 0,
-            mute: isPresenter ? 0 : 1,
-            origin: window.location.origin,
-            enablejsapi: 1
-          },
+          ...(!isPlaylist || actualVideoId ? { videoId: actualVideoId } : {}),
+          playerVars: playerVars,
           events: {
             onReady: () => {
               if (!isPresenter) {

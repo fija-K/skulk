@@ -8,12 +8,25 @@ export function parseMediaUrl(url: string): ParsedMedia | null {
   const cleanUrl = url.trim();
   if (!cleanUrl) return null;
 
-  // 1. YouTube
-  const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-  const ytMatch = cleanUrl.match(ytRegex);
-  if (ytMatch) {
-    return { platform: 'youtube', videoId: ytMatch[1] };
+  // 1. YouTube (Video and Playlist support)
+  const isYtDomain = cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be');
+  if (isYtDomain) {
+    const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const ytMatch = cleanUrl.match(ytRegex);
+    const videoId = ytMatch ? ytMatch[1] : '';
+
+    const playlistRegex = /[?&]list=([^#\&\?]+)/;
+    const playlistMatch = cleanUrl.match(playlistRegex);
+    const playlistId = playlistMatch ? playlistMatch[1] : '';
+
+    if (playlistId) {
+      return { platform: 'youtube', videoId: `playlist:${playlistId}${videoId ? ':' + videoId : ''}` };
+    }
+    if (videoId) {
+      return { platform: 'youtube', videoId };
+    }
   }
+
   if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) {
     return { platform: 'youtube', videoId: cleanUrl };
   }
