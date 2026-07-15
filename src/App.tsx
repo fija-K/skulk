@@ -1144,7 +1144,11 @@ function AppContent() {
   const [lkConnectStatus, setLkConnectStatus] = useState<'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'>('idle');
   const [lkRetryCount, setLkRetryCount] = useState(0);
   const stableServerUrl = useMemo(() => {
-    const url = (import.meta.env.VITE_LIVEKIT_URL || 'wss://skulk5-a4l548bb.livekit.cloud').trim();
+    let url = (import.meta.env.VITE_LIVEKIT_URL || '').trim();
+    // If empty or invalid domain (no dots, indicating a mistaken API Key or ID value), fallback.
+    if (!url || !url.includes('.')) {
+      url = 'wss://skulk5-a4l548bb.livekit.cloud';
+    }
     if (url && !url.startsWith('ws://') && !url.startsWith('wss://')) {
       return `wss://${url}`;
     }
