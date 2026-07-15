@@ -879,6 +879,16 @@ export function UniversalVideoPlayer({
         console.warn("Failed to read playlist index:", playlistErr);
       }
 
+      console.log("[FIRESTORE-WRITE] updateFirestorePlaybackState", {
+        ytPlaying: playing,
+        ytTime: time,
+        ytSpeed: resolvedSpeed,
+        ytPlaylistIndex: playlistIndex,
+        roomId,
+        myId,
+        stack: new Error().stack
+      });
+
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
         ytPlaying: playing,
         ytTime: time,

@@ -38,6 +38,12 @@ export function usePresence(
     const myId = getMyId();
     if (!myId || !roomId) return;
     try {
+      console.log("[FIRESTORE-WRITE] updateMySharing", {
+        fields,
+        roomId,
+        myId,
+        stack: new Error().stack
+      });
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), fields);
     } catch (e) {
       console.warn('Failed to update sharing state:', e);

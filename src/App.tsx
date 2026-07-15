@@ -1662,6 +1662,8 @@ function AppContent() {
             isRollingOverRef.current = false;
           });
       }
+    }, (error) => {
+      console.warn("Failed to listen to userDocRef:", error);
     });
 
     return () => unsubscribe();
@@ -2861,6 +2863,8 @@ function AppContent() {
         .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
         .filter((req: any) => req.status === 'pending');
       setPendingRequests(reqList);
+    }, (error) => {
+      console.warn("Failed to listen to joinRequests:", error);
     });
     
     return () => unsubscribe();
@@ -2901,6 +2905,8 @@ function AppContent() {
           navigate('/');
         }
       }
+    }, (error) => {
+      console.warn("Failed to listen to local user's own join request:", error);
     });
     
     return () => {
