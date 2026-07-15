@@ -103,84 +103,99 @@ export function SpotifyPlayer({
     }, 250);
   };
 
-  // 1. Initialize Spotify Embed Controller on the existing iframe
+  // 1. Initialize Spotify Embed Controller on the existing iframe (wait for iframe load to prevent CORS binding issues)
   useEffect(() => {
     let active = true;
+    let initialized = false;
     hasDoneInitialSeekRef.current = false;
 
     if (!iframeRef.current) return;
 
-    loadSpotifyApi().then((IFrameAPI) => {
-      if (!active || !iframeRef.current) return;
+    const initController = () => {
+      if (initialized) return;
+      initialized = true;
 
-      const options = {};
+      loadSpotifyApi().then((IFrameAPI) => {
+        if (!active || !iframeRef.current) return;
 
-      IFrameAPI.createController(iframeRef.current, options, (EmbedController: any) => {
-        if (!active) return;
+        const options = {};
 
-        controllerRef.current = EmbedController;
-        console.log("[SPOTIFY-SYNC] Controller successfully bound to existing iframe.");
-
-        // Set default volume level
-        try {
-          EmbedController.setVolume(volume);
-        } catch (e) {}
-
-        // Sync to latest presenter state immediately when controller mounts
-        const presenterData = lastPresenterDataRef.current;
-        if (presenterData && !isPresenterRef.current) {
-          syncToPresenterState(presenterData, EmbedController);
-        } else if (isPresenterRef.current) {
-          updateFirestorePlaybackState(true, 0);
-          hasDoneInitialSeekRef.current = true;
-        }
-
-        let lastStatePaused = true;
-        let lastPositionSeconds = 0;
-        let lastCheckTime = Date.now();
-
-        // Listen to playback state changes on the controller
-        EmbedController.on('playback_update', (e: any) => {
+        IFrameAPI.createController(iframeRef.current, options, (EmbedController: any) => {
           if (!active) return;
-          const { position, duration: dur, isPaused } = e.data;
-          const timeSeconds = position / 1000;
 
-          if (!isPaused) {
-            setHasInteracted(true);
+          controllerRef.current = EmbedController;
+          console.log("[SPOTIFY-SYNC] Controller successfully bound to existing iframe.");
+
+          // Set default volume level
+          try {
+            EmbedController.setVolume(volume);
+          } catch (e) {}
+
+          // Sync to latest presenter state immediately when controller mounts
+          const presenterData = lastPresenterDataRef.current;
+          if (presenterData && !isPresenterRef.current) {
+            syncToPresenterState(presenterData, EmbedController);
+          } else if (isPresenterRef.current) {
+            updateFirestorePlaybackState(true, 0);
+            hasDoneInitialSeekRef.current = true;
           }
 
-          if (!isDraggingRef.current) {
-            setCurrentTime(timeSeconds);
-          }
-          setDuration(dur / 1000);
-          localPausedRef.current = isPaused;
+          let lastStatePaused = true;
+          let lastPositionSeconds = 0;
+          let lastCheckTime = Date.now();
 
-          if (isPresenterRef.current) {
-            // Presenter tracking logic
-            if (!hasDoneInitialSeekRef.current) return;
+          // Listen to playback state changes on the controller
+          EmbedController.on('playback_update', (e: any) => {
+            if (!active) return;
+            const { position, duration: dur, isPaused } = e.data;
+            const timeSeconds = position / 1000;
 
-            const now = Date.now();
-            const stateChanged = isPaused !== lastStatePaused;
-            const expectedTime = lastPositionSeconds + (isPaused ? 0 : (now - lastCheckTime) / 1000);
-            const timeJumped = Math.abs(timeSeconds - expectedTime) > 3.5;
-
-            if (stateChanged || timeJumped) {
-              if (!isLocalChangeRef.current) {
-                updateFirestorePlaybackState(!isPaused, timeSeconds);
-              }
+            if (!isPaused) {
+              setHasInteracted(true);
             }
 
-            lastStatePaused = isPaused;
-            lastPositionSeconds = timeSeconds;
-            lastCheckTime = now;
-          }
+            if (!isDraggingRef.current) {
+              setCurrentTime(timeSeconds);
+            }
+            setDuration(dur / 1000);
+            localPausedRef.current = isPaused;
+
+            if (isPresenterRef.current) {
+              // Presenter tracking logic
+              if (!hasDoneInitialSeekRef.current) return;
+
+              const now = Date.now();
+              const stateChanged = isPaused !== lastStatePaused;
+              const expectedTime = lastPositionSeconds + (isPaused ? 0 : (now - lastCheckTime) / 1000);
+              const timeJumped = Math.abs(timeSeconds - expectedTime) > 3.5;
+
+              if (stateChanged || timeJumped) {
+                if (!isLocalChangeRef.current) {
+                  updateFirestorePlaybackState(!isPaused, timeSeconds);
+                }
+              }
+
+              lastStatePaused = isPaused;
+              lastPositionSeconds = timeSeconds;
+              lastCheckTime = now;
+            }
+          });
         });
       });
-    });
+    };
+
+    const iframe = iframeRef.current;
+    iframe.addEventListener('load', initController);
+
+    // Fallback: If load event already fired or fails to trigger, initialize after 800ms
+    const timer = setTimeout(() => {
+      if (active) initController();
+    }, 800);
 
     return () => {
       active = false;
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      iframe.removeEventListener('load', initController);
+      clearTimeout(timer);
       controllerRef.current = null;
     };
   }, [spotifyUri, roomId]);
@@ -273,12 +288,12 @@ export function SpotifyPlayer({
           title="Spotify Music Player"
         />
 
-        {/* Informational Hint to Start Syncing */}
+        {/* Informational Hint to Start Syncing (Shifted down to top: 55px to avoid Close view overlay) */}
         {!isPresenter && !hasInteracted && (
           <div
             style={{
               position: 'absolute',
-              top: '12px',
+              top: '55px',
               left: '50%',
               transform: 'translateX(-50%)',
               background: '#1db954',
