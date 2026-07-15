@@ -83,8 +83,20 @@ export function createWrappedPlayer(
                 } catch (e) {}
               }
               try {
-                player.playVideo();
-              } catch (e) {}
+                if (isPlaylist) {
+                  const startIndex = (!isNaN(urlIndex) && urlIndex > 0) ? urlIndex - 1 : 0;
+                  player.loadPlaylist({
+                    list: playlistId,
+                    listType: 'playlist',
+                    index: startIndex,
+                    suggestedQuality: 'default'
+                  });
+                } else {
+                  player.playVideo();
+                }
+              } catch (e) {
+                console.warn("YouTube player startup play/load failed:", e);
+              }
                resolve({
                 play: () => player.playVideo(),
                 pause: () => player.pauseVideo(),
