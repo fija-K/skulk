@@ -122,28 +122,27 @@ Tone example:
 
                 if (geminiKey) {
                   const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-                  const contents: any[] = [];
+                  
+                  let promptText = `${prompt}\n\n`;
                   if (chatHistory && Array.isArray(chatHistory)) {
                     const recent = chatHistory.slice(-10);
+                    promptText += "Recent Chat History:\n";
                     for (const msg of recent) {
-                      const role = msg.senderRole === 'bot' ? 'model' : 'user';
-                      contents.push({
-                        role,
-                        parts: [{ text: msg.text }]
-                      });
+                      const sender = msg.senderRole === 'bot' ? botId : msg.sender;
+                      promptText += `${sender}: ${msg.text}\n`;
                     }
+                    promptText += "\n";
                   }
-                  contents.push({
-                    role: 'user',
-                    parts: [{ text: message }]
-                  });
+                  promptText += `New Message from User: ${message}\n`;
+                  promptText += `Response from ${botId}:`;
 
                   const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      contents,
-                      systemInstruction: { parts: [{ text: prompt }] },
+                      contents: [{
+                        parts: [{ text: promptText }]
+                      }],
                       generationConfig: { maxOutputTokens: 100, temperature: 0.7 }
                     })
                   });

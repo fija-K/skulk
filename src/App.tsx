@@ -7695,34 +7695,25 @@ function AppContent() {
                                </div>
                              </div>
 
-                           </div>
-                        </div>
+                             {/* Study Buddies Card */}
+                             <div 
+                               className={`tool-card ${activeToolDetail === 'buddies' ? 'active' : ''}`}
+                               onClick={() => {
+                                 setActiveToolDetail('buddies');
+                                 setActiveGameId(null);
+                               }}
+                               title="Invite virtual study buddies to this room"
+                             >
+                               <div className="tool-card-icon-wrapper" style={{ color: 'var(--primary-color, #f1c40f)' }}>
+                                 🤖
+                               </div>
+                               <div className="tool-card-info">
+                                 <span className="tool-card-title">Study Buddies</span>
+                                 <span className="tool-card-desc">Add virtual study companions to chat.</span>
+                               </div>
+                             </div>
 
-                        {/* Section 1.5: Group Buddies */}
-                        <div>
-                          <h4 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            Group Buddies
-                          </h4>
-                          
-                          <div className="tools-cards-grid">
-                            {/* Study Buddies Card */}
-                            <div 
-                              className={`tool-card ${activeToolDetail === 'buddies' ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveToolDetail('buddies');
-                                setActiveGameId(null);
-                              }}
-                              title="Invite virtual study buddies to this room"
-                            >
-                              <div className="tool-card-icon-wrapper" style={{ color: 'var(--primary-color, #f1c40f)' }}>
-                                🤖
-                              </div>
-                              <div className="tool-card-info">
-                                <span className="tool-card-title">Study Buddies</span>
-                                <span className="tool-card-desc">Add virtual study companions to chat.</span>
-                              </div>
-                            </div>
-                          </div>
+                           </div>
                         </div>
 
                         {/* Section 2: Fun Section (Disabled for everyone if toggle is OFF) */}
