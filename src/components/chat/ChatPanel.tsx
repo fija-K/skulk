@@ -15,15 +15,15 @@ const POPULAR_EMOJIS = [
 ];
 
 const DEFAULT_GIFS = [
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3h2Z2VlNDh0dW15cHlta3pxZHp5MGQyMWh5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3NtY188QaxDdC/giphy.gif', // cat typing
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmNxMDZ3NnM1cW15ejR4YzN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/t3s3EZmJr7vwY/giphy.gif', // coding dog
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26uf3jBf9yBM1ZsFO/giphy.gif', // thumbs up
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l3q2Z6G1OE6mK0IOk/giphy.gif', // clapping
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9s73S0Jz2Z1lK/giphy.gif', // minion celebrate
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/b09xElu8umMm4/giphy.gif', // dance cat
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/13HgwGsXF0G6wU/giphy.gif', // yes nod
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/d1E1msP6kmXCza6I/giphy.gif', // mind blown
-  'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZleHprMG40dDN1aGpxZ2h5MTRoY3p1YW0zN2k3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xT0xeJpD8e4DYnMGsw/giphy.gif' // facepalm
+  'https://media.giphy.com/media/3NtY188QaxDdC/giphy.gif', // cat typing
+  'https://media.giphy.com/media/t3s3EZmJr7vwY/giphy.gif', // coding dog
+  'https://media.giphy.com/media/26uf3jBf9yBM1ZsFO/giphy.gif', // thumbs up
+  'https://media.giphy.com/media/l3q2Z6G1OE6mK0IOk/giphy.gif', // clapping
+  'https://media.giphy.com/media/9s73S0Jz2Z1lK/giphy.gif', // minion celebrate
+  'https://media.giphy.com/media/b09xElu8umMm4/giphy.gif', // dance cat
+  'https://media.giphy.com/media/13HgwGsXF0G6wU/giphy.gif', // yes nod
+  'https://media.giphy.com/media/d1E1msP6kmXCza6I/giphy.gif', // mind blown
+  'https://media.giphy.com/media/xT0xeJpD8e4DYnMGsw/giphy.gif' // facepalm
 ];
 
 export function ChatPanel({
@@ -155,9 +155,10 @@ export function ChatPanel({
       try {
         const query = gifQuery.trim() || 'trending';
         const type = gifTab === 'gifs' ? 'gifs' : 'stickers';
+        const apiKey = import.meta.env.VITE_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
         const url = query === 'trending'
-          ? `https://api.giphy.com/v1/${type}/trending?api_key=dc6zaTOxFJmzC&limit=12`
-          : `https://api.giphy.com/v1/${type}/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(query)}&limit=12`;
+          ? `https://api.giphy.com/v1/${type}/trending?api_key=${apiKey}&limit=12`
+          : `https://api.giphy.com/v1/${type}/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=12`;
         const res = await fetch(url);
         if (res.ok) {
           const json = await res.json();

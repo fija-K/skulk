@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useLocalParticipant } from '@livekit/components-react';
+import { useLocalParticipant, useConnectionState } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
 export function DeviceRecoveryManager({ 
@@ -12,9 +12,10 @@ export function DeviceRecoveryManager({
   onErrorChange: (camErr: boolean, micErr: boolean) => void;
 }) {
   const { localParticipant } = useLocalParticipant();
+  const connectionState = useConnectionState();
 
   useEffect(() => {
-    if (!localParticipant) return;
+    if (!localParticipant || connectionState !== 'connected') return;
 
     let currentCamErr = false;
     let currentMicErr = false;
@@ -196,7 +197,7 @@ export function DeviceRecoveryManager({
       window.removeEventListener('media-devices-error', onMediaError as any);
       window.removeEventListener('retry-device', onRetryDevice);
     };
-  }, [localParticipant, isCamOff, isMicMuted, onErrorChange]);
+  }, [localParticipant, isCamOff, isMicMuted, onErrorChange, connectionState]);
 
   return null;
 }
