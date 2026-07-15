@@ -541,7 +541,7 @@ export function ParticipantTile({
                   onClick={() => handleParticipantCameraToggle(p.id, p.name)} 
                   className="tile-menu-item"
                 >
-                  {p.isCamOff ? 'Turn camera on' : 'Turn camera off'}
+                  {p.camRestricted ? 'Unrestrict camera' : 'Restrict camera'}
                 </button>
               )}
               

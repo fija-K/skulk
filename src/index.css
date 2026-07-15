@@ -1091,7 +1091,7 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   align-items: center;
   justify-content: center;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   transition: all var(--transition-speed) ease;
 }
 

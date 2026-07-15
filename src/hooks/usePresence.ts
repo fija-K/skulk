@@ -183,7 +183,12 @@ export function usePresence(
           sessionId: data.sessionId || null,
           micRestricted: data.micRestricted ?? false,
           camRestricted: data.camRestricted ?? false,
-          isPinned: data.isPinned ?? false
+          isPinned: data.isPinned ?? false,
+          todJoined: data.todJoined ?? false,
+          todPending: data.todPending ?? false,
+          todRequestedSpin: data.todRequestedSpin || null,
+          todRequestedChoice: data.todRequestedChoice || null,
+          todRequestedReset: data.todRequestedReset ?? false
         });
       });
 
@@ -223,7 +228,12 @@ export function usePresence(
           sessionId: currentSessionIdRef.current,
           micRestricted: false,
           camRestricted: false,
-          isPinned: false
+          isPinned: false,
+          todJoined: false,
+          todPending: false,
+          todRequestedSpin: null,
+          todRequestedChoice: null,
+          todRequestedReset: false
         }
       ]);
     });

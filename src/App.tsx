@@ -6246,7 +6246,7 @@ function AppContent() {
               {/* Call Header */}
               <div className="call-top-bar">
             <div className="call-room-info">
-              <a href="/" onClick={(e) => { e.preventDefault(); handleLeaveCall(); }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
+              <a href="/" onClick={(e) => { e.preventDefault(); if (window.confirm("Do you want to return to the homepage? You will leave the current room.")) { handleLeaveCall(); } }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
               <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
               {currentRoom.creatorName && (() => {
                 const isAdminCreator = (currentRoom.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') ||
@@ -6263,23 +6263,7 @@ function AppContent() {
                 <div className="recording-dot"></div>
                 <span>LIVE</span>
               </div>
-
-              {/* Shared Pomodoro Status Badge */}
-              <div 
-                onClick={() => setCallTab('tools')}
-                className={`topbar-pomodoro-badge ${pomodoroPhase === 'focus' ? 'focus-phase' : 'break-phase'}`}
-                title="View Pomodoro Timer details"
-              >
-                <span>⏱️</span>
-                <span>
-                  {pomodoroMinutes.toString().padStart(2, '0')}:
-                  {pomodoroSeconds.toString().padStart(2, '0')}
-                </span>
-                <span style={{ fontSize: '9px', opacity: 0.8, textTransform: 'uppercase', marginLeft: '4px' }}>
-                  ({pomodoroPhase})
-                </span>
               </div>
-            </div>
             
             <div className="nav-container" style={{ gap: '16px' }}>
               {/* Theme Selector inside Call */}
@@ -6425,48 +6409,54 @@ function AppContent() {
             
             {/* Call Main Stage (Left) */}
             <div className="call-stage" style={expandedTool !== 'none' || viewingShare ? { padding: 0, alignItems: 'stretch', justifyContent: 'stretch' } : undefined}>
-              {activePresenter && (!viewingShare || viewingShare.participantId !== activePresenter.id) && (
+              {pendingRequests.length > 0 && (
                 <div 
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 16px',
-                    background: 'rgba(241, 196, 15, 0.1)',
-                    border: '1px solid rgba(241, 196, 15, 0.3)',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
                     borderRadius: '8px',
                     width: 'calc(100% - 32px)',
                     margin: '16px auto 0 auto',
-                    gap: '12px',
-                    zIndex: 50,
+                    padding: '12px 16px',
+                    zIndex: 60,
                     boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                     flexShrink: 0,
                     boxSizing: 'border-box'
                   }}
                   className="animate-fade-in"
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)' }}>
-                    <span style={{ fontSize: '16px' }}>
-                      {activePresenter.sharing === 'youtube' ? '🎥' : activePresenter.sharing === 'whiteboard' ? '✎' : '🖥️'}
-                    </span>
-                    <span>
-                      <strong>{activePresenter.name}</strong> is hosting a <strong>{activePresenter.sharing === 'youtube' ? 'Watch Together' : activePresenter.sharing === 'whiteboard' ? 'Whiteboard' : 'Screen Share'}</strong> session.
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>🔔</span>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      Pending Join Requests ({pendingRequests.length})
                     </span>
                   </div>
-                  <button
-                    onClick={() => handleViewParticipantShare(activePresenter)}
-                    className="btn-signin"
-                    style={{
-                      padding: '6px 14px',
-                      fontSize: '12px',
-                      borderRadius: '6px',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    Join Session
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {pendingRequests.map((req) => (
+                      <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--card-bg, #1a1c23)', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ backgroundColor: req.color || '#3b82f6', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold', color: '#fff' }}>
+                            {req.initials || 'P'}
+                          </div>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{req.name}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button onClick={() => handleApproveRequest(req)} className="btn-create" style={{ padding: '3px 8px', fontSize: '11px', borderRadius: '4px' }}>
+                            Accept
+                          </button>
+                          <button onClick={() => handleDenyRequest(req)} className="btn-signin" style={{ padding: '3px 8px', fontSize: '11px', borderRadius: '4px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
+                            Deny
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
               {expandedTool !== 'none' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', flex: 1 }}>
                   <div className="expanded-tool-stage-wrapper animate-fade-in" style={{
@@ -6714,45 +6704,7 @@ function AppContent() {
               ) : (
                 /* Standard conference participants grid layout display */
                 <>
-                  {pendingRequests.length > 0 && (
-                    <div className="animate-fade-in" style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px',
-                      backgroundColor: 'rgba(59, 130, 246, 0.08)',
-                      border: '1px solid rgba(59, 130, 246, 0.15)',
-                      borderRadius: 'var(--border-radius)',
-                      padding: '16px',
-                      marginBottom: '24px',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '18px' }}>🔔</span>
-                        <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                          Pending Join Requests ({pendingRequests.length})
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                        {pendingRequests.map((req) => (
-                          <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--card-bg, #1a1c23)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <div style={{ backgroundColor: req.color || '#3b82f6', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: '#fff' }}>
-                                {req.initials || 'P'}
-                              </div>
-                              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{req.name}</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button onClick={() => handleApproveRequest(req)} className="btn-create" style={{ padding: '4px 10px', fontSize: '12px' }}>
-                                Accept
-                              </button>
-                              <button onClick={() => handleDenyRequest(req)} className="btn-signin" style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
-                                Deny
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
                   {spotlightParticipantId ? (
                     <div className="spotlight-stage-layout animate-fade-in">
                       <div className="spotlight-strip">
@@ -8260,12 +8212,11 @@ function AppContent() {
                   {startOption === 'later' ? 'Room scheduled!' : 'Room created!'}
                 </h3>
 
-                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px', maxWidth: '320px', lineHeight: 1.5 }}>
-                  {startOption === 'later' 
-                    ? `Room scheduled for ${formatFriendlyDate(scheduleDate)} at ${scheduleTime}. Copy the link to invite participants in advance.`
-                    : 'Your study room is active. Share the link below to invite participants.'
-                  }
-                </p>
+                {startOption === 'later' && (
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px', maxWidth: '320px', lineHeight: 1.5 }}>
+                    Room scheduled for {formatFriendlyDate(scheduleDate)} at {scheduleTime}. Copy the link to invite participants in advance.
+                  </p>
+                )}
 
                 {startOption !== 'later' && (
                   <button 
