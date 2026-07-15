@@ -24,6 +24,7 @@ export interface AbstractPlayer {
   loadVideo?(videoId: string): void;
   mute?(): void;
   unMute?(): void;
+  getVideoId?(): Promise<string> | string;
   destroy(): void;
 }
 
@@ -163,6 +164,25 @@ export function createWrappedPlayer(
                   try {
                     player.unMute();
                   } catch (e) {}
+                },
+                getVideoId: () => {
+                  try {
+                    if (player.getVideoData) {
+                      const data = player.getVideoData();
+                      if (data && data.video_id) {
+                        return data.video_id;
+                      }
+                    }
+                    if (player.getVideoUrl) {
+                      const url = player.getVideoUrl();
+                      const ytRegex = /[?&]v=([^#\&\?]+)/;
+                      const match = url.match(ytRegex);
+                      if (match) return match[1];
+                    }
+                    return '';
+                  } catch (e) {
+                    return '';
+                  }
                 },
                 destroy: () => {
                   try {
@@ -588,14 +608,22 @@ export function UniversalVideoPlayer({
     let playlistLoaded = true;
     try {
       const targetPlaylistIndex = data.ytPlaylistIndex ?? 0;
+      const targetVideoId = data.ytVideoId ?? '';
       if (player.getPlaylistIndex && player.playVideoAt) {
         const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
         if (isPlaylist && (!playlist || playlist.length === 0)) {
           playlistLoaded = false;
         } else if (!playlist || playlist.length > 0) {
+          let resolvedIndex = targetPlaylistIndex;
+          if (targetVideoId && playlist.length > 0) {
+            const indexByVid = playlist.indexOf(targetVideoId);
+            if (indexByVid !== -1) {
+              resolvedIndex = indexByVid;
+            }
+          }
           const currentIndex = player.getPlaylistIndex();
-          if (currentIndex !== targetPlaylistIndex) {
-            player.playVideoAt(targetPlaylistIndex);
+          if (currentIndex !== resolvedIndex) {
+            player.playVideoAt(resolvedIndex);
           }
         }
       }
@@ -700,14 +728,22 @@ export function UniversalVideoPlayer({
       let playlistLoaded = true;
       try {
         const targetPlaylistIndex = presenterData.ytPlaylistIndex ?? 0;
+        const targetVideoId = presenterData.ytVideoId ?? '';
         if (player.getPlaylistIndex && player.playVideoAt) {
           const playlist = (player as any).getPlaylist ? (player as any).getPlaylist() : [];
           if (isPlaylist && (!playlist || playlist.length === 0)) {
             playlistLoaded = false;
           } else if (!playlist || playlist.length > 0) {
+            let resolvedIndex = targetPlaylistIndex;
+            if (targetVideoId && playlist.length > 0) {
+              const indexByVid = playlist.indexOf(targetVideoId);
+              if (indexByVid !== -1) {
+                resolvedIndex = indexByVid;
+              }
+            }
             const currentIndex = player.getPlaylistIndex();
-            if (currentIndex !== targetPlaylistIndex) {
-              player.playVideoAt(targetPlaylistIndex);
+            if (currentIndex !== resolvedIndex) {
+              player.playVideoAt(resolvedIndex);
             }
           }
         }
@@ -905,11 +941,21 @@ export function UniversalVideoPlayer({
         console.warn("Failed to read playlist index:", playlistErr);
       }
 
+      let activeVideoId = '';
+      try {
+        if (playerRef.current && playerRef.current.getVideoId) {
+          activeVideoId = await playerRef.current.getVideoId();
+        }
+      } catch (err) {
+        console.warn("Failed to read active video ID:", err);
+      }
+
       console.log("[FIRESTORE-WRITE] updateFirestorePlaybackState", {
         ytPlaying: playing,
         ytTime: time,
         ytSpeed: resolvedSpeed,
         ytPlaylistIndex: playlistIndex,
+        ytVideoId: activeVideoId,
         roomId,
         myId,
         stack: new Error().stack
@@ -920,7 +966,8 @@ export function UniversalVideoPlayer({
         ytTime: time,
         ytUpdateTimestamp: Date.now(),
         ytSpeed: resolvedSpeed,
-        ytPlaylistIndex: playlistIndex
+        ytPlaylistIndex: playlistIndex,
+        ytVideoId: activeVideoId
       });
     } catch (e) {
       console.warn("Failed to update media playback in Firestore:", e);
@@ -935,6 +982,7 @@ export function UniversalVideoPlayer({
     let lastTime = 0;
     let lastSpeed: number | null = null;
     let lastPlaylistIndex: number | null = null;
+    let lastVideoId = '';
     let lastCheck = Date.now();
     let active = true;
 
@@ -975,23 +1023,34 @@ export function UniversalVideoPlayer({
             console.warn("Tracking loop failed to get playlist index:", err);
           }
 
+          let activeVid = '';
+          try {
+            if (playerRef.current.getVideoId) {
+              activeVid = await playerRef.current.getVideoId();
+            }
+          } catch (err) {
+            console.warn("Tracking loop failed to get video ID:", err);
+          }
+
           const now = Date.now();
           const playing = state === 1;
           const stateChanged = state !== lastState;
           const speedChanged = lastSpeed !== null && Math.abs(speed - lastSpeed) > 0.05;
           const playlistIndexChanged = lastPlaylistIndex !== null && playlistIndex !== lastPlaylistIndex;
+          const videoIdChanged = lastVideoId !== '' && activeVid !== lastVideoId;
 
           // Detect seek: time jumped by more than 2 seconds from expected elapsed time (scaled by speed)
           const expectedTime = lastTime + (playing ? ((now - lastCheck) / 1000) * speed : 0);
           const timeJumped = Math.abs(time - expectedTime) > 2.0;
 
-          if (stateChanged || timeJumped || speedChanged || playlistIndexChanged) {
+          if (stateChanged || timeJumped || speedChanged || playlistIndexChanged || videoIdChanged) {
             if (!active) return;
             updateFirestorePlaybackState(playing, time, speed);
             lastState = state;
             lastTime = time;
             lastSpeed = speed;
             lastPlaylistIndex = playlistIndex;
+            lastVideoId = activeVid;
             lastCheck = now;
           } else {
             lastTime = time;
