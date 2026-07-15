@@ -31,7 +31,7 @@ import {
 import '@livekit/components-styles';
 import { VideoPresets } from 'livekit-client';
 
-import { parseMediaUrl, isDrmBlockedUrl } from './utils/helpers';
+import { parseMediaUrl, isDrmBlockedUrl, loadYoutubeApi, loadVimeoApi, loadTwitchApi } from './utils/helpers';
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { WhiteboardView } from './components/whiteboard/WhiteboardView';
@@ -1333,6 +1333,8 @@ function AppContent() {
   // const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
   
+  const activePresenter = callParticipants.find(p => p.id !== getMyId() && p.sharing);
+  
 
   // Tools sub-panel toggle
   const [activeToolDetail, setActiveToolDetail] = useState<'none' | 'youtube' | 'games' | 'pomodoro' | 'targets' | 'deadline' | 'loose' | 'truthordare' | 'spin'>('none');
@@ -1895,6 +1897,13 @@ function AppContent() {
     classesToRemove.forEach(c => root.classList.remove(c));
     root.classList.add(`theme-${theme}`);
   }, [theme]);
+
+  // Pre-load media sharing APIs in the background for instant Watch Together loading
+  useEffect(() => {
+    loadYoutubeApi().catch(() => {});
+    loadVimeoApi().catch(() => {});
+    loadTwitchApi().catch(() => {});
+  }, []);
 
   // Load or auto-generate Guest Identity
   useEffect(() => {
@@ -6416,6 +6425,48 @@ function AppContent() {
             
             {/* Call Main Stage (Left) */}
             <div className="call-stage" style={expandedTool !== 'none' || viewingShare ? { padding: 0, alignItems: 'stretch', justifyContent: 'stretch' } : undefined}>
+              {activePresenter && (!viewingShare || viewingShare.participantId !== activePresenter.id) && (
+                <div 
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 16px',
+                    background: 'rgba(241, 196, 15, 0.1)',
+                    border: '1px solid rgba(241, 196, 15, 0.3)',
+                    borderRadius: '8px',
+                    width: 'calc(100% - 32px)',
+                    margin: '16px auto 0 auto',
+                    gap: '12px',
+                    zIndex: 50,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    flexShrink: 0,
+                    boxSizing: 'border-box'
+                  }}
+                  className="animate-fade-in"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)' }}>
+                    <span style={{ fontSize: '16px' }}>
+                      {activePresenter.sharing === 'youtube' ? '🎥' : activePresenter.sharing === 'whiteboard' ? '✎' : '🖥️'}
+                    </span>
+                    <span>
+                      <strong>{activePresenter.name}</strong> is hosting a <strong>{activePresenter.sharing === 'youtube' ? 'Watch Together' : activePresenter.sharing === 'whiteboard' ? 'Whiteboard' : 'Screen Share'}</strong> session.
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleViewParticipantShare(activePresenter)}
+                    className="btn-signin"
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '12px',
+                      borderRadius: '6px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Join Session
+                  </button>
+                </div>
+              )}
               {expandedTool !== 'none' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', flex: 1 }}>
                   <div className="expanded-tool-stage-wrapper animate-fade-in" style={{

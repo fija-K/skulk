@@ -71,7 +71,7 @@ export function ParticipantTile({
           flexShrink: 0
         }}
       >
-        {p.sharing === 'youtube' ? (
+        {p.sharing ? (
           <div style={{
             position: 'absolute',
             top: 0,
@@ -79,13 +79,31 @@ export function ParticipantTile({
             width: '100%',
             height: '100%',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
-            animation: 'pulse 2s infinite',
+            background: p.sharing === 'youtube' 
+              ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : p.sharing === 'whiteboard'
+              ? 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+              : 'radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
             zIndex: 2
           }}>
-            <span style={{ fontSize: '16px', color: 'var(--primary-color)' }}>▶</span>
+            <span style={{ 
+              fontSize: '14px', 
+              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : '#3b82f6',
+              animation: 'pulse 2s infinite'
+            }}>
+              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : '⛶'}
+            </span>
+            <span style={{ 
+              fontSize: '8px', 
+              color: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : '#3b82f6',
+              fontWeight: 'bold',
+              marginTop: '4px'
+            }}>
+              {p.sharing === 'youtube' ? 'Watch' : p.sharing === 'whiteboard' ? 'Draw' : 'Screen'}
+            </span>
           </div>
         ) : (
           <>
