@@ -61,7 +61,7 @@ export function SpotifyPlayer({
 
     try {
       if (targetPlaying) {
-        controller.resume(); // Spotify controller uses resume()
+        controller.play();
       } else {
         controller.pause();
       }
