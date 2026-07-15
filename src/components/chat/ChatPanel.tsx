@@ -8,6 +8,7 @@ interface ChatPanelProps {
   callParticipants: Participant[];
   sendChatMessage: (text: string) => Promise<void>;
   callTab: string;
+  handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
 }
 
 const POPULAR_EMOJIS = [
@@ -31,7 +32,8 @@ export function ChatPanel({
   systemMessages,
   callParticipants,
   sendChatMessage,
-  callTab
+  callTab,
+  handleOpenProfile
 }: ChatPanelProps) {
   const [chatMessageText, setChatMessageText] = useState('');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -353,7 +355,24 @@ export function ChatPanel({
             return (
               <div key={msg.id} className="chat-message-item animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span className="chat-sender" style={{ fontWeight: 700, fontSize: '13px' }}>{msg.sender}</span>
+                  <span 
+                    className="chat-sender" 
+                    style={{ fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                    onClick={() => {
+                      if (handleOpenProfile) {
+                        const participant = callParticipants.find(p => p.id === msg.senderId || p.name === msg.sender);
+                        handleOpenProfile({
+                          id: msg.senderId || (participant ? participant.id : ""),
+                          name: msg.sender.replace(' (You)', ''),
+                          initials: participant ? participant.initials : msg.sender.substring(0, 2).toUpperCase(),
+                          color: participant ? participant.color : '#3b82f6',
+                          photoURL: participant ? participant.photoURL : null
+                        }, 'card');
+                      }
+                    }}
+                  >
+                    {msg.sender}
+                  </span>
                   {role && role !== 'member' && (
                     <span className={`role-badge-${role}`} style={{
                       fontSize: '8px',

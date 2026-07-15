@@ -6886,6 +6886,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        handleOpenProfile={handleOpenProfile}
                       />
                     ))}
                   </div>
@@ -7014,6 +7015,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        handleOpenProfile={handleOpenProfile}
                       />
                     ))}
                   </div>
@@ -7047,6 +7049,7 @@ function AppContent() {
                         handleParticipantRoleChange={handleParticipantRoleChange}
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
+                        handleOpenProfile={handleOpenProfile}
                       />
                     ))}
                       </div>
@@ -7076,6 +7079,7 @@ function AppContent() {
                                   handleParticipantRoleChange={handleParticipantRoleChange}
                                   checkCanKick={checkCanKick}
                                   handleParticipantRemove={handleParticipantRemove}
+                                  handleOpenProfile={handleOpenProfile}
                                 />
                               )}
                               <button 
@@ -7156,6 +7160,7 @@ function AppContent() {
                             handleParticipantRoleChange={handleParticipantRoleChange}
                             checkCanKick={checkCanKick}
                             handleParticipantRemove={handleParticipantRemove}
+                            handleOpenProfile={handleOpenProfile}
                       />
                     ))}
                       </div>
@@ -7213,6 +7218,7 @@ function AppContent() {
                     callParticipants={callParticipants}
                     sendChatMessage={sendChatMessage}
                     callTab={callTab}
+                    handleOpenProfile={handleOpenProfile}
                   />
                 )}
 
@@ -7231,12 +7237,20 @@ function AppContent() {
                               style={{ 
                                 backgroundColor: p.color, 
                                 position: 'relative',
-                                cursor: p.sharing ? 'pointer' : 'default',
+                                cursor: 'pointer',
                                 border: p.sharing ? '1px solid var(--primary-color)' : 'none'
                               }}
                               onClick={() => {
                                 if (p.sharing) {
                                   handleViewParticipantShare(p);
+                                } else {
+                                  handleOpenProfile({
+                                    id: p.uid || p.id,
+                                    name: p.name.replace(' (You)', ''),
+                                    initials: p.initials,
+                                    color: p.color || '#3b82f6',
+                                    photoURL: p.photoURL
+                                  }, 'card');
                                 }
                               }}
                             >
@@ -7262,7 +7276,19 @@ function AppContent() {
                                 </span>
                               )}
                             </div>
-                            <div className="person-name-wrapper" style={{ display: 'flex', alignItems: 'center' }}>
+                            <div 
+                              className="person-name-wrapper" 
+                              style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+                              onClick={() => {
+                                handleOpenProfile({
+                                  id: p.uid || p.id,
+                                  name: p.name.replace(' (You)', ''),
+                                  initials: p.initials,
+                                  color: p.color || '#3b82f6',
+                                  photoURL: p.photoURL
+                                }, 'card');
+                              }}
+                            >
                               <span className="person-name">
                                 {p.name}
                               </span>

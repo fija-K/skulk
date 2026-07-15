@@ -21,6 +21,7 @@ interface ParticipantTileProps {
   handleParticipantRoleChange: (id: string, role: 'host' | 'cohost' | 'member') => void | Promise<void>;
   checkCanKick: (myRole: string, targetRole: string) => boolean;
   handleParticipantRemove: (id: string, name: string) => void;
+  handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
 }
 
 export function ParticipantTile({
@@ -42,7 +43,8 @@ export function ParticipantTile({
   handleParticipantCameraToggle,
   handleParticipantRoleChange,
   checkCanKick,
-  handleParticipantRemove
+  handleParticipantRemove,
+  handleOpenProfile
 }: ParticipantTileProps) {
   const isUser = p.id === myId;
   const showMuted = isUser ? isMicMuted : p.isMuted;
@@ -321,6 +323,14 @@ export function ParticipantTile({
               onClick={() => {
                 if (p.sharing) {
                   handleViewParticipantShare(p);
+                } else if (handleOpenProfile) {
+                  handleOpenProfile({
+                    id: p.uid || p.id,
+                    name: p.name.replace(' (You)', ''),
+                    initials: p.initials,
+                    color: p.color || '#3b82f6',
+                    photoURL: p.photoURL
+                  }, 'card');
                 }
               }}
             >
@@ -442,18 +452,33 @@ export function ParticipantTile({
                   <ParticipantVideo participantId={p.id} />
                 )}
               </div>
-              <div className="tile-avatar-wrapper">
-                {p.photoURL ? (
-                  <img 
-                    src={p.photoURL} 
-                    alt={p.name} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span className="tile-avatar-initials">{p.initials}</span>
-                )}
-              </div>
+              <div 
+                className="tile-avatar-wrapper"
+                style={{ cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (handleOpenProfile) {
+                    handleOpenProfile({
+                      id: p.uid || p.id,
+                      name: p.name.replace(' (You)', ''),
+                      initials: p.initials,
+                      color: p.color || '#3b82f6',
+                      photoURL: p.photoURL
+                    }, 'card');
+                  }
+                }}
+               >
+                 {p.photoURL ? (
+                   <img 
+                     src={p.photoURL} 
+                     alt={p.name} 
+                     style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                     referrerPolicy="no-referrer"
+                   />
+                 ) : (
+                   <span className="tile-avatar-initials">{p.initials}</span>
+                 )}
+               </div>
             </>
           )}
           
@@ -510,7 +535,22 @@ export function ParticipantTile({
       {/* Name Tag + Muted Status Overlay */}
       {!isThumbnail && (
         <div className="participant-info-overlay">
-          <div className="participant-name-tag" style={{ gap: '6px' }}>
+          <div 
+            className="participant-name-tag" 
+            style={{ gap: '6px', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (handleOpenProfile) {
+                handleOpenProfile({
+                  id: p.uid || p.id,
+                  name: p.name.replace(' (You)', ''),
+                  initials: p.initials,
+                  color: p.color || '#3b82f6',
+                  photoURL: p.photoURL
+                }, 'card');
+              }
+            }}
+          >
             <span>{p.name}</span>
             {p.role && p.role !== 'member' && (
               <span className={`role-tag-${p.role}`} style={{
