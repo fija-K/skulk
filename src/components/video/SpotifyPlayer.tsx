@@ -3,6 +3,33 @@ import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { loadSpotifyApi } from '../../utils/helpers';
 
+export function parseSpotifyUri(url: string): string {
+  const clean = url.trim();
+  if (clean.includes('spotify.com')) {
+    try {
+      const urlObj = new URL(clean.startsWith('http') ? clean : `https://${clean}`);
+      let path = urlObj.pathname;
+      if (path.startsWith('/')) path = path.substring(1);
+      const parts = path.split('/');
+      let typeIndex = 0;
+      if (parts[0] === 'embed') {
+        typeIndex = 1;
+      }
+      const type = parts[typeIndex] || '';
+      const id = parts[typeIndex + 1] || '';
+      if (type && id) {
+        return `spotify:${type}:${id}`;
+      }
+    } catch (e) {
+      console.warn("Failed to parse Spotify web URL:", e);
+    }
+  }
+  if (clean.startsWith('spotify:')) {
+    return clean;
+  }
+  return clean;
+}
+
 export function SpotifyPlayer({
   spotifyUri,
   isPresenter,
@@ -101,7 +128,7 @@ export function SpotifyPlayer({
       if (!active) return;
 
       const options = {
-        uri: spotifyUri,
+        uri: parseSpotifyUri(spotifyUri),
         width: '100%',
         height: '100%'
       };
