@@ -146,7 +146,7 @@ Tone example:
 
                   for (const model of models) {
                     try {
-                      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiKey}`;
+                      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
                       response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
