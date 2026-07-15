@@ -624,6 +624,7 @@ export function UniversalVideoPlayer({
 
   useEffect(() => {
     let active = true;
+    let timer: any = null;
     hasDoneInitialSeekRef.current = false;
 
     if (!containerRef.current) return;
@@ -640,75 +641,80 @@ export function UniversalVideoPlayer({
     apiLoadPromise.then(() => {
       if (!active) return;
 
-      createWrappedPlayer(
-        platform,
-        targetDiv,
-        videoId,
-        isPresenter,
-        isLive,
-        (playing, time) => {
-          if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
-          if (!isLocalChangeRef.current) {
-            updateFirestorePlaybackState(playing, time);
-          }
-        },
-        (state) => {
-          // State 1 is PLAYING, State 3 is BUFFERING.
-          // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
-          if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
-            hasDoneInitialSeekRef.current = true;
-            const presenterData = lastPresenterDataRef.current || getPresenterState();
-            if (playerRef.current) {
-              console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
-              if (isPresenter) {
-                syncPresenterToOwnState(playerRef.current);
-              } else if (presenterData) {
-                syncToPresenterState(presenterData, playerRef.current);
+      // Add a tiny 50ms delay to allow DOM/previous player cleanup to settle completely
+      timer = setTimeout(() => {
+        if (!active) return;
+        createWrappedPlayer(
+          platform,
+          targetDiv,
+          videoId,
+          isPresenter,
+          isLive,
+          (playing, time) => {
+            if (!isPresenter || isLive) return; // ONLY presenter writes playback updates to Firestore!
+            if (!isLocalChangeRef.current) {
+              updateFirestorePlaybackState(playing, time);
+            }
+          },
+          (state) => {
+            // State 1 is PLAYING, State 3 is BUFFERING.
+            // Once the player is buffering or playing, metadata is loaded and seekTo is safe to call!
+            if ((state === 1 || state === 3) && !hasDoneInitialSeekRef.current) {
+              hasDoneInitialSeekRef.current = true;
+              const presenterData = lastPresenterDataRef.current || getPresenterState();
+              if (playerRef.current) {
+                console.log("[YT-SYNC] Player buffering or playing, performing initial sync seek:", presenterData);
+                if (isPresenter) {
+                  syncPresenterToOwnState(playerRef.current);
+                } else if (presenterData) {
+                  syncToPresenterState(presenterData, playerRef.current);
+                }
               }
             }
           }
-        }
-      ).then((wrappedPlayer) => {
-        if (!active) {
-          wrappedPlayer.destroy();
-          return;
-        }
-        playerRef.current = wrappedPlayer;
+        ).then((wrappedPlayer) => {
+          if (!active) {
+            wrappedPlayer.destroy();
+            return;
+          }
+          playerRef.current = wrappedPlayer;
 
-        // Check for playlist videos immediately and with a small interval
-        if (wrappedPlayer.getPlaylist) {
-          const checkPlaylist = () => {
-            if (!active) return;
-            const list = wrappedPlayer.getPlaylist?.();
-            if (list && list.length > 0) {
-              setPlaylistVideos(list);
-            } else {
-              setTimeout(checkPlaylist, 500);
-            }
-          };
-          checkPlaylist();
-        }
+          // Check for playlist videos immediately and with a small interval
+          if (wrappedPlayer.getPlaylist) {
+            const checkPlaylist = () => {
+              if (!active) return;
+              const list = wrappedPlayer.getPlaylist?.();
+              if (list && list.length > 0) {
+                setPlaylistVideos(list);
+              } else {
+                setTimeout(checkPlaylist, 500);
+              }
+            };
+            checkPlaylist();
+          }
 
-        // Sync to latest presenter state immediately when player mounts
-        const presenterData = lastPresenterDataRef.current || getPresenterState();
-        if (isPresenter) {
-          syncPresenterToOwnState(wrappedPlayer);
-        } else if (presenterData) {
-          syncToPresenterState(presenterData, wrappedPlayer);
-        }
-      }).catch(err => {
-        console.error("Failed to load player:", err);
-      });
+          // Sync to latest presenter state immediately when player mounts
+          const presenterData = lastPresenterDataRef.current || getPresenterState();
+          if (isPresenter) {
+            syncPresenterToOwnState(wrappedPlayer);
+          } else if (presenterData) {
+            syncToPresenterState(presenterData, wrappedPlayer);
+          }
+        }).catch(err => {
+          console.error("Failed to load player:", err);
+        });
+      }, 50);
     });
 
     return () => {
       active = false;
+      if (timer) clearTimeout(timer);
       if (playerRef.current) {
         playerRef.current.destroy();
         playerRef.current = null;
       }
     };
-  }, [videoId, platform, isPresenter, isLive]);
+  }, [videoId, platform, isPresenter, isLive, presenterId]);
 
   const updateFirestorePlaybackState = async (playing: boolean, time: number, speed?: number) => {
     try {

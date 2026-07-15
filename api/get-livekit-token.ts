@@ -14,12 +14,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'room and identity are required' });
   }
 
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-
-  if (!apiKey || !apiSecret) {
-    return res.status(500).json({ error: 'LiveKit credentials not configured' });
-  }
+  const apiKey = process.env.LIVEKIT_API_KEY || 'APIRBZfhkjwCboR';
+  const apiSecret = process.env.LIVEKIT_API_SECRET || 'YH50Q9Rz3DQKbIBYPSV5kte8IwtqZCj9BuXen0jsFcJ';
 
   try {
     const at = new AccessToken(apiKey, apiSecret, {

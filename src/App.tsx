@@ -1143,7 +1143,13 @@ function AppContent() {
   const [activeLkToken, setActiveLkToken] = useState<string | null>(null);
   const [lkConnectStatus, setLkConnectStatus] = useState<'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'>('idle');
   const [lkRetryCount, setLkRetryCount] = useState(0);
-  const stableServerUrl = useMemo(() => import.meta.env.VITE_LIVEKIT_URL, []);
+  const stableServerUrl = useMemo(() => {
+    const url = (import.meta.env.VITE_LIVEKIT_URL || 'wss://skulk5-a4l548bb.livekit.cloud').trim();
+    if (url && !url.startsWith('ws://') && !url.startsWith('wss://')) {
+      return `wss://${url}`;
+    }
+    return url;
+  }, []);
   
   const liveKitRoomOptions = useMemo(() => ({
     adaptiveStream: true,
