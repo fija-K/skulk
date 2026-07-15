@@ -78,6 +78,9 @@ export function createWrappedPlayer(
                   player.mute();
                 } catch (e) {}
               }
+              try {
+                player.playVideo();
+              } catch (e) {}
                resolve({
                 play: () => player.playVideo(),
                 pause: () => player.pauseVideo(),
@@ -151,7 +154,7 @@ export function createWrappedPlayer(
       
       const player = new (window as any).Vimeo.Player(targetElement, {
         id: parseInt(videoId, 10),
-        autoplay: isPresenter,
+        autoplay: true,
         muted: !isPresenter,
         controls: true,
         loop: false
@@ -165,6 +168,10 @@ export function createWrappedPlayer(
           iframe.style.height = '100%';
           iframe.style.border = 'none';
         }
+
+        try {
+          player.play().catch(() => {});
+        } catch (e) {}
 
         if (isPresenter) {
           player.on('play', async () => {
@@ -220,11 +227,14 @@ export function createWrappedPlayer(
       return (window as any).dailymotion.createPlayer(playerDiv.id, {
         video: videoId,
         params: {
-          autoplay: isPresenter,
+          autoplay: true,
           mute: !isPresenter,
           controls: true
         }
       }).then((player: any) => {
+        try {
+          player.play();
+        } catch (e) {}
         let localTime = 0;
         let isPlaying = isPresenter;
 
@@ -327,7 +337,7 @@ export function createWrappedPlayer(
       const options: any = {
         width: '100%',
         height: '100%',
-        autoplay: isPresenter,
+        autoplay: true,
         muted: !isPresenter,
         controls: true,
         parent: [window.location.hostname]
@@ -343,7 +353,10 @@ export function createWrappedPlayer(
 
       return new Promise<AbstractPlayer>((resolve) => {
         player.addEventListener((window as any).Twitch.Player.READY, () => {
-          let isPaused = !isPresenter;
+          let isPaused = false;
+          try {
+            player.play();
+          } catch (e) {}
 
           player.addEventListener((window as any).Twitch.Player.PLAY, () => {
             isPaused = false;
