@@ -28,20 +28,23 @@ export function SpotifyPlayer({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.5); // Default to 50%
   const [isScrolling, setIsScrolling] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   const presenterIdRef = useRef(presenterId);
   const isPresenterRef = useRef(isPresenter);
   const localPausedRef = useRef(true);
+  const currentTimeRef = useRef(currentTime);
 
   // Keep refs up-to-date on every render
   presenterIdRef.current = presenterId;
   isPresenterRef.current = isPresenter;
+  currentTimeRef.current = currentTime;
 
-  const updateFirestorePlaybackState = async (playing: boolean, time: number) => {
+  const updateFirestorePlaybackState = async (isPlaying: boolean, time: number) => {
     try {
-      console.log("[SPOTIFY-SYNC] Writing playback state to Firestore:", { playing, time });
+      console.log("[SPOTIFY-SYNC] Writing playback state to Firestore:", { isPlaying, time });
       await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), {
-        ytPlaying: playing,
+        ytPlaying: isPlaying,
         ytTime: time,
         ytUpdateTimestamp: Date.now(),
         ytSpeed: 1,
@@ -73,8 +76,10 @@ export function SpotifyPlayer({
     try {
       if (targetPlaying && localPausedRef.current) {
         controller.play();
+        localPausedRef.current = false;
       } else if (!targetPlaying && !localPausedRef.current) {
         controller.pause();
+        localPausedRef.current = true;
       }
     } catch (e) {
       console.warn("Spotify sync play/pause failed:", e);
@@ -92,6 +97,26 @@ export function SpotifyPlayer({
     }, 500);
   };
 
+  const togglePlay = () => {
+    if (!isPresenter) return;
+    const newState = !playing;
+    setPlaying(newState);
+    localPausedRef.current = !newState;
+
+    if (controllerRef.current) {
+      try {
+        if (newState) {
+          controllerRef.current.play();
+        } else {
+          controllerRef.current.pause();
+        }
+      } catch (e) {
+        console.warn("Presenter toggle play/pause failed:", e);
+      }
+    }
+    updateFirestorePlaybackState(newState, currentTimeRef.current);
+  };
+
   // Handle temporary pointer-events bypass while wheeling to support iframe tracklist scrolling
   const handleWheel = () => {
     if (isPresenter) return;
@@ -101,6 +126,27 @@ export function SpotifyPlayer({
       setIsScrolling(false);
     }, 250);
   };
+
+  // Unified local progress bar tracking timer (drives playline increments for both clients independently)
+  useEffect(() => {
+    const isPlaying = isPresenter ? playing : !localPausedRef.current;
+    if (!isPlaying) return;
+
+    let ticks = 0;
+    const interval = setInterval(() => {
+      setCurrentTime((prev) => prev + 1);
+
+      if (isPresenterRef.current) {
+        ticks += 1;
+        if (ticks >= 2) {
+          ticks = 0;
+          updateFirestorePlaybackState(true, currentTimeRef.current + 1);
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isPresenter, playing]);
 
   // 1. Initialize Spotify Embed Controller on the existing iframe (wait for iframe load to prevent CORS binding issues)
   useEffect(() => {
@@ -135,7 +181,7 @@ export function SpotifyPlayer({
           if (presenterData && !isPresenterRef.current) {
             syncToPresenterState(presenterData, EmbedController);
           } else if (isPresenterRef.current) {
-            updateFirestorePlaybackState(true, 0);
+            updateFirestorePlaybackState(playing, currentTimeRef.current);
             hasDoneInitialSeekRef.current = true;
           }
 
@@ -143,7 +189,7 @@ export function SpotifyPlayer({
           let lastPositionSeconds = 0;
           let lastCheckTime = Date.now();
 
-          // Listen to playback state changes on the controller
+          // Listen to playback state changes on the controller (if they fire)
           EmbedController.on('playback_update', (e: any) => {
             if (!active) return;
             const { position, duration: dur, isPaused } = e.data;
@@ -154,6 +200,9 @@ export function SpotifyPlayer({
             }
             setDuration(dur / 1000);
             localPausedRef.current = isPaused;
+            if (isPresenterRef.current) {
+              setPlaying(!isPaused);
+            }
 
             if (isPresenterRef.current) {
               // Presenter tracking logic
@@ -314,11 +363,31 @@ export function SpotifyPlayer({
         fontSize: '11px',
         borderTop: '1px solid #282828'
       }}>
+        {/* Play/Pause Button */}
+        {isPresenter && (
+          <button
+            onClick={togglePlay}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '14px',
+              padding: '0 4px',
+              display: 'flex',
+              alignItems: 'center',
+              outline: 'none'
+            }}
+          >
+            {playing ? '❚❚' : '▶'}
+          </button>
+        )}
+
         {/* Time Tracking */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '80px' }}>
           <span>{formatTime(currentTime)}</span>
           <span>/</span>
-          <span>{formatTime(duration)}</span>
+          <span>{formatTime(duration || 180)}</span>
         </div>
 
         {/* Progress Slider */}
@@ -327,9 +396,8 @@ export function SpotifyPlayer({
             <input
               type="range"
               min={0}
-              max={duration || 100}
+              max={duration || 180}
               value={currentTime}
-              disabled={duration === 0}
               onMouseDown={() => {
                 isDraggingRef.current = true;
               }}
@@ -347,7 +415,7 @@ export function SpotifyPlayer({
                 setCurrentTime(val);
                 if (controllerRef.current) {
                   controllerRef.current.seek(Math.floor(val));
-                  updateFirestorePlaybackState(true, val);
+                  updateFirestorePlaybackState(playing, val);
                 }
               }}
               style={{
@@ -356,7 +424,7 @@ export function SpotifyPlayer({
                 background: '#535353',
                 height: '4px',
                 borderRadius: '2px',
-                cursor: duration === 0 ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
                 outline: 'none'
               }}
             />
