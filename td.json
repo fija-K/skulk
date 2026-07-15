@@ -1,8 +1,8 @@
 {
   "game": {
-    "td":{
-        "truths": [
-            "What's the most pathetic thing you've done to impress a crush?",
+    "td": {
+      "truths": [
+        "What's the most pathetic thing you've done to impress a crush?",
         "Have you ever been rejected so badly you wanted to disappear?",
         "What's the cringiest thing you've done while stalking your crush?",
         "Have you ever been friendzoned in the most humiliating way possible?",
@@ -390,6 +390,5 @@
         "Reveal the most painful one-sided love you've experienced"
       ]
     }
+  }
 }
-}
-  
