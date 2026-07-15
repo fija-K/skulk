@@ -569,13 +569,17 @@ export function ParticipantTile({
                   backgroundColor: 'rgba(59, 130, 246, 0.15)',
                   borderColor: '#3b82f6',
                   color: '#3b82f6'
+                } : p.role === 'bot' ? {
+                  backgroundColor: 'rgba(29, 185, 84, 0.15)',
+                  borderColor: '#1db954',
+                  color: '#1db954'
                 } : {
                   backgroundColor: 'rgba(16, 185, 129, 0.15)',
                   borderColor: '#10b981',
                   color: '#10b981'
                 }
               }}>
-                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : '🛡️ Co-host'}
+                {p.role === 'admin' ? '👑 Admin' : p.role === 'host' ? '⭐ Host' : p.role === 'bot' ? '🤖 Buddy' : '🛡️ Co-host'}
               </span>
             )}
           </div>
@@ -597,7 +601,7 @@ export function ParticipantTile({
       )}
 
       {/* Host Actions Hover Trigger Menu */}
-      {!isThumbnail && !isUser && (callParticipants.find(part => part.id === myId)?.role === 'admin' || 
+      {!isThumbnail && !isUser && p.role !== 'bot' && (callParticipants.find(part => part.id === myId)?.role === 'admin' || 
                                    callParticipants.find(part => part.id === myId)?.role === 'host' || 
                                    callParticipants.find(part => part.id === myId)?.role === 'cohost') && (
         <div>

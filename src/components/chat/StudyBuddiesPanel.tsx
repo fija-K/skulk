@@ -53,7 +53,22 @@ export function StudyBuddiesPanel({
         addedByName: myName,
         createdAt: new Date().toISOString()
       });
-      showToast(`🤖 ${bot.name} joined the room chat!`);
+      
+      const partDocRef = doc(db, 'rooms', roomId, 'participants', `bot_${bot.id}`);
+      await setDoc(partDocRef, {
+        id: `bot_${bot.id}`,
+        uid: `bot_${bot.id}`,
+        name: bot.name,
+        initials: '🤖',
+        color: '#1db954',
+        photoURL: null,
+        role: 'bot',
+        joinedAt: new Date().toISOString(),
+        isMuted: true,
+        isCamOff: true
+      });
+
+      showToast(`🤖 ${bot.name} joined the room!`);
     } catch (err) {
       console.error("Failed to add study buddy bot:", err);
       showToast("❌ Failed to add study buddy. Please check permissions.");
@@ -64,6 +79,10 @@ export function StudyBuddiesPanel({
     try {
       const botDocRef = doc(db, 'rooms', roomId, 'bots', botId);
       await deleteDoc(botDocRef);
+      
+      const partDocRef = doc(db, 'rooms', roomId, 'participants', `bot_${botId}`);
+      await deleteDoc(partDocRef);
+
       showToast(`🤖 ${botName} has left the room.`);
     } catch (err) {
       console.error("Failed to remove study buddy bot:", err);

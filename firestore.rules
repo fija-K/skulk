@@ -100,14 +100,23 @@ service cloud.firestore {
       match /participants/{participantId} {
         allow read: if true;
         allow create: if request.auth != null && 
-                      participantId == request.auth.uid &&
-                      request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
                       (
-                        (request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId && request.resource.data.role == 'host') ||
-                        ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
-                        (!(request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId) && 
-                         !(request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && 
-                         request.resource.data.role == 'member')
+                        (
+                          participantId == request.auth.uid &&
+                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
+                          (
+                            (request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId && request.resource.data.role == 'host') ||
+                            ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
+                            (!(request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId) && 
+                             !(request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && 
+                             request.resource.data.role == 'member')
+                          )
+                        ) ||
+                        (
+                          participantId.startsWith('bot_') &&
+                          request.resource.data.keys().hasOnly(['uid', 'id', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'isMuted', 'isCamOff']) &&
+                          exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid))
+                        )
                       );
                       
         allow update: if request.auth != null && 
@@ -169,6 +178,7 @@ service cloud.firestore {
         allow delete: if request.auth != null && 
                       (
                         participantId == request.auth.uid ||
+                        participantId.startsWith('bot_') ||
                         (
                           participantId != request.auth.uid &&
                           isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role)

@@ -80,7 +80,7 @@ export interface Participant {
   sharing?: 'youtube' | 'whiteboard' | 'screen' | 'spotify' | null;
   sharingYoutubeId?: string | null;
   whiteboardData?: string;
-  role?: 'admin' | 'host' | 'cohost' | 'member'; // admin, host, cohost, member
+  role?: 'admin' | 'host' | 'cohost' | 'member' | 'bot'; // admin, host, cohost, member, bot
   mutedBy?: string;
   camOffBy?: string;
   todJoined?: boolean;
