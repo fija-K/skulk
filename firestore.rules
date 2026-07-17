@@ -126,7 +126,12 @@ service cloud.firestore {
                       (
                         participantId.startsWith('guest_') &&
                         request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
-                        request.resource.data.role == 'member'
+                        (
+                          request.resource.data.role == 'member' ||
+                          (request.resource.data.role == 'host' && participantId == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId) ||
+                          (exists(/databases/$(database)/documents/rooms/$(roomId)/approvedUsers/$(participantId)) && 
+                           request.resource.data.role == get(/databases/$(database)/documents/rooms/$(roomId)/approvedUsers/$(participantId)).data.role)
+                        )
                       ) ||
                       (
                         participantId.matches('^bot_.*')
@@ -240,10 +245,10 @@ service cloud.firestore {
                       requestId.startsWith('guest_');
       }
 
-      // 7. Keys subcollection (No listing allowed except for mods to prevent key discovery)
+      // 7. Keys subcollection
       match /keys/{keyId} {
-        allow get: if true;
-        allow list, create, delete: if (
+        allow get, list: if true;
+        allow create, delete: if (
           (request.auth != null && 
             (
               get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid ||
