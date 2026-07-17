@@ -2470,7 +2470,7 @@ function AppContent() {
           status: myStatus === 'none' ? null : myStatus
         });
         localStorage.setItem('skulk_active_session', JSON.stringify({
-          roomId: normalizedRoom.id,
+          roomId: roomDocId(normalizedRoom),
           sessionId: newSessionId,
           timestamp: Date.now()
         }));

@@ -11,6 +11,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { roomDocId } from '../App';
 import type { Participant, Room } from '../App';
 
 export function usePresence(
@@ -131,7 +132,7 @@ export function usePresence(
         camRestricted: false
       });
       localStorage.setItem('skulk_active_session', JSON.stringify({
-        roomId: room.id,
+        roomId: roomDocId(room),
         sessionId: newSessionId,
         timestamp: Date.now()
       }));
