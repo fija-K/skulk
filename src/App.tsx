@@ -1378,6 +1378,39 @@ function AppContent() {
     // onEvicted callback
     (reason) => {
       console.log("Kicking user out! Reason:", reason);
+      if (reason === 'kicked') {
+        const timeSinceJoin = Date.now() - (localJoinTimeRef.current || 0);
+        if (timeSinceJoin < 5000) {
+          console.warn("[PRESENCE] Presence doc deleted within 5s grace period. Self-healing/re-writing instead of evicting.");
+          const myId = getMyId();
+          const rid = currentRoom ? roomDocId(currentRoom) : null;
+          if (myId && rid) {
+            const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
+            const myRole = callParticipants.find(p => p.id === myId)?.role || 'member';
+            setDoc(presenceRef, {
+              uid: myId,
+              name: user ? user.displayName || 'Google User' : guestName,
+              photoURL: user ? user.photoURL : guestPhotoURL,
+              initials: guestInitials,
+              color: guestColor,
+              joinedAt: new Date().toISOString(),
+              role: myRole,
+              isMuted: isMicMutedRef.current,
+              isCamOff: isCamOffRef.current,
+              mutedBy: myId,
+              camOffBy: myId,
+              sessionId: currentSessionIdRef.current,
+              micOn: !isMicMutedRef.current,
+              camOn: !isCamOffRef.current,
+              status: myStatus === 'none' ? null : myStatus
+            }, { merge: true }).catch(err => {
+              console.error("[PRESENCE] Failed to self-heal/re-write presence document:", err);
+            });
+          }
+          return;
+        }
+      }
+
       if (reason === 'new_room') {
         showToast("Joined another room in a different tab.");
       } else {
