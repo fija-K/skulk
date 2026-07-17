@@ -920,7 +920,26 @@ function AppContent() {
   const [roomsParticipants, setRoomsParticipants] = useState<Record<string, any[]>>({});
 
   // Persistent Guest ID
-  const [guestId, setGuestId] = useState<string>('');
+  const [guestId, setGuestId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('skulk_guest_id') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      let gid = localStorage.getItem('skulk_guest_id');
+      if (!gid) {
+        gid = 'guest_' + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem('skulk_guest_id', gid);
+      }
+      setGuestId(gid);
+    } catch (e) {
+      console.warn("Failed to read/write guest ID to localStorage:", e);
+    }
+  }, []);
   // Load local rooms from localStorage as a fallback when Firestore is blocked
   const getLocalRooms = (): Room[] => {
     try {
