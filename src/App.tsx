@@ -88,6 +88,7 @@ export interface Participant {
   todRequestedSpin?: number | null;
   todRequestedChoice?: 'Truth' | 'Dare' | null;
   todRequestedReset?: number | null;
+  status?: 'none' | 'dnd' | 'zZ' | 'brb' | 'chillin' | null;
   ytPlaying?: boolean;
   ytTime?: number;
   ytUpdateTimestamp?: number;
@@ -1150,6 +1151,9 @@ function AppContent() {
   const [cameraError, setCameraError] = useState(false);
   const [micError, setMicError] = useState(false);
   const [isGalleryView, setIsGalleryView] = useState(true);
+  const [myStatus, setMyStatus] = useState<'none' | 'dnd' | 'zZ' | 'brb' | 'chillin'>('none');
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [botTypingIds, setBotTypingIds] = useState<string[]>([]);
   const [liveKitToken, setLiveKitToken] = useState<string | null>(null);
   const [activeLkToken, setActiveLkToken] = useState<string | null>(null);
   const [lkConnectStatus, setLkConnectStatus] = useState<'idle' | 'connecting' | 'connected' | 'error' | 'disconnected'>('idle');
@@ -1294,6 +1298,7 @@ function AppContent() {
     setSpotlightParticipantId,
     updateMySharing,
     clearMySharing,
+    updateMyStatus,
     leavePresence
   } = usePresence(
     currentRoom ? roomDocId(currentRoom) : null,
@@ -4374,6 +4379,9 @@ function AppContent() {
           text: m.text
         }));
 
+        // Show typing indicator
+        setBotTypingIds(prev => [...prev, mentionedId]);
+
         fetch('/api/study-buddy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4413,6 +4421,10 @@ function AppContent() {
             createdAt: new Date().toISOString()
           };
           await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+        })
+        .finally(() => {
+          // Clear typing indicator
+          setBotTypingIds(prev => prev.filter(id => id !== mentionedId));
         });
       }
     } catch (err) {
@@ -7295,6 +7307,7 @@ function AppContent() {
                     callTab={callTab}
                     handleOpenProfile={handleOpenProfile}
                     activeBots={activeBots}
+                    botTypingIds={botTypingIds}
                   />
                 )}
 
@@ -8434,8 +8447,58 @@ function AppContent() {
           </div>
 
           {/* Call Control Dock (Bottom Toolbar) */}
-          <div className="call-bottom-dock">
+          <div className="call-bottom-dock" style={{ position: 'relative' }}>
             
+            {/* Status Button — bottom left */}
+            {(() => {
+              const STATUS_OPTIONS: { key: typeof myStatus; label: string; emoji: string; color: string }[] = [
+                { key: 'none',    label: 'Clear',    emoji: '😐', color: '#64748b' },
+                { key: 'dnd',     label: 'Do Not Disturb', emoji: '⛔', color: '#ef4444' },
+                { key: 'zZ',      label: 'Sleeping', emoji: '💤', color: '#8b5cf6' },
+                { key: 'brb',     label: 'Be Right Back', emoji: '🚶', color: '#f59e0b' },
+                { key: 'chillin', label: 'Chillin',  emoji: '😎', color: '#10b981' },
+              ];
+              const current = STATUS_OPTIONS.find(s => s.key === myStatus) || STATUS_OPTIONS[0];
+              return (
+                <div style={{ position: 'absolute', left: 16, bottom: '100%', marginBottom: 4, zIndex: 300 }}>
+                  {showStatusMenu && (
+                    <div className="status-popup-menu">
+                      {STATUS_OPTIONS.map(opt => (
+                        <button
+                          key={opt.key}
+                          className={`status-popup-item ${myStatus === opt.key ? 'active' : ''}`}
+                          style={{ '--status-color': opt.color } as any}
+                          onClick={() => {
+                            const next = opt.key;
+                            setMyStatus(next);
+                            setShowStatusMenu(false);
+                            if (currentRoom) {
+                              updateMyStatus(next === 'none' ? null : next);
+                            }
+                          }}
+                        >
+                          <span>{opt.emoji}</span>
+                          <span>{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    id="status-toggle-btn"
+                    className="status-dock-btn"
+                    title="Set your status"
+                    onClick={() => setShowStatusMenu(v => !v)}
+                    style={{ '--status-color': current.color } as any}
+                  >
+                    <span className="status-dock-emoji">{current.emoji}</span>
+                    {myStatus !== 'none' && (
+                      <span className="status-dock-label">{current.key.toUpperCase()}</span>
+                    )}
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* Mic Toggle Button */}
             {(() => {
               const myId = getMyId();

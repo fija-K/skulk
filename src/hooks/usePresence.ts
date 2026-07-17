@@ -60,6 +60,16 @@ export function usePresence(
     });
   };
 
+  const updateMyStatus = async (status: string | null) => {
+    const myId = getMyId();
+    if (!myId || !roomId) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomId, 'participants', myId), { status });
+    } catch (e) {
+      console.warn('Failed to update status:', e);
+    }
+  };
+
   const leavePresence = async (roomIdToLeave: string, sessionIdToDelete?: string | null) => {
     const myId = getMyId();
     console.log("leavePresence called:", { roomIdToLeave, sessionIdToDelete, myId });
@@ -202,7 +212,8 @@ export function usePresence(
           todPending: data.todPending ?? false,
           todRequestedSpin: data.todRequestedSpin || null,
           todRequestedChoice: data.todRequestedChoice || null,
-          todRequestedReset: data.todRequestedReset || null
+          todRequestedReset: data.todRequestedReset || null,
+          status: data.status || null
         });
       });
 
@@ -247,7 +258,8 @@ export function usePresence(
           todPending: false,
           todRequestedSpin: null,
           todRequestedChoice: null,
-          todRequestedReset: null
+          todRequestedReset: null,
+          status: null
         }
       ]);
     });
@@ -266,6 +278,7 @@ export function usePresence(
     setSpotlightParticipantId,
     updateMySharing,
     clearMySharing,
+    updateMyStatus,
     leavePresence,
     enterCallRoomPresence
   };

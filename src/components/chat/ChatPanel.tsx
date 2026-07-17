@@ -10,6 +10,7 @@ interface ChatPanelProps {
   callTab: string;
   handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
   activeBots: { id: string; name: string; addedBy: string }[];
+  botTypingIds?: string[];
 }
 
 const POPULAR_EMOJIS = [
@@ -35,7 +36,8 @@ export function ChatPanel({
   sendChatMessage,
   callTab,
   handleOpenProfile,
-  activeBots
+  activeBots,
+  botTypingIds = []
 }: ChatPanelProps) {
   const [chatMessageText, setChatMessageText] = useState('');
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
@@ -488,6 +490,21 @@ export function ChatPanel({
             );
           });
         })()}
+        {/* Bot typing indicators */}
+        {botTypingIds.length > 0 && botTypingIds.map(botId => {
+          const botName = botId.replace('bot_', '');
+          return (
+            <div key={`typing_${botId}`} className="bot-typing-row">
+              <div className="bot-typing-avatar">🤖</div>
+              <div className="bot-typing-bubble">
+                <span className="bot-typing-name">{botName}</span>
+                <div className="bot-typing-dots">
+                  <span /><span /><span />
+                </div>
+              </div>
+            </div>
+          );
+        })}
         <div ref={chatEndRef} />
       </div>
 

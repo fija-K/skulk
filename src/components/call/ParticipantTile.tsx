@@ -304,46 +304,86 @@ export function ParticipantTile({
               )}
             </div>
             
-            {/* Keep large avatar circle in DOM */}
-            <div 
-              className="participant-avatar-large" 
-              style={{ 
-                backgroundColor: p.color, 
-                cursor: p.sharing ? 'pointer' : 'default',
-                position: 'relative',
-                boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                overflow: 'hidden',
-                width: '96px',
-                height: '96px',
-                borderRadius: '50%',
-                fontSize: '32px',
-                marginBottom: '0'
-              }}
-              onClick={() => {
-                if (p.sharing) {
-                  handleViewParticipantShare(p);
-                } else if (handleOpenProfile) {
-                  handleOpenProfile({
-                    id: p.uid || p.id,
-                    name: p.name.replace(' (You)', ''),
-                    initials: p.initials,
-                    color: p.color || '#3b82f6',
-                    photoURL: p.photoURL
-                  }, 'card');
-                }
-              }}
-            >
-              {p.photoURL ? (
-                <img 
-                  src={p.photoURL} 
-                  alt={p.name} 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                p.initials
-              )}
+            {/* Large avatar circle wrapper – status badge lives outside overflow:hidden */}
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <div 
+                className="participant-avatar-large" 
+                style={{ 
+                  backgroundColor: p.color, 
+                  cursor: p.sharing ? 'pointer' : 'default',
+                  position: 'relative',
+                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                  overflow: 'hidden',
+                  width: '96px',
+                  height: '96px',
+                  borderRadius: '50%',
+                  fontSize: '32px',
+                  marginBottom: '0'
+                }}
+                onClick={() => {
+                  if (p.sharing) {
+                    handleViewParticipantShare(p);
+                  } else if (handleOpenProfile) {
+                    handleOpenProfile({
+                      id: p.uid || p.id,
+                      name: p.name.replace(' (You)', ''),
+                      initials: p.initials,
+                      color: p.color || '#3b82f6',
+                      photoURL: p.photoURL
+                    }, 'card');
+                  }
+                }}
+              >
+                {p.photoURL ? (
+                  <img 
+                    src={p.photoURL} 
+                    alt={p.name} 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  p.initials
+                )}
+              </div>
+              {/* Status badge — covers bottom-left ~1/8 of avatar */}
+              {p.status && p.status !== 'none' && (() => {
+                const STATUS_EMOJI: Record<string, string> = {
+                  dnd: '⛔', zZ: '💤', brb: '🚶', chillin: '😎'
+                };
+                const STATUS_COLOR: Record<string, string> = {
+                  dnd: '#ef4444', zZ: '#8b5cf6', brb: '#f59e0b', chillin: '#10b981'
+                };
+                const emoji = STATUS_EMOJI[p.status] || '';
+                const bgColor = STATUS_COLOR[p.status] || '#64748b';
+                // Badge = ~1/8 the circle area. Avatar is 96px → badge ~28px
+                return (
+                  <div
+                    className="participant-status-badge"
+                    style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      backgroundColor: bgColor,
+                      border: '2px solid #0f1013',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 14,
+                      lineHeight: 1,
+                      zIndex: 5,
+                      pointerEvents: 'none',
+                      boxShadow: `0 0 8px ${bgColor}66`
+                    }}
+                    title={p.status.toUpperCase()}
+                  >
+                    {emoji}
+                  </div>
+                );
+              })()}
             </div>
 
             {p.sharing && (

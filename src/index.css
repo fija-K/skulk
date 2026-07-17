@@ -2592,3 +2592,173 @@ div[id^="dailymotion-player-"] > div {
   background-color: var(--primary-text);
 }
 
+/* Status Dock Button & Menu CSS */
+.status-dock-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 16, 19, 0.75);
+  border: 1.5px solid var(--status-color, var(--border-color));
+  color: var(--text-primary);
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(8px);
+}
+
+.status-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateY(-1px);
+}
+
+.status-dock-emoji {
+  font-size: 14px;
+}
+
+.status-dock-label {
+  letter-spacing: 0.05em;
+  opacity: 0.9;
+}
+
+.status-popup-menu {
+  background: #15161a;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  animation: slideUpIn 0.15s ease-out;
+}
+
+@keyframes slideUpIn {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.status-popup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.15s ease;
+}
+
+.status-popup-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.status-popup-item.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--primary-color);
+  font-weight: bold;
+}
+
+/* Bot Typing Indicator CSS */
+.bot-typing-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 12px 16px;
+  animation: typingFadeIn 0.25s ease;
+}
+
+.bot-typing-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  border: 1px solid var(--border-color);
+}
+
+.bot-typing-bubble {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 14px 14px 14px 2px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 75%;
+}
+
+.bot-typing-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.bot-typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 10px;
+}
+
+.bot-typing-dots span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+  opacity: 0.4;
+  animation: typingBounce 1.4s infinite both;
+}
+
+.bot-typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.bot-typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes typingFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
