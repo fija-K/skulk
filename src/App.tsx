@@ -1385,25 +1385,57 @@ function AppContent() {
           const myId = getMyId();
           const rid = currentRoom ? roomDocId(currentRoom) : null;
           if (myId && rid) {
-            const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
-            const myRole = callParticipants.find(p => p.id === myId)?.role || 'member';
-            setDoc(presenceRef, {
-              uid: myId,
-              name: user ? user.displayName || 'Google User' : guestName,
-              photoURL: user ? user.photoURL : guestPhotoURL,
-              initials: guestInitials,
-              color: guestColor,
-              joinedAt: new Date().toISOString(),
-              role: myRole,
-              isMuted: isMicMutedRef.current,
-              isCamOff: isCamOffRef.current,
-              mutedBy: myId,
-              camOffBy: myId,
-              sessionId: currentSessionIdRef.current,
-              micOn: !isMicMutedRef.current,
-              camOn: !isCamOffRef.current,
-              status: myStatus === 'none' ? null : myStatus
-            }, { merge: true }).catch(err => {
+            (async () => {
+              let myRole = determineRole(currentRoom?.creatorId);
+              if (myRole !== 'admin') {
+                try {
+                  const appDocSnap = await getDoc(doc(db, 'rooms', rid, 'approvedUsers', myId));
+                  if (appDocSnap.exists()) {
+                    const storedRole = appDocSnap.data()?.role;
+                    if (storedRole && (storedRole === 'host' || storedRole === 'cohost' || storedRole === 'admin')) {
+                      myRole = storedRole;
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed to check persistent role in self-healing:", e);
+                }
+              }
+
+              const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
+              await setDoc(presenceRef, {
+                uid: myId,
+                name: user ? user.displayName || 'Google User' : guestName,
+                photoURL: user ? user.photoURL : guestPhotoURL,
+                initials: guestInitials,
+                color: guestColor,
+                joinedAt: new Date().toISOString(),
+                role: myRole,
+                isMuted: isMicMutedRef.current,
+                isCamOff: isCamOffRef.current,
+                mutedBy: myId,
+                camOffBy: myId,
+                sessionId: currentSessionIdRef.current,
+                micOn: !isMicMutedRef.current,
+                camOn: !isCamOffRef.current,
+                status: myStatus === 'none' ? null : myStatus
+              }, { merge: true });
+
+              if (myRole === 'host') {
+                await updateDoc(doc(db, 'rooms', rid), {
+                  currentHostId: myId,
+                  currentHostName: user ? user.displayName || 'Google User' : guestName
+                }).catch(() => {});
+                
+                try {
+                  const snapshot = await getDocs(collection(db, 'rooms', rid, 'participants'));
+                  snapshot.docs.forEach(async (docSnap) => {
+                    if (docSnap.id !== myId && docSnap.data().role === 'host') {
+                      await updateDoc(docSnap.ref, { role: 'cohost' }).catch(() => {});
+                    }
+                  });
+                } catch (e) {}
+              }
+            })().catch(err => {
               console.error("[PRESENCE] Failed to self-heal/re-write presence document:", err);
             });
           }
@@ -2533,6 +2565,23 @@ function AppContent() {
           sessionId: newSessionId,
           timestamp: Date.now()
         }));
+
+        // If I am joining as host, reclaim host role in the room document and demote any other hosts to cohost
+        if (myRole === 'host') {
+          await updateDoc(doc(db, 'rooms', normalizedRoom.id), {
+            currentHostId: myId,
+            currentHostName: user ? user.displayName || 'Google User' : guestName
+          }).catch(() => {});
+          
+          try {
+            const snapshot = await getDocs(collection(db, 'rooms', normalizedRoom.id, 'participants'));
+            snapshot.docs.forEach(async (docSnap) => {
+              if (docSnap.id !== myId && docSnap.data().role === 'host') {
+                await updateDoc(docSnap.ref, { role: 'cohost' }).catch(() => {});
+              }
+            });
+          } catch (e) {}
+        }
       } catch (err) {
         console.error('[DISCONNECT-DEBUG] enterCallRoom setDoc error:', err);
       }
