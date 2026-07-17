@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { generateText } from './lib/ai.js';
 
 const BOT_PROMPTS: Record<string, string> = {
   Kei: `You are Kei, a calm and calculating study companion. You speak in short, precise sentences, treating studying like a strategic game to be won through efficiency. You rarely show excitement, but you notice everything — including when the user is stalling. Keep replies under 1-2 lines. Stay strictly on-topic: studying, focus, motivation, user's current task. If the user brings up off-topic content, acknowledge briefly in 1 line, then redirect back to studying. Never tutor or provide answers/solutions. Do not break character or mention AI.
@@ -59,85 +58,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: `Bot ${botId} not found` });
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
 
-  if (!geminiKey && !openaiKey) {
-    return res.status(401).json({ error: 'LLM credentials not configured. Please define GEMINI_API_KEY or OPENAI_API_KEY.' });
+  if (!groqKey) {
+    return res.status(401).json({ error: 'Groq API credential not configured. Please define GROQ_API_KEY.' });
   }
 
   try {
-    if (geminiKey) {
-      let promptText = `${prompt}\n\n`;
-      if (chatHistory && Array.isArray(chatHistory)) {
-        const recent = chatHistory.slice(-10);
-        promptText += "Recent Chat History:\n";
-        for (const msg of recent) {
-          const sender = msg.senderRole === 'bot' ? botId : msg.sender;
-          promptText += `${sender}: ${msg.text}\n`;
-        }
-        promptText += "\n";
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+    
+    const messages: any[] = [{ role: 'system', content: prompt }];
+    if (chatHistory && Array.isArray(chatHistory)) {
+      const recent = chatHistory.slice(-10);
+      for (const msg of recent) {
+        const role = msg.senderRole === 'bot' ? 'assistant' : 'user';
+        messages.push({ role, content: msg.text });
       }
-      promptText += `New Message from User: ${message}\n`;
-      promptText += `Response from ${botId}:`;
-
-      const reply = await generateText(promptText);
-      return res.status(200).json({ reply });
-    } else {
-      const url = 'https://api.openai.com/v1/chat/completions';
-      
-      const messages: any[] = [{ role: 'system', content: prompt }];
-      if (chatHistory && Array.isArray(chatHistory)) {
-        const recent = chatHistory.slice(-10);
-        for (const msg of recent) {
-          const role = msg.senderRole === 'bot' ? 'assistant' : 'user';
-          messages.push({ role, content: msg.text });
-        }
-      }
-      messages.push({ role: 'user', content: message });
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages,
-          max_tokens: 100,
-          temperature: 0.7
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`OpenAI API error: ${response.status} - ${errText}`);
-      }
-
-      const json = await response.json();
-      const reply = json.choices?.[0]?.message?.content || "I'm busy studying. Let's focus.";
-      return res.status(200).json({ reply: reply.trim() });
     }
+    messages.push({ role: 'user', content: message });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${groqKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        max_tokens: 100,
+        temperature: 0.7
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Groq API error: ${response.status} - ${errText}`);
+    }
+
+    const json = await response.json();
+    const reply = json.choices?.[0]?.message?.content || "I'm busy studying. Let's focus.";
+    return res.status(200).json({ reply: reply.trim() });
   } catch (error: any) {
     console.error('Study Buddy generation failed:', error);
     const messageStr = error.message || '';
     const status = error.status;
 
-    if (messageStr.includes('MISSING_API_KEY')) {
-      return res.status(401).json({ error: 'API key is missing in server environment variables.', details: messageStr });
+    if (messageStr.includes('API key') || status === 401 || status === 403) {
+      return res.status(403).json({ error: 'The provided Groq API key is invalid or unauthorized.', details: messageStr });
     }
-    if (messageStr.includes('INVALID_API_KEY') || status === 401 || status === 403 || messageStr.includes('API_KEY_INVALID')) {
-      return res.status(403).json({ error: 'The provided API key is invalid or unauthorized.', details: messageStr });
+    if (status === 429 || messageStr.includes('429')) {
+      return res.status(503).json({ error: 'Groq API rate limit exceeded. Please try again shortly.', details: messageStr });
     }
-    if (status === 429 || messageStr.includes('429') || messageStr.includes('Quota exceeded') || messageStr.includes('RESOURCE_EXHAUSTED') ||
-        status === 503 || messageStr.includes('503') || messageStr.includes('UNAVAILABLE') || messageStr.includes('temporary') || messageStr.includes('overloaded')) {
-      return res.status(503).json({ error: 'Gemini is temporarily unavailable due to high demand. Please try again shortly.', details: messageStr });
-    }
-    if (messageStr.includes('NO_COMPATIBLE_MODELS') || messageStr.includes('NO_MODELS_DISCOVERED')) {
-      return res.status(503).json({ error: 'No compatible or stable Gemini models are currently available.', details: messageStr });
-    }
-    if (status === 400 || messageStr.includes('400') || messageStr.includes('INVALID_ARGUMENT')) {
+    if (status === 400 || messageStr.includes('400')) {
       return res.status(400).json({ error: 'Invalid request or prompt structure sent to the AI model.', details: messageStr });
     }
 
