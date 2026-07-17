@@ -922,7 +922,12 @@ function AppContent() {
   // Persistent Guest ID
   const [guestId, setGuestId] = useState<string>(() => {
     try {
-      return localStorage.getItem('skulk_guest_id') || '';
+      let gid = localStorage.getItem('skulk_guest_id');
+      if (!gid || gid.includes(' ') || !gid.startsWith('guest_')) {
+        gid = 'guest_' + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem('skulk_guest_id', gid);
+      }
+      return gid;
     } catch {
       return '';
     }
@@ -931,7 +936,7 @@ function AppContent() {
   useEffect(() => {
     try {
       let gid = localStorage.getItem('skulk_guest_id');
-      if (!gid) {
+      if (!gid || gid.includes(' ') || !gid.startsWith('guest_')) {
         gid = 'guest_' + Math.random().toString(36).substring(2, 15);
         localStorage.setItem('skulk_guest_id', gid);
       }
