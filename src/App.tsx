@@ -2398,7 +2398,8 @@ function AppContent() {
     try {
       const myId = getMyId();
       const myName = user ? user.displayName || 'Google User' : guestName;
-      const res = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${myId}&name=${encodeURIComponent(myName)}`);
+      const cleanIdentity = myId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const res = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${cleanIdentity}&name=${encodeURIComponent(myName)}`);
       const data = await res.json();
       if (data.token) {
         prefetchedLkTokenRef.current = { roomId, token: data.token };
@@ -2509,7 +2510,8 @@ function AppContent() {
 
       try {
         const myName = user ? user.displayName || 'Google User' : guestName;
-        const res = await fetch(`/api/get-livekit-token?room=${normalizedRoom.id}&identity=${myId}&name=${encodeURIComponent(myName)}`);
+        const cleanIdentity = myId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const res = await fetch(`/api/get-livekit-token?room=${normalizedRoom.id}&identity=${cleanIdentity}&name=${encodeURIComponent(myName)}`);
         const data = await res.json();
         return data.token || null;
       } catch (e) {
