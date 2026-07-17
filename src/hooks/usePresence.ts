@@ -167,6 +167,16 @@ export function usePresence(
         if (change.type === 'removed') {
           onParticipantRemoved(docId, data.name || 'Someone');
           if (docId === myId) {
+            const deletedSessionId = data.sessionId;
+            const currentSessionId = currentSessionIdRef.current;
+            console.log("[PRESENCE] Local participant document removed:", { docId, deletedSessionId, currentSessionId });
+            
+            // Bypass eviction if we don't have an active session (e.g. left normally) or if this belongs to a stale/older session
+            if (!currentSessionId || (deletedSessionId && deletedSessionId !== currentSessionId)) {
+              console.log("[PRESENCE] Bypassing eviction: document belongs to an inactive or stale session.");
+              return;
+            }
+
             console.log("[PRESENCE] Local participant document removed by server. Triggering eviction.");
             let reason: 'new_room' | 'kicked' = 'kicked';
             try {
