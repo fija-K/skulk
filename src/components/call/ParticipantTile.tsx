@@ -417,158 +417,199 @@ export function ParticipantTile({
         )
       ) : (
         // Compact Grid Layout OR Floating Avatar
-        <div 
-          className="participant-avatar-large" 
-          style={{ 
-            backgroundColor: p.color, 
-            cursor: p.sharing ? 'pointer' : 'default',
-            position: 'relative',
-            boxShadow: p.sharing === 'youtube'
-              ? '0 0 12px var(--primary-color)'
-              : p.sharing === 'whiteboard'
-              ? '0 0 12px #10b981'
-              : p.sharing === 'spotify'
-              ? '0 0 12px #1db954'
-              : p.sharing
-              ? '0 0 12px #3b82f6'
-              : 'none',
-            border: p.sharing === 'youtube'
-              ? '2px solid var(--primary-color)'
-              : p.sharing === 'whiteboard'
-              ? '2px solid #10b981'
-              : p.sharing === 'spotify'
-              ? '2px solid #1db954'
-              : p.sharing
-              ? '2px solid #3b82f6'
-              : 'none',
-            overflow: 'hidden',
-            background: p.sharing === 'youtube'
-              ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
-              : p.sharing === 'whiteboard'
-              ? 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
-              : p.sharing === 'spotify'
-              ? 'radial-gradient(circle, rgba(29, 185, 84, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
-              : undefined,
-            // Shrink for thumbnail strip
-            ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
-          }}
-        >
-          {p.sharing === 'youtube' ? (
-            /* Pulsing play icon inside circular avatar circle */
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              animation: 'pulse 2s infinite',
-              zIndex: 2
-            }}>
-              <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
-            </div>
-          ) : p.sharing === 'spotify' ? (
-            /* Pulsing music icon inside circular avatar circle */
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              animation: 'pulse 2s infinite',
-              zIndex: 2
-            }}>
-              <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: '#1db954' }}>♫</span>
-            </div>
-          ) : (
-            <>
-              <div className="tile-video-wrapper">
-                {!(isUser && cameraError) && (
-                  <ParticipantVideo participantId={p.id} />
-                )}
+        <div style={{ position: 'relative', display: 'inline-block' }}>
+          <div 
+            className="participant-avatar-large" 
+            style={{ 
+              backgroundColor: p.color, 
+              cursor: p.sharing ? 'pointer' : 'default',
+              position: 'relative',
+              boxShadow: p.sharing === 'youtube'
+                ? '0 0 12px var(--primary-color)'
+                : p.sharing === 'whiteboard'
+                ? '0 0 12px #10b981'
+                : p.sharing === 'spotify'
+                ? '0 0 12px #1db954'
+                : p.sharing
+                ? '0 0 12px #3b82f6'
+                : 'none',
+              border: p.sharing === 'youtube'
+                ? '2px solid var(--primary-color)'
+                : p.sharing === 'whiteboard'
+                ? '2px solid #10b981'
+                : p.sharing === 'spotify'
+                ? '2px solid #1db954'
+                : p.sharing
+                ? '2px solid #3b82f6'
+                : 'none',
+              overflow: 'hidden',
+              background: p.sharing === 'youtube'
+                ? 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+                : p.sharing === 'whiteboard'
+                ? 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+                : p.sharing === 'spotify'
+                ? 'radial-gradient(circle, rgba(29, 185, 84, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)'
+                : undefined,
+              // Shrink for thumbnail strip
+              ...isThumbnail ? { width: '48px', height: '48px', minWidth: '48px' } : {}
+            }}
+          >
+            {p.sharing === 'youtube' ? (
+              /* Pulsing play icon inside circular avatar circle */
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'pulse 2s infinite',
+                zIndex: 2
+              }}>
+                <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: 'var(--primary-color)' }}>▶</span>
               </div>
+            ) : p.sharing === 'spotify' ? (
+              /* Pulsing music icon inside circular avatar circle */
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'pulse 2s infinite',
+                zIndex: 2
+              }}>
+                <span style={{ fontSize: isThumbnail ? '14px' : '20px', color: '#1db954' }}>♫</span>
+              </div>
+            ) : (
+              <>
+                <div className="tile-video-wrapper">
+                  {!(isUser && cameraError) && (
+                    <ParticipantVideo participantId={p.id} />
+                  )}
+                </div>
+                <div 
+                  className="tile-avatar-wrapper"
+                  style={{ cursor: 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (handleOpenProfile) {
+                      handleOpenProfile({
+                        id: p.uid || p.id,
+                        name: p.name.replace(' (You)', ''),
+                        initials: p.initials,
+                        color: p.color || '#3b82f6',
+                        photoURL: p.photoURL
+                      }, 'card');
+                    }
+                  }}
+                 >
+                   {p.photoURL ? (
+                     <img 
+                       src={p.photoURL} 
+                       alt={p.name} 
+                       style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                       referrerPolicy="no-referrer"
+                     />
+                   ) : (
+                     <span className="tile-avatar-initials">{p.initials}</span>
+                   )}
+                 </div>
+              </>
+            )}
+            
+            {/* Clickable Retry warning indicator in compact view */}
+            {isUser && !showCamOff && cameraError && (
               <div 
-                className="tile-avatar-wrapper"
-                style={{ cursor: 'pointer' }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (handleOpenProfile) {
-                    handleOpenProfile({
-                      id: p.uid || p.id,
-                      name: p.name.replace(' (You)', ''),
-                      initials: p.initials,
-                      color: p.color || '#3b82f6',
-                      photoURL: p.photoURL
-                    }, 'card');
-                  }
+                  window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
                 }}
-               >
-                 {p.photoURL ? (
-                   <img 
-                     src={p.photoURL} 
-                     alt={p.name} 
-                     style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                     referrerPolicy="no-referrer"
-                   />
-                 ) : (
-                   <span className="tile-avatar-initials">{p.initials}</span>
-                 )}
-               </div>
-            </>
-          )}
-          
-          {/* Clickable Retry warning indicator in compact view */}
-          {isUser && !showCamOff && cameraError && (
-            <div 
-              onClick={(e) => {
-                e.stopPropagation();
-                window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-              }}
-              style={{
-                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center', zIndex: 15,
-                cursor: 'pointer'
-              }} 
-              title="Camera error - check hardware switch and click to retry"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
-                <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
-                <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
-                <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
-              </svg>
-              <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
-            </div>
-          )}
- 
-          {p.sharing && (
-            <div className="sharing-badge-overlay" style={{
-              position: 'absolute',
-              bottom: '-6px',
-              right: '-6px',
-              backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
-              color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
-              borderRadius: '50%',
-              width: '22px',
-              height: '22px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '11px',
-              fontWeight: 'bold',
-              border: '2px solid var(--card-bg, #1a1c23)',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-              zIndex: 10
-            }} title={`Sharing ${p.sharing} - click to view`}>
-              {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
-            </div>
-          )}
+                style={{
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'rgba(0,0,0,0.75)', display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center', zIndex: 15,
+                  cursor: 'pointer'
+                }} 
+                title="Camera error - check hardware switch and click to retry"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '2px' }}>
+                  <path d="m18.84 12.84 1.83 1.83a1 1 0 0 0 1.63-.77v-3.8a1 1 0 0 0-1.63-.77l-1.83 1.83"></path>
+                  <rect x="2" y="5" width="14" height="14" rx="2" stroke="#ef4444"></rect>
+                  <line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444"></line>
+                </svg>
+                <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 'bold' }}>RETRY</span>
+              </div>
+            )}
+    
+            {p.sharing && (
+              <div className="sharing-badge-overlay" style={{
+                position: 'absolute',
+                bottom: '-6px',
+                right: '-6px',
+                backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
+                color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
+                borderRadius: '50%',
+                width: '22px',
+                height: '22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                border: '2px solid var(--card-bg, #1a1c23)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                zIndex: 10
+              }} title={`Sharing ${p.sharing} - click to view`}>
+                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
+              </div>
+            )}
+          </div>
+          {/* Status badge Overlay inside wrapper */}
+          {p.status && p.status !== 'none' && (() => {
+            const STATUS_EMOJI: Record<string, string> = {
+              dnd: '⛔', zZ: '💤', brb: '🚶', chillin: '😎'
+            };
+            const STATUS_COLOR: Record<string, string> = {
+              dnd: '#ef4444', zZ: '#8b5cf6', brb: '#f59e0b', chillin: '#10b981'
+            };
+            const emoji = STATUS_EMOJI[p.status] || '';
+            const bgColor = STATUS_COLOR[p.status] || '#64748b';
+            const size = isThumbnail ? 16 : 28;
+            const fontSize = isThumbnail ? 9 : 14;
+            return (
+              <div
+                className="participant-status-badge"
+                style={{
+                  position: 'absolute',
+                  bottom: isThumbnail ? -2 : 0,
+                  left: isThumbnail ? -2 : 0,
+                  width: size,
+                  height: size,
+                  borderRadius: '50%',
+                  backgroundColor: bgColor,
+                  border: '2px solid #0f1013',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: fontSize,
+                  lineHeight: 1,
+                  zIndex: 20,
+                  pointerEvents: 'none',
+                  boxShadow: `0 0 8px ${bgColor}66`
+                }}
+                title={p.status.toUpperCase()}
+              >
+                {emoji}
+              </div>
+            );
+          })()}
         </div>
       )}
       

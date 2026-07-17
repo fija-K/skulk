@@ -2466,7 +2466,8 @@ function AppContent() {
           micOn: false,
           camOn: false,
           micRestricted: false,
-          camRestricted: false
+          camRestricted: false,
+          status: myStatus === 'none' ? null : myStatus
         });
         localStorage.setItem('skulk_active_session', JSON.stringify({
           roomId: normalizedRoom.id,
@@ -2745,7 +2746,21 @@ function AppContent() {
         }
       }
       
-      const myRole = determineRole(currentRoom.creatorId);
+      let myRole = determineRole(currentRoom.creatorId);
+      if (myRole !== 'admin') {
+        try {
+          const appDocSnap = await getDoc(doc(db, 'rooms', rid, 'approvedUsers', myId));
+          if (appDocSnap.exists()) {
+            const storedRole = appDocSnap.data()?.role;
+            if (storedRole && (storedRole === 'host' || storedRole === 'cohost' || storedRole === 'admin')) {
+              myRole = storedRole;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to retrieve persistent role from approvedUsers inside syncAuthPresence:", err);
+        }
+      }
+
       const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
       await setDoc(presenceRef, {
         uid: myId,
@@ -2761,12 +2776,13 @@ function AppContent() {
         camOffBy: myId,
         sessionId: currentSessionIdRef.current,
         micOn: !isMicMutedRef.current,
-        camOn: !isCamOffRef.current
+        camOn: !isCamOffRef.current,
+        status: myStatus === 'none' ? null : myStatus
       }, { merge: true });
     };
     
     syncAuthPresence();
-  }, [user, currentRoom ? roomDocId(currentRoom) : null, guestName, guestInitials, guestColor, guestPhotoURL, guestId]);
+  }, [user, currentRoom ? roomDocId(currentRoom) : null, guestName, guestInitials, guestColor, guestPhotoURL, guestId, myStatus]);
 
   // Clean up presence immediately on tab/browser close using fetch keepalive
   useEffect(() => {
