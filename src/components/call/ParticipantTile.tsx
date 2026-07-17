@@ -145,6 +145,44 @@ export function ParticipantTile({
           </>
         )}
 
+        {/* Status badge Overlay inside thumbnail */}
+        {p.status && p.status !== 'none' && (() => {
+          const STATUS_EMOJI: Record<string, string> = {
+            dnd: '⛔', zZ: '💤', brb: '🚶', chillin: '😎'
+          };
+          const STATUS_COLOR: Record<string, string> = {
+            dnd: '#ef4444', zZ: '#8b5cf6', brb: '#f59e0b', chillin: '#10b981'
+          };
+          const emoji = STATUS_EMOJI[p.status] || '';
+          const bgColor = STATUS_COLOR[p.status] || '#64748b';
+          return (
+            <div
+              className="participant-status-badge"
+              style={{
+                position: 'absolute',
+                bottom: '18px',
+                left: '4px',
+                width: '16px',
+                height: '16px',
+                borderRadius: '50%',
+                backgroundColor: bgColor,
+                border: '1.5px solid #0f1013',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '9px',
+                lineHeight: 1,
+                zIndex: 10,
+                pointerEvents: 'none',
+                boxShadow: `0 0 6px ${bgColor}66`
+              }}
+              title={p.status.toUpperCase()}
+            >
+              {emoji}
+            </div>
+          );
+        })()}
+
         {/* Micro status indicator (Muted status) */}
         <div style={{
           position: 'absolute',

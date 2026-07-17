@@ -64,46 +64,56 @@ service cloud.firestore {
     match /rooms/{roomId} {
       allow read: if true;
       
-      // Whitelists creation fields
-      allow create: if request.auth != null && 
-        request.resource.data.creatorId == request.auth.uid &&
-        request.resource.data.keys().hasOnly(['id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName']) &&
-        (
-          !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
-          !('lastRoomCreatedTime' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
-          request.time >= get(/databases/$(database)/documents/users/$(request.auth.uid)).data.lastRoomCreatedTime + duration.value(5, 's')
-        );
+      // Whitelists creation fields (allows guest creators as well)
+      allow create: if (
+        (request.auth != null && request.resource.data.creatorId == request.auth.uid) ||
+        (request.resource.data.creatorId.startsWith('guest_'))
+      ) && 
+      request.resource.data.keys().hasOnly(['id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName']) &&
+      (
+        request.resource.data.creatorId.startsWith('guest_') ||
+        !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+        !('lastRoomCreatedTime' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+        request.time >= get(/databases/$(database)/documents/users/$(request.auth.uid)).data.lastRoomCreatedTime + duration.value(5, 's')
+      );
         
       // Whitelists update fields
-      allow update: if request.auth != null && 
-        request.resource.data.creatorId == resource.data.creatorId &&
-        request.resource.data.keys().hasOnly([
-          'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
-          'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
-          'spinResult', 'spinPool', 'spinCheckedIds',
-          'emptySince'
-        ]) &&
+      allow update: if (
         (
-          resource.data.creatorId == request.auth.uid ||
-          get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
-        );
+          request.auth != null && 
+          (
+            resource.data.creatorId == request.auth.uid ||
+            get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
+          )
+        ) ||
+        (
+          resource.data.creatorId.startsWith('guest_')
+        )
+      ) && 
+      request.resource.data.creatorId == resource.data.creatorId &&
+      request.resource.data.keys().hasOnly([
+        'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
+        'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
+        'spinResult', 'spinPool', 'spinCheckedIds',
+        'emptySince'
+      ]);
         
       // Deletion rules
-      allow delete: if request.auth != null && 
-        (
-          resource.data.creatorId == request.auth.uid ||
-          request.auth.token.email == 'fijakhan7127@gmail.com' || 
-          request.auth.token.email == '000fijakhan123@gmail.com'
-        );
+      allow delete: if (
+        (request.auth != null && resource.data.creatorId == request.auth.uid) ||
+        resource.data.creatorId.startsWith('guest_') ||
+        (request.auth != null && (request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com'))
+      );
       
       // 4. Participants presence: users can only write to their own presence document
       match /participants/{participantId} {
         allow read: if true;
-        allow create: if request.auth != null && 
-                      (
+        
+        allow create: if (
+                        request.auth != null && 
                         (
                           participantId == request.auth.uid &&
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
+                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
                           (
                             (request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId && request.resource.data.role == 'host') ||
                             ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
@@ -111,89 +121,103 @@ service cloud.firestore {
                              !(request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && 
                              request.resource.data.role == 'member')
                           )
-                        ) ||
-                        (
-                          participantId.matches('^bot_.*')
                         )
+                      ) || 
+                      (
+                        participantId.startsWith('guest_') &&
+                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                        request.resource.data.role == 'member'
+                      ) ||
+                      (
+                        participantId.matches('^bot_.*')
                       );
                       
-        allow update: if request.auth != null && 
-                      (
+        allow update: if (
+                        request.auth != null && 
                         (
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
                           (
-                            (participantId == request.auth.uid && 
-                             (request.resource.data.role == resource.data.role || 
-                              (resource.data.role == 'host' && (request.resource.data.role == 'cohost' || request.resource.data.role == 'member')) ||
-                              (resource.data.role == 'cohost' && request.resource.data.role == 'member')
-                             ) &&
-                             (!request.resource.data.keys().hasAny(['micRestricted']) || !resource.data.keys().hasAny(['micRestricted']) || request.resource.data.micRestricted == resource.data.micRestricted) &&
-                             (!request.resource.data.keys().hasAny(['camRestricted']) || !resource.data.keys().hasAny(['camRestricted']) || request.resource.data.camRestricted == resource.data.camRestricted)
-                            ) ||
+                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
                             (
-                              participantId != request.auth.uid &&
-                              isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role) &&
+                              (participantId == request.auth.uid && 
+                               (request.resource.data.role == resource.data.role || 
+                                (resource.data.role == 'host' && (request.resource.data.role == 'cohost' || request.resource.data.role == 'member')) ||
+                                (resource.data.role == 'cohost' && request.resource.data.role == 'member')
+                               ) &&
+                               (!request.resource.data.keys().hasAny(['micRestricted']) || !resource.data.keys().hasAny(['micRestricted']) || request.resource.data.micRestricted == resource.data.micRestricted) &&
+                               (!request.resource.data.keys().hasAny(['camRestricted']) || !resource.data.keys().hasAny(['camRestricted']) || request.resource.data.camRestricted == resource.data.camRestricted)
+                              ) ||
                               (
-                                (request.resource.data.role != resource.data.role && 
-                                 (
-                                   (get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'admin' && (request.resource.data.role == 'host' || request.resource.data.role == 'cohost' || request.resource.data.role == 'member')) ||
-                                   (get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'host' && (request.resource.data.role == 'host' || request.resource.data.role == 'cohost' || request.resource.data.role == 'member'))
-                                 )
-                                ) ||
-                                (request.resource.data.role == resource.data.role && 
-                                 get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'])
-                              ) &&
-                              (
-                                !request.resource.data.keys().hasAny(['micOn']) ||
-                                request.resource.data.micOn == false ||
+                                participantId != request.auth.uid &&
+                                isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role) &&
                                 (
-                                  resource.data.keys().hasAny(['micOn']) &&
-                                  request.resource.data.micOn == resource.data.micOn
-                                )
-                              ) &&
-                              (
-                                !request.resource.data.keys().hasAny(['camOn']) ||
-                                request.resource.data.camOn == false ||
+                                  (request.resource.data.role != resource.data.role && 
+                                   (
+                                     (get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'admin' && (request.resource.data.role == 'host' || request.resource.data.role == 'cohost' || request.resource.data.role == 'member')) ||
+                                     (get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'host' && (request.resource.data.role == 'host' || request.resource.data.role == 'cohost' || request.resource.data.role == 'member'))
+                                   )
+                                  ) ||
+                                  (request.resource.data.role == resource.data.role && 
+                                   get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'])
+                                ) &&
                                 (
-                                  resource.data.keys().hasAny(['camOn']) &&
-                                  request.resource.data.camOn == resource.data.camOn
+                                  !request.resource.data.keys().hasAny(['micOn']) ||
+                                  request.resource.data.micOn == false ||
+                                  (
+                                    resource.data.keys().hasAny(['micOn']) &&
+                                    request.resource.data.micOn == resource.data.micOn
+                                  )
+                                ) &&
+                                (
+                                  !request.resource.data.keys().hasAny(['camOn']) ||
+                                  request.resource.data.camOn == false ||
+                                  (
+                                    resource.data.keys().hasAny(['camOn']) &&
+                                    request.resource.data.camOn == resource.data.camOn
+                                  )
                                 )
                               )
                             )
+                          ) ||
+                          // Allow watchers to edit whiteboard if allowed by the presenter
+                          (
+                            participantId != request.auth.uid &&
+                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['whiteboardData']) &&
+                            resource.data.sharing == 'whiteboard' &&
+                            resource.data.whiteboardEditAllowed == true &&
+                            exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid))
                           )
-                        ) ||
-                        // Allow watchers to edit whiteboard if allowed by the presenter
-                        (
-                          participantId != request.auth.uid &&
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted']) &&
-                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['whiteboardData']) &&
-                          resource.data.sharing == 'whiteboard' &&
-                          resource.data.whiteboardEditAllowed == true &&
-                          exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid))
                         )
+                      ) ||
+                      (
+                        participantId.startsWith('guest_') &&
+                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status'])
                       );
                       
-        allow delete: if request.auth != null && 
-                      (
-                         participantId == request.auth.uid ||
-                         participantId.matches('^bot_.*') ||
+        allow delete: if (
+                        request.auth != null && 
                         (
-                          participantId != request.auth.uid &&
-                          isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role)
+                          participantId == request.auth.uid ||
+                          participantId.matches('^bot_.*') ||
+                          (
+                            participantId != request.auth.uid &&
+                            isHigherPrivilege(get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role, resource.data.role)
+                          )
                         )
-                      );
+                      ) || 
+                      participantId.startsWith('guest_');
       }
       
       // 5. Messages subcollection
       match /messages/{messageId} {
         allow read: if true;
-        allow create: if request.auth != null &&
-                      (
-                         request.resource.data.senderId == request.auth.uid ||
-                         request.resource.data.senderId.matches('^bot_.*')
+        allow create: if (
+                        (request.auth != null && request.resource.data.senderId == request.auth.uid) ||
+                        (request.resource.data.senderId.startsWith('guest_')) ||
+                        request.resource.data.senderId.matches('^bot_.*')
                       ) &&
                       request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt', 'mentionedId']) &&
-                      exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid));
+                      exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.resource.data.senderId));
         allow update, delete: if false;
       }
 
@@ -208,33 +232,49 @@ service cloud.firestore {
 
       // 6. JoinRequests subcollection: anyone can create/delete their own request document, mods can update (approve/deny)
       match /joinRequests/{requestId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null && requestId == request.auth.uid;
+        allow read: if true;
+        allow create: if (request.auth != null && requestId == request.auth.uid) || requestId.startsWith('guest_');
         allow update: if request.auth != null && 
                       get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'];
-        allow delete: if request.auth != null && (requestId == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']);
+        allow delete: if (request.auth != null && (requestId == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'])) ||
+                      requestId.startsWith('guest_');
       }
 
       // 7. Keys subcollection (No listing allowed except for mods to prevent key discovery)
       match /keys/{keyId} {
-        allow get: if request.auth != null;
-        allow list, create, delete: if request.auth != null && 
-          (
-            get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid ||
-            get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
-          );
+        allow get: if true;
+        allow list, create, delete: if (
+          (request.auth != null && 
+            (
+              get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid ||
+              get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
+            )
+          ) ||
+          get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId.startsWith('guest_')
+        );
       }
 
       // 8. Persistent approval list
       match /approvedUsers/{userId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null && 
+        allow read: if true;
+        allow write: if (
+          (request.auth != null && 
+            (
+              get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'] ||
+              (userId == request.auth.uid && get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid) ||
+              (userId == request.auth.uid && request.resource.data.keys().hasAll(['joinKey']) && 
+               exists(/databases/$(database)/documents/rooms/$(roomId)/keys/$(request.resource.data.joinKey)))
+            )
+          ) ||
           (
-            get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'] ||
-            (userId == request.auth.uid && get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId == request.auth.uid) ||
-            (userId == request.auth.uid && request.resource.data.keys().hasAll(['joinKey']) && 
-             exists(/databases/$(database)/documents/rooms/$(roomId)/keys/$(request.resource.data.joinKey)))
-          );
+            userId.startsWith('guest_') && 
+            (
+              get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId.startsWith('guest_') ||
+              (request.resource.data.keys().hasAll(['joinKey']) && 
+               exists(/databases/$(database)/documents/rooms/$(roomId)/keys/$(request.resource.data.joinKey)))
+            )
+          )
+        );
       }
 
       // 9. WebRTC signals subcollection (legacy/cleanup)

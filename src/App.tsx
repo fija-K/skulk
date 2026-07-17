@@ -2473,6 +2473,7 @@ function AppContent() {
       }
 
       try {
+        await updateDoc(doc(db, 'rooms', normalizedRoom.id), { emptySince: null }).catch(() => {});
         const presenceRef = doc(db, 'rooms', normalizedRoom.id, 'participants', myId);
         await setDoc(presenceRef, {
           uid: myId,
@@ -2787,24 +2788,28 @@ function AppContent() {
         }
       }
 
-      const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
-      await setDoc(presenceRef, {
-        uid: myId,
-        name: user ? user.displayName || 'Google User' : guestName,
-        photoURL: user ? user.photoURL : guestPhotoURL,
-        initials: guestInitials,
-        color: guestColor,
-        joinedAt: new Date().toISOString(),
-        role: myRole,
-        isMuted: isMicMutedRef.current,
-        isCamOff: isCamOffRef.current,
-        mutedBy: myId,
-        camOffBy: myId,
-        sessionId: currentSessionIdRef.current,
-        micOn: !isMicMutedRef.current,
-        camOn: !isCamOffRef.current,
-        status: myStatus === 'none' ? null : myStatus
-      }, { merge: true });
+      try {
+        const presenceRef = doc(db, 'rooms', rid, 'participants', myId);
+        await setDoc(presenceRef, {
+          uid: myId,
+          name: user ? user.displayName || 'Google User' : guestName,
+          photoURL: user ? user.photoURL : guestPhotoURL,
+          initials: guestInitials,
+          color: guestColor,
+          joinedAt: new Date().toISOString(),
+          role: myRole,
+          isMuted: isMicMutedRef.current,
+          isCamOff: isCamOffRef.current,
+          mutedBy: myId,
+          camOffBy: myId,
+          sessionId: currentSessionIdRef.current,
+          micOn: !isMicMutedRef.current,
+          camOn: !isCamOffRef.current,
+          status: myStatus === 'none' ? null : myStatus
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Failed to synchronize presence in syncAuthPresence:", err);
+      }
     };
     
     syncAuthPresence();
