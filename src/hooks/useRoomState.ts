@@ -144,6 +144,8 @@ export function useRoomState(
       if (!data.sharing && viewingShare.participantId !== getMyId()) {
         setViewingShare(null);
       }
+    }, (error) => {
+      console.warn("Spotify/YouTube presenter sync failed:", error);
     });
     return () => unsubscribe();
   }, [viewingShare?.participantId, viewingShare?.type, roomId, user, guestId]);
@@ -165,6 +167,8 @@ export function useRoomState(
       if (!data.sharing && viewingShare.participantId !== getMyId()) {
         setViewingShare(null);
       }
+    }, (error) => {
+      console.warn("Screen presenter sync failed:", error);
     });
     return () => unsubscribe();
   }, [viewingShare?.participantId, viewingShare?.type, roomId, user, guestId]);
