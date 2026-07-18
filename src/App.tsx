@@ -1317,7 +1317,6 @@ function AppContent() {
     setSystemMessages,
     viewingShare,
     setViewingShare,
-    allowFunTools,
     todSpinResult,
     setTodSpinResult,
     todSpinPool,
@@ -1574,15 +1573,6 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [currentRoom?.id, currentRoom?.roomMode, micBlockedUntil, isMicMuted]);
 
-  // Switch tab off tools if focus mode becomes active
-  useEffect(() => {
-    if (currentRoom) {
-      const mode = currentRoom.roomMode || 'chill';
-      if ((mode === 'discuss' || mode === 'non-discuss') && callTab === 'tools') {
-        setCallTab('chat');
-      }
-    }
-  }, [currentRoom?.roomMode, callTab]);
 
   leavePresenceFn = leavePresence;
   const isInitialLoadRef = useRef(true);
@@ -7700,14 +7690,12 @@ function AppContent() {
                 >
                   People ({callParticipants.length})
                 </button>
-                {!(currentRoom.roomMode === 'discuss' || currentRoom.roomMode === 'non-discuss') && (
-                  <button 
-                    onClick={() => setCallTab('tools')} 
-                    className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
-                  >
-                    Tools
-                  </button>
-                )}
+                <button 
+                  onClick={() => setCallTab('tools')} 
+                  className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
+                >
+                  Tools
+                </button>
               </div>
 
               {/* Sidebar Body Content Panels */}
@@ -7939,7 +7927,7 @@ function AppContent() {
                   </div>
                 )}
 
-                                     {callTab === 'tools' && !(currentRoom.roomMode === 'discuss' || currentRoom.roomMode === 'non-discuss') && (
+                  {callTab === 'tools' && (
                   <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     
                     {activeToolDetail === 'none' && (
@@ -8158,9 +8146,9 @@ function AppContent() {
                            </div>
                         </div>
 
-                        {/* Section 2: Fun Section (Disabled for everyone if toggle is OFF) */}
+                        {/* Section 2: Fun Section (Disabled for everyone if Room Mode is Focus/Ultra Pro Max) */}
                         {(() => {
-                          const isFunLocked = !allowFunTools;
+                          const isFunLocked = (currentRoom?.roomMode === 'discuss' || currentRoom?.roomMode === 'non-discuss');
 
                           return (
                             <div>
@@ -8170,7 +8158,7 @@ function AppContent() {
                                 </h4>
                                 {isFunLocked && (
                                   <span style={{ fontSize: '9px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                    🔒 Study Mode Active
+                                    🔒 Locked in Focus Mode
                                   </span>
                                 )}
                               </div>
@@ -8181,13 +8169,13 @@ function AppContent() {
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
                                     if (isFunLocked) {
-                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
+                                      showToast("🔒 Fun tools are disabled in Focus Mode. Switch back to Chill Mode to play.");
                                       return;
                                     }
                                     setActiveToolDetail('games');
                                     setActiveGameId(null);
                                   }}
-                                  title="Play games together"
+                                  title={isFunLocked ? "🔒 Locked in Focus Mode" : "Play games together"}
                                 >
                                   <div className="tool-card-icon-wrapper">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -8206,13 +8194,13 @@ function AppContent() {
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
                                     if (isFunLocked) {
-                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
+                                      showToast("🔒 Fun tools are disabled in Focus Mode. Switch back to Chill Mode to play.");
                                       return;
                                     }
                                     setActiveToolDetail('truthordare');
                                     setActiveGameId(null);
                                   }}
-                                  title="Play Truth or Dare spinner wheel"
+                                  title={isFunLocked ? "🔒 Locked in Focus Mode" : "Play Truth or Dare spinner wheel"}
                                 >
                                   <div className="tool-card-icon-wrapper">
                                     🎲
@@ -8228,13 +8216,13 @@ function AppContent() {
                                   className={`tool-card ${isFunLocked ? 'locked-disabled' : ''}`}
                                   onClick={() => {
                                     if (isFunLocked) {
-                                      showToast("🔒 Fun tools are disabled. Turn them on in Room Settings to play.");
+                                      showToast("🔒 Fun tools are disabled in Focus Mode. Switch back to Chill Mode to play.");
                                       return;
                                     }
                                     setActiveToolDetail('streaming');
                                     setActiveGameId(null);
                                   }}
-                                  title="Stream Vimeo, Dailymotion, or Twitch together"
+                                  title={isFunLocked ? "🔒 Locked in Focus Mode" : "Stream Vimeo, Dailymotion, or Twitch together"}
                                 >
                                   <div className="tool-card-icon-wrapper" style={{ color: '#a855f7' }}>
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
