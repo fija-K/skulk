@@ -44,17 +44,17 @@ const drawWaveform = (canvas: HTMLCanvasElement, volume: number, phase: number) 
   const rootStyle = getComputedStyle(document.documentElement);
   const primaryColor = rootStyle.getPropertyValue('--primary-color').trim() || '#f1c40f';
 
-  // Apply volume sensitivity boost multiplier, clamped at 1.0
-  const boostedVolume = Math.min(volume * 4.5, 1.0);
+  // Make it more sensitive to quiet voices, but scale dynamically for louder voices
+  const boostedVolume = volume > 0 ? Math.min(Math.pow(volume, 0.6) * 5.5, 1.3) : 0;
 
   // Apply a subtle neon-line glow using canvas shadow properties
   ctx.shadowColor = primaryColor;
-  ctx.shadowBlur = boostedVolume > 0 ? 8 : 2; // enhanced neon glow when speaking
+  ctx.shadowBlur = boostedVolume > 0 ? 4 + boostedVolume * 8 : 2; // enhanced neon glow scaling with voice volume
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
 
   ctx.strokeStyle = primaryColor;
-  ctx.lineWidth = 2.0; // thin line
+  ctx.lineWidth = boostedVolume > 0 ? 1.5 + boostedVolume * 1.5 : 2.0; // line gets thicker as volume increases
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
@@ -426,195 +426,209 @@ export function ParticipantTile({
       }}
     >
       {isGalleryView && !isThumbnail ? (
-        // Gallery Layout or camera is ON: Full Card Video/Avatar
-        showMediaTakeover ? (
-          /* Takeover card for gallery layout - beautifully contained */
-          <div 
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              padding: '12px',
-              background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
-              boxSizing: 'border-box'
-            }}
-          >
-            <div style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(241, 196, 15, 0.15)',
-              border: '2px dashed var(--primary-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              animation: 'pulse 2s infinite'
-            }}>
-              <span style={{ fontSize: '18px', color: 'var(--primary-color)', marginLeft: '3px' }}>▶</span>
+        <>
+          {showMediaTakeover ? (
+            /* Takeover card for gallery layout - beautifully contained */
+            <div 
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '12px',
+                background: 'radial-gradient(circle, rgba(241, 196, 15, 0.15) 0%, rgba(15, 16, 19, 0.95) 100%)',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(241, 196, 15, 0.15)',
+                border: '2px dashed var(--primary-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'pulse 2s infinite'
+              }}>
+                <span style={{ fontSize: '18px', color: 'var(--primary-color)', marginLeft: '3px' }}>▶</span>
+              </div>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--primary-color)', letterSpacing: '0.1em', textTransform: 'uppercase', textAlign: 'center' }}>
+                Watching Together
+              </span>
+              <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>Click to join</span>
             </div>
-            <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--primary-color)', letterSpacing: '0.1em', textTransform: 'uppercase', textAlign: 'center' }}>
-              Watching Together
-            </span>
-            <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>Click to join</span>
-          </div>
-        ) : (
-          <>
-            {/* Keep video element in DOM */}
-            <div className="tile-video-wrapper">
-              {isUser && cameraError ? (
-                // Refined camera error display: show PFP/initials background + a small centered retry box!
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          ) : (
+            <>
+              {/* Keep video element in DOM */}
+              <div className="tile-video-wrapper">
+                {isUser && cameraError ? (
+                  // Refined camera error display: show PFP/initials background + a small centered retry box!
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    {p.photoURL ? (
+                      <img 
+                        src={p.photoURL} 
+                        alt={p.name} 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                    )}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
+                      }}
+                      style={{
+                        position: 'absolute',
+                        padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
+                        border: '1px solid var(--border-color)', borderRadius: '6px',
+                        cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
+                    </div>
+                  </div>
+                ) : (
+                  <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
+                )}
+              </div>
+              
+              {/* Large avatar circle wrapper – status badge lives outside overflow:hidden */}
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div 
+                  className="participant-avatar-large" 
+                  style={{ 
+                    backgroundColor: p.color, 
+                    cursor: p.sharing ? 'pointer' : 'default',
+                    position: 'relative',
+                    boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
+                    border: p.sharing ? '2px solid var(--primary-color)' : 'none',
+                    overflow: 'hidden',
+                    width: '96px',
+                    height: '96px',
+                    borderRadius: '50%',
+                    fontSize: '32px',
+                    marginBottom: '0'
+                  }}
+                  onClick={() => {
+                    if (p.sharing) {
+                      handleViewParticipantShare(p);
+                    } else if (handleOpenProfile) {
+                      handleOpenProfile({
+                        id: p.uid || p.id,
+                        name: p.name.replace(' (You)', ''),
+                        initials: p.initials,
+                        color: p.color || '#3b82f6',
+                        photoURL: p.photoURL
+                      }, 'card');
+                    }
+                  }}
+                >
                   {p.photoURL ? (
                     <img 
                       src={p.photoURL} 
                       alt={p.name} 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'rgba(255,255,255,0.2)' }}>{p.initials}</div>
+                    p.initials
                   )}
-                  <div 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.dispatchEvent(new CustomEvent('retry-device', { detail: 'camera' }));
-                    }}
-                    style={{
-                      position: 'absolute',
-                      padding: '8px 16px', background: 'rgba(15, 16, 19, 0.85)',
-                      border: '1px solid var(--border-color)', borderRadius: '6px',
-                      cursor: 'pointer', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px'
-                    }}
-                  >
-                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>Camera Unavailable</span>
-                    <span style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>Click to retry</span>
-                  </div>
                 </div>
-              ) : (
-                <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
-              )}
-              <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '24px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
-            </div>
-            
-            {/* Large avatar circle wrapper – status badge lives outside overflow:hidden */}
-            <div style={{ position: 'relative', display: 'inline-block' }}>
-              <div 
-                className="participant-avatar-large" 
-                style={{ 
-                  backgroundColor: p.color, 
-                  cursor: p.sharing ? 'pointer' : 'default',
-                  position: 'relative',
-                  boxShadow: p.sharing ? '0 0 12px var(--primary-color)' : 'none',
-                  border: p.sharing ? '2px solid var(--primary-color)' : 'none',
-                  overflow: 'hidden',
-                  width: '96px',
-                  height: '96px',
-                  borderRadius: '50%',
-                  fontSize: '32px',
-                  marginBottom: '0'
-                }}
-                onClick={() => {
-                  if (p.sharing) {
-                    handleViewParticipantShare(p);
-                  } else if (handleOpenProfile) {
-                    handleOpenProfile({
-                      id: p.uid || p.id,
-                      name: p.name.replace(' (You)', ''),
-                      initials: p.initials,
-                      color: p.color || '#3b82f6',
-                      photoURL: p.photoURL
-                    }, 'card');
-                  }
-                }}
-              >
-                {p.photoURL ? (
-                  <img 
-                    src={p.photoURL} 
-                    alt={p.name} 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  p.initials
-                )}
-                <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '24px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
+                {/* Status badge — covers bottom-left ~1/8 of avatar */}
+                {p.status && p.status !== 'none' && (() => {
+                  const STATUS_EMOJI: Record<string, string> = {
+                    dnd: '⛔', zZ: '💤', brb: '🚶', chillin: '😎'
+                  };
+                  const STATUS_COLOR: Record<string, string> = {
+                    dnd: '#ef4444', zZ: '#8b5cf6', brb: '#f59e0b', chillin: '#10b981'
+                  };
+                  const emoji = STATUS_EMOJI[p.status] || '';
+                  const bgColor = STATUS_COLOR[p.status] || '#64748b';
+                  // Badge = ~1/8 the circle area. Avatar is 96px → badge ~28px
+                  return (
+                    <div
+                      className="participant-status-badge"
+                      style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: 28,
+                        height: 28,
+                        borderRadius: '50%',
+                        backgroundColor: bgColor,
+                        border: '2px solid #0f1013',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 14,
+                        lineHeight: 1,
+                        zIndex: 5,
+                        pointerEvents: 'none',
+                        boxShadow: `0 0 8px ${bgColor}66`
+                      }}
+                      title={p.status.toUpperCase()}
+                    >
+                      {emoji}
+                    </div>
+                  );
+                })()}
               </div>
-              {/* Status badge — covers bottom-left ~1/8 of avatar */}
-              {p.status && p.status !== 'none' && (() => {
-                const STATUS_EMOJI: Record<string, string> = {
-                  dnd: '⛔', zZ: '💤', brb: '🚶', chillin: '😎'
-                };
-                const STATUS_COLOR: Record<string, string> = {
-                  dnd: '#ef4444', zZ: '#8b5cf6', brb: '#f59e0b', chillin: '#10b981'
-                };
-                const emoji = STATUS_EMOJI[p.status] || '';
-                const bgColor = STATUS_COLOR[p.status] || '#64748b';
-                // Badge = ~1/8 the circle area. Avatar is 96px → badge ~28px
-                return (
-                  <div
-                    className="participant-status-badge"
-                    style={{
-                      position: 'absolute',
-                      bottom: 0,
-                      left: 0,
-                      width: 28,
-                      height: 28,
-                      borderRadius: '50%',
-                      backgroundColor: bgColor,
-                      border: '2px solid #0f1013',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 14,
-                      lineHeight: 1,
-                      zIndex: 5,
-                      pointerEvents: 'none',
-                      boxShadow: `0 0 8px ${bgColor}66`
-                    }}
-                    title={p.status.toUpperCase()}
-                  >
-                    {emoji}
-                  </div>
-                );
-              })()}
-            </div>
 
-            {p.sharing && (
-              <div className="sharing-badge-overlay" style={{
-                position: 'absolute',
-                bottom: '12px',
-                right: '12px',
-                backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
-                color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
-                borderRadius: '50%',
-                width: '22px',
-                height: '22px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                border: '2px solid var(--card-bg, #1a1c23)',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                zIndex: 10
-              }} title={`Sharing ${p.sharing} - click to view`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewParticipantShare(p);
-                }}
-              >
-                {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
-              </div>
-            )}
-          </>
-        )
+              {p.sharing && (
+                <div className="sharing-badge-overlay" style={{
+                  position: 'absolute',
+                  bottom: '12px',
+                  right: '12px',
+                  backgroundColor: p.sharing === 'youtube' ? 'var(--primary-color)' : p.sharing === 'whiteboard' ? '#10b981' : p.sharing === 'spotify' ? '#1db954' : '#3b82f6',
+                  color: (p.sharing === 'youtube' || p.sharing === 'whiteboard' || p.sharing === 'spotify') ? '#0f1013' : '#ffffff',
+                  borderRadius: '50%',
+                  width: '22px',
+                  height: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  border: '2px solid var(--card-bg, #1a1c23)',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                  zIndex: 10
+                }} title={`Sharing ${p.sharing} - click to view`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewParticipantShare(p);
+                  }}
+                >
+                  {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
+                </div>
+              )}
+            </>
+          )}
+          {/* Main rectangle ECG line canvas positioned at the bottom of the card */}
+          <canvas 
+            className="ecg-canvas" 
+            ref={registerCanvas} 
+            style={{ 
+              position: 'absolute', 
+              bottom: '4px', 
+              left: 0, 
+              width: '100%', 
+              height: '24px', 
+              pointerEvents: 'none', 
+              zIndex: 6, 
+              display: showMuted ? 'none' : 'block' 
+            }} 
+          />
+        </>
       ) : (
         // Compact Grid Layout OR Floating Avatar
         <div style={{ position: 'relative', display: 'inline-block' }}>

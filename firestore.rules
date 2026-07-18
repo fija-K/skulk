@@ -65,6 +65,24 @@ service cloud.firestore {
              exists(/databases/$(database)/documents/follows/$(uid2 + '_' + uid1));
     }
 
+    // Helper function to check if a thread is a valid mentor thread for a given auth user
+    function isMentorThread(threadId, uid) {
+      return threadId == 'mentor_leader_' + uid ||
+             threadId == 'mentor_mr_x_' + uid ||
+             threadId == 'mentor_little_miss_' + uid ||
+             threadId == 'mentor_mam_' + uid ||
+             threadId == 'mentor_sir_' + uid;
+    }
+
+    // Helper function to check if a participant ID is a valid mentor bot
+    function isMentorBot(botId) {
+      return botId == 'bot_mentor_leader' ||
+             botId == 'bot_mentor_mr_x' ||
+             botId == 'bot_mentor_little_miss' ||
+             botId == 'bot_mentor_mam' ||
+             botId == 'bot_mentor_sir';
+    }
+
     // Direct Messages (DMs) between Connections
     match /dm_threads/{threadId} {
       allow read: if request.auth != null && (request.auth.uid in resource.data.participants);
@@ -83,8 +101,14 @@ service cloud.firestore {
           ||
           // Mentor thread
           (
-            threadId == 'mentor_' + request.auth.uid
-            && ('bot_mentor' in request.resource.data.participants)
+            isMentorThread(threadId, request.auth.uid)
+            && (
+              ('bot_mentor_leader' in request.resource.data.participants) ||
+              ('bot_mentor_mr_x' in request.resource.data.participants) ||
+              ('bot_mentor_little_miss' in request.resource.data.participants) ||
+              ('bot_mentor_mam' in request.resource.data.participants) ||
+              ('bot_mentor_sir' in request.resource.data.participants)
+            )
           )
         );
       
@@ -113,12 +137,12 @@ service cloud.firestore {
             request.resource.data.lastMessageText is string &&
             (
               isConnected(resource.data.participants[0], resource.data.participants[1])
-              || threadId == 'mentor_' + request.auth.uid
+              || isMentorThread(threadId, request.auth.uid)
             )
           ) ||
           // Case 3: Wellness ping / reminder sending (allows updating wellness ping timestamp)
           (
-            threadId == 'mentor_' + request.auth.uid &&
+            isMentorThread(threadId, request.auth.uid) &&
             request.resource.data.lastMessageTime == request.time &&
             request.resource.data.lastMessageText is string
           )
@@ -132,7 +156,7 @@ service cloud.firestore {
         allow create: if request.auth != null
           && (
             request.auth.uid == request.resource.data.senderId
-            || (threadId == 'mentor_' + request.auth.uid && request.resource.data.senderId == 'bot_mentor')
+            || (isMentorThread(threadId, request.auth.uid) && isMentorBot(request.resource.data.senderId))
           )
           && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants)
           && request.resource.data.createdAt == request.time
@@ -149,7 +173,7 @@ service cloud.firestore {
             ||
             // Mentor message exemption (no TTL required, no connection required)
             (
-              threadId == 'mentor_' + request.auth.uid
+              isMentorThread(threadId, request.auth.uid)
               && !('expiresAt' in request.resource.data)
             )
           );

@@ -2172,67 +2172,168 @@ function AppContent() {
   // Runs only while the tab is open. Duplicate-tab prevention: before posting,
   // reads the mentor thread doc and checks lastWellnessPingTime — skips if
   // another tab already posted within the last 55 minutes.
-  const WELLNESS_ROTATION = [
-    { type: 'water',   text: "💧 Drink water. Right now — before you touch anything else. Go." },
-    { type: 'eyes',    text: "👁️ Close your eyes for 20 seconds. Look at something 20 feet away. Do it." },
-    { type: 'stretch', text: "🧘 Stand up. Stretch your back and neck for 30 seconds. Then sit back down and work." }
-  ];
+  const CANNED_WELLNESS_MESSAGES: Record<string, Record<string, string[]>> = {
+    sir: {
+      water: [
+        "Hydrate. No excuses. Go drink water now.",
+        "Your brain is sluggish because you're dry. Go get water. Move.",
+        "Stop staring at the screen and drink some water. Discomfort is part of the grind, dehydration is just stupidity."
+      ],
+      eyes: [
+        "Rest your eyes. 20 seconds. Look away. Grind requires vision. Do it.",
+        "Look at something 20 feet away. Close your eyes. Grind now, cry later.",
+        "Focus on the wall or look outside for 20 seconds. Blink. Your screen is destroying your retina."
+      ],
+      stretch: [
+        "Stand up. Stretch. Posture check. Move your body for 30 seconds. Now.",
+        "Get up. Stretch. Sitting like a statue won't pass the class. Grind.",
+        "Stand up and move. Do some squats or stretch your neck. Sitting down for hours isn't productivity, it's laziness."
+      ]
+    },
+    leader: {
+      water: [
+        "Hey kid, I look like a guy who sells counterfeit watches, but please: go drink some water now. Do it.",
+        "My doctors tell me water is good for the liver. I tell you it's good for the focus. Go get a glass.",
+        "Listen to me. Go grab a cup of cold water. I'll wait here, looking menacingly."
+      ],
+      eyes: [
+        "Close your eyes. Stare at something far away for 20 seconds. Trust me, it helps. Do it.",
+        "My face causes eye strain. Go look out the window for 20 seconds to reset. Right now.",
+        "Give your eyes a break. Close them for 20 seconds and picture your goals. Or a nice sandwich."
+      ],
+      stretch: [
+        "Stand up. Stretch. I look stiff, but I still stretch my neck. Do it now.",
+        "Grind is good, but standing up to stretch is better. Get up for 30 seconds.",
+        "Posture check! Stand up and roll your shoulders back. You're starting to look like a gargoyle."
+      ]
+    },
+    mr_x: {
+      water: [
+        "Dehydration is a pathetic excuse for slowing down. Go drink some water.",
+        "Your brain is mostly water. Act like it and go get a glass. Now.",
+        "Why are you still sitting there? Go fetch some water. You can't think straight without it."
+      ],
+      eyes: [
+        "Staring at this screen won't make you study faster. Look 20 feet away for 20 seconds. Go.",
+        "Give your eyes a break. Close them for 20 seconds. Do it before you fail.",
+        "Eyes off the screen! Stare at the distance for 20 seconds. Your eyes aren't made of steel."
+      ],
+      stretch: [
+        "Your posture is embarrassing. Stand up and stretch. Now.",
+        "Stand up. Stretch your spine. You look like a shrimp. Fix it.",
+        "Get up and stretch for 30 seconds. Your lower back is begging for mercy. Do it."
+      ]
+    },
+    mam: {
+      water: [
+        "Ara ara~ Dehydrated already? Mama says go drink some water right now.",
+        "Ara ara, a thirsty child is a distracted child. Go get some water, dear.",
+        "Ara ara, mama's watching you. Go fill up your water glass this instant!"
+      ],
+      eyes: [
+        "Ara ara, your eyes look tired. Close them for 20 seconds and look far away.",
+        "Ara ara, look away from the screen. Protect your sight, dear. Do it now.",
+        "Ara ara, let's close our eyes together for 20 seconds. Stare far away, let them rest."
+      ],
+      stretch: [
+        "Ara ara~ stand up and stretch. Mama wants you to have good posture.",
+        "Ara ara, stand up for 30 seconds. Stretch those shoulders, then return to work.",
+        "Ara ara, stretch your back, dear. Mama doesn't want you getting all stiff."
+      ]
+    },
+    little_miss: {
+      water: [
+        "Oh! Oopsie, don't forget to stay hydrated! Go get some water right now, okay? Drink up!",
+        "A quick water sip break! Go go, get a glass of water now!",
+        "Water time! Go get some hydration, don't let your brain dry out!"
+      ],
+      eyes: [
+        "Look away from the screen! Stare at something far away for 20 seconds. Close those eyes!",
+        "Protect your pretty eyes! Stare out the window for 20 seconds. Do it!",
+        "Oopsie! Too much screen time. Close your eyes and count to 20!"
+      ],
+      stretch: [
+        "Stand up and reach for the stars! Stretch that back for 30 seconds. Up you go!",
+        "Let's stretch together! Stand up, move your shoulders, breathe in. Okay, back to work!",
+        "Stand up and shake those legs! A quick 30-second stretch, you got this!"
+      ]
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
-    const mentorThreadId = `mentor_${user.uid}`;
+    const activePersona = userDataState?.activeMentorPersona || 'leader';
+    const mentorThreadId = `mentor_${activePersona}_${user.uid}`;
     let pingIndex = 0;
 
     const runWellnessPing = async () => {
       try {
         const threadRef = doc(db, 'dm_threads', mentorThreadId);
-        const threadSnap = await getDoc(threadRef);
-
-        // Duplicate tab guard: skip if another tab already pinged within 55 min
-        if (threadSnap.exists()) {
-          const lastPingTs = threadSnap.data()?.lastWellnessPingTime;
-          if (lastPingTs) {
-            const lastMs = lastPingTs.toDate ? lastPingTs.toDate().getTime() : new Date(lastPingTs).getTime();
-            if (Date.now() - lastMs < 55 * 60 * 1000) {
-              return; // Another tab already pinged — skip silently
+        
+        const result = await runTransaction(db, async (transaction) => {
+          const threadSnap = await transaction.get(threadRef);
+          
+          // Check lastWellnessPingTime for duplicate prevention
+          if (threadSnap.exists()) {
+            const lastPingTs = threadSnap.data()?.lastWellnessPingTime;
+            if (lastPingTs) {
+              const lastMs = lastPingTs.toDate ? lastPingTs.toDate().getTime() : new Date(lastPingTs).getTime();
+              if (Date.now() - lastMs < 55 * 60 * 1000) {
+                return { success: false, reason: 'skipped_duplicate' };
+              }
             }
           }
-        }
 
-        const ping = WELLNESS_ROTATION[pingIndex % WELLNESS_ROTATION.length];
-        pingIndex++;
+          // Determine next message category
+          const types = ['water', 'eyes', 'stretch'];
+          const type = types[pingIndex % types.length];
+          const messagesArray = CANNED_WELLNESS_MESSAGES[activePersona]?.[type] || CANNED_WELLNESS_MESSAGES.leader[type];
+          
+          // Select message (rotate using pingIndex)
+          const text = messagesArray[Math.floor(pingIndex / 3) % messagesArray.length];
+          const now = serverTimestamp();
+          const participants = [user.uid, `bot_mentor_${activePersona}`];
 
-        const now = serverTimestamp();
+          // Set thread doc
+          transaction.set(threadRef, {
+            participants,
+            lastMessageText: text,
+            lastMessageTime: now,
+            lastWellnessPingTime: now,
+            unread: { [user.uid]: true },
+            createdAt: threadSnap.exists() ? (threadSnap.data()?.createdAt || now) : now
+          }, { merge: true });
 
-        // Ensure mentor thread exists
-        await setDoc(threadRef, {
-          participants: [user.uid, 'bot_mentor'],
-          lastMessageText: ping.text,
-          lastMessageTime: now,
-          lastWellnessPingTime: now,
-          unread: { [user.uid]: true },
-          createdAt: now
-        }, { merge: true });
+          // Set subcollection message doc
+          const messagesCol = collection(db, 'dm_threads', mentorThreadId, 'messages');
+          const newMsgRef = doc(messagesCol);
+          transaction.set(newMsgRef, {
+            senderId: `bot_mentor_${activePersona}`,
+            senderName: activePersona === 'sir' ? 'Sir' :
+                        activePersona === 'leader' ? 'Leader' :
+                        activePersona === 'mr_x' ? 'Mr. X' :
+                        activePersona === 'mam' ? 'Mam' : 'Little Miss',
+            text,
+            createdAt: now,
+            wellnessType: type
+          });
 
-        // Write the wellness message (no expiresAt — persists forever)
-        await addDoc(collection(db, 'dm_threads', mentorThreadId, 'messages'), {
-          senderId: 'bot_mentor',
-          senderName: 'Mentor',
-          text: ping.text,
-          createdAt: now,
-          wellnessType: ping.type
+          return { success: true, text };
         });
 
-        showToast(`🧠 Mentor: ${ping.text}`);
+        if (result.success && result.text) {
+          pingIndex++;
+          showToast(`🧠 Mentor: ${result.text}`);
+        }
       } catch (err) {
-        console.warn('Wellness ping failed:', err);
+        console.warn('Wellness transaction failed:', err);
       }
     };
 
     // Fire first ping after 60 minutes, then every 60 minutes
     const intervalId = setInterval(runWellnessPing, 60 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [user]);
+  }, [user, userDataState?.activeMentorPersona]);
 
   // ─── Tier 2: Custom Reminder Listener ─────────────────────────────────────
   // Listens to user's reminders subcollection and fires them at their scheduled time.
@@ -2267,22 +2368,28 @@ function AppContent() {
 
         const timerId = setTimeout(async () => {
           try {
-            const mentorThreadId = `mentor_${user.uid}`;
+            const activePersona = userDataState?.activeMentorPersona || 'leader';
+            const mentorThreadId = `mentor_${activePersona}_${user.uid}`;
             const threadRef = doc(db, 'dm_threads', mentorThreadId);
             const now = serverTimestamp();
             const text = `⏰ Reminder: ${data.text}`;
 
             await setDoc(threadRef, {
-              participants: [user.uid, 'bot_mentor'],
+              participants: [user.uid, `bot_mentor_${activePersona}`],
               lastMessageText: text,
               lastMessageTime: now,
               unread: { [user.uid]: true },
               createdAt: now
             }, { merge: true });
 
+            const mentorName = activePersona === 'sir' ? 'Sir' :
+                               activePersona === 'leader' ? 'Leader' :
+                               activePersona === 'mr_x' ? 'Mr. X' :
+                               activePersona === 'mam' ? 'Mam' : 'Little Miss';
+
             await addDoc(collection(db, 'dm_threads', mentorThreadId, 'messages'), {
-              senderId: 'bot_mentor',
-              senderName: 'Mentor',
+              senderId: `bot_mentor_${activePersona}`,
+              senderName: mentorName,
               text,
               createdAt: now
             });
@@ -2306,7 +2413,7 @@ function AppContent() {
       activeTimers.forEach(clearTimeout);
       activeTimers.clear();
     };
-  }, [user]);
+  }, [user, userDataState?.activeMentorPersona]);
 
   // Background self-healing for denormalized follow counts
   useEffect(() => {
@@ -7496,6 +7603,7 @@ function AppContent() {
                   followerUserIds={followerUserIds}
                   showToast={showToast}
                   targetsList={targetsList}
+                  userDataState={userDataState}
                 />
               </div>
             ) : (
@@ -9848,6 +9956,7 @@ function AppContent() {
                     followerUserIds={followerUserIds}
                     showToast={showToast}
                     targetsList={targetsList}
+                    userDataState={userDataState}
                   />
                 )}
 
