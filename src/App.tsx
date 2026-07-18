@@ -1239,7 +1239,7 @@ function AppContent() {
   }), []);
   
   // Sidebar tabs in-call panel
-  const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools'>('chat');
+  const [callTab, setCallTab] = useState<'chat' | 'people' | 'tools' | 'dm'>('chat');
 
   // Lexically declared refs and callbacks for hooks
   const localJoinTimeRef = useRef<number | null>(null);
@@ -1733,19 +1733,40 @@ function AppContent() {
   const [isMiniModeActive, setIsMiniModeActive] = useState(false);
   const [miniModeTab, setMiniModeTab] = useState<'call' | 'tool' | 'chat'>('call');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [unreadDmCount, setUnreadDmCount] = useState(0);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('skulk_sidebar_collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('skulk_sidebar_collapsed', isSidebarCollapsed.toString());
+  }, [isSidebarCollapsed]);
 
   const isChatActiveRef = useRef(false);
   useEffect(() => {
-    isChatActiveRef.current = isMiniModeActive ? (miniModeTab === 'chat') : (callTab === 'chat');
-  }, [callTab, miniModeTab, isMiniModeActive]);
+    const isChatActive = isMiniModeActive 
+      ? (miniModeTab === 'chat') 
+      : (!isSidebarCollapsed && callTab === 'chat');
+    isChatActiveRef.current = isChatActive;
+  }, [callTab, miniModeTab, isMiniModeActive, isSidebarCollapsed]);
 
   // Clear unread count when chat is active either in sidebar or PiP
   useEffect(() => {
-    const isChatActive = isMiniModeActive ? (miniModeTab === 'chat') : (callTab === 'chat');
+    const isChatActive = isMiniModeActive 
+      ? (miniModeTab === 'chat') 
+      : (!isSidebarCollapsed && callTab === 'chat');
     if (isChatActive) {
       setUnreadChatCount(0);
     }
-  }, [callTab, miniModeTab, isMiniModeActive]);
+  }, [callTab, miniModeTab, isMiniModeActive, isSidebarCollapsed]);
+
+  // Clear unread DM count when DM tab is active in sidebar
+  useEffect(() => {
+    if (!isSidebarCollapsed && callTab === 'dm') {
+      setUnreadDmCount(0);
+    }
+  }, [callTab, isSidebarCollapsed]);
 
   // Update browser tab title / badge when there are unread messages
   useEffect(() => {
@@ -7715,28 +7736,90 @@ function AppContent() {
 
             {/* Call Sidebar (Right Panel) */}
             {!spotlightParticipantId && (
-              <div className="call-sidebar">
-              {/* Sidebar Header Tabs */}
-              <div className="call-sidebar-header">
+              <>
+                {/* Floating collapse/expand toggle button */}
                 <button 
-                  onClick={() => setCallTab('chat')} 
-                  className={`sidebar-tab-btn ${callTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                  className={`sidebar-toggle-btn ${isSidebarCollapsed ? 'collapsed' : ''}`}
+                  title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                  style={{
+                    right: isSidebarCollapsed ? '0px' : '320px'
+                  }}
                 >
-                  Chat
+                  {isSidebarCollapsed ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                  )}
+                  {isSidebarCollapsed && (
+                    <div style={{ position: 'absolute', top: '4px', right: '4px', display: 'flex', gap: '3px' }}>
+                      {unreadDmCount > 0 && (
+                        <span 
+                          style={{ 
+                            width: '6px', 
+                            height: '6px', 
+                            borderRadius: '50%', 
+                            backgroundColor: '#3b82f6', 
+                            border: '1px solid var(--panel-bg, #1e222b)',
+                            boxShadow: '0 0 4px #3b82f6' 
+                          }} 
+                        />
+                      )}
+                      {unreadChatCount > 0 && (
+                        <span 
+                          style={{ 
+                            width: '6px', 
+                            height: '6px', 
+                            borderRadius: '50%', 
+                            backgroundColor: '#ef4444', 
+                            border: '1px solid var(--panel-bg, #1e222b)',
+                            boxShadow: '0 0 4px #ef4444' 
+                          }} 
+                        />
+                      )}
+                    </div>
+                  )}
                 </button>
-                <button 
-                  onClick={() => setCallTab('people')} 
-                  className={`sidebar-tab-btn ${callTab === 'people' ? 'active' : ''}`}
+
+                <div 
+                  className={`call-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}
+                  style={{
+                    width: isSidebarCollapsed ? '0px' : '320px',
+                    minWidth: isSidebarCollapsed ? '0px' : '320px',
+                    borderLeft: isSidebarCollapsed ? 'none' : undefined,
+                    overflow: 'hidden',
+                    transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-left 0.3s ease'
+                  }}
                 >
-                  People ({callParticipants.length})
-                </button>
-                <button 
-                  onClick={() => setCallTab('tools')} 
-                  className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
-                >
-                  Tools
-                </button>
-              </div>
+                  {/* Sidebar Header Tabs */}
+                  <div className="call-sidebar-header">
+                    <button 
+                      onClick={() => setCallTab('chat')} 
+                      className={`sidebar-tab-btn ${callTab === 'chat' ? 'active' : ''}`}
+                      style={{ position: 'relative' }}
+                    >
+                      Chat
+                      {callTab !== 'chat' && unreadChatCount > 0 && (
+                        <span className="tab-unread-dot" />
+                      )}
+                    </button>
+                    <button 
+                      onClick={() => setCallTab('people')} 
+                      className={`sidebar-tab-btn ${callTab === 'people' ? 'active' : ''}`}
+                    >
+                      People ({callParticipants.length})
+                    </button>
+                    <button 
+                      onClick={() => setCallTab('tools')} 
+                      className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
+                    >
+                      Tools
+                    </button>
+                  </div>
 
               {/* Sidebar Body Content Panels */}
               <div className="sidebar-content">
@@ -8886,7 +8969,8 @@ function AppContent() {
 
               </div>
             </div>
-            )}
+          </>
+          )}
 
           </div>
 

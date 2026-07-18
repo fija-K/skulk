@@ -2761,4 +2761,67 @@ div[id^="dailymotion-player-"] > div {
   }
 }
 
+/* Sidebar Toggle & Collapsible Styles */
+.sidebar-toggle-btn {
+  position: absolute;
+  top: 16px;
+  width: 28px;
+  height: 40px;
+  background-color: var(--panel-bg, #1e222b);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  color: var(--text-secondary, #94a3b8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 101;
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s, color 0.2s;
+  box-shadow: -4px 0 10px rgba(0, 0, 0, 0.25);
+  padding: 0;
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #ffffff);
+}
+
+.sidebar-toggle-btn.collapsed {
+  border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 8px 0 0 8px;
+}
+
+.sidebar-toggle-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  background-color: #ef4444;
+  border-radius: 50%;
+  border: 1px solid var(--panel-bg, #1e222b);
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.tab-unread-dot {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 6px;
+  height: 6px;
+  background-color: #ef4444;
+  border-radius: 50%;
+  box-shadow: 0 0 4px #ef4444;
+}
+
+.tab-unread-dot.dm-dot {
+  background-color: #3b82f6;
+  box-shadow: 0 0 4px #3b82f6;
+}
+
+.call-sidebar {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-left 0.3s ease;
+}
+
 
