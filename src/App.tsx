@@ -3459,6 +3459,21 @@ function AppContent() {
         const lastMsg = chatMessages[chatMessages.length - 1];
         if (lastMsg && lastMsg.senderId !== getMyId()) {
           playMessageSound();
+          if (!isChatActiveRef.current) {
+            setUnreadChatCount(prev => prev + 1);
+          }
+          // Notify on mention (@user or @all)
+          const myId = getMyId();
+          const cleanMyName = (user ? user.displayName || 'Google User' : guestName).replace(' (You)', '');
+          const hasMentionInText = lastMsg.text.toLowerCase().includes(`@${cleanMyName.toLowerCase()}`) || 
+                                   lastMsg.text.toLowerCase().includes('@all');
+          const isMentioned = lastMsg.mentionedId === myId || 
+                              lastMsg.mentionedId === 'bot_all' || 
+                              hasMentionInText;
+
+          if (isMentioned) {
+            showToast(`🔔 Mentioned by ${lastMsg.sender}: "${lastMsg.text.substring(0, 40)}${lastMsg.text.length > 40 ? '...' : ''}"`);
+          }
         }
       }
     }
