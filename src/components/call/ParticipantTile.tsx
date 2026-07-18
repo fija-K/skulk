@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+import { useParticipants, useLocalParticipant } from '@livekit/components-react';
 import type { Participant } from '../../App';
 import { ParticipantVideo } from './ParticipantVideo';
 
@@ -51,6 +53,49 @@ export function ParticipantTile({
   const showCamOff = isUser ? isCamOff : p.isCamOff;
   const isSpeaking = p.isSpeaking && !showMuted;
 
+  // Track and update speaking glow intensity dynamically
+  const tileRef = useRef<HTMLDivElement>(null);
+  const { localParticipant } = useLocalParticipant();
+  const lkParticipants = useParticipants();
+  const lkParticipant = isUser ? localParticipant : lkParticipants.find(lp => lp.identity === p.id);
+
+  useEffect(() => {
+    if (!lkParticipant) return;
+
+    let animId: number;
+    let currentVolume = 0;
+
+    const updateGlow = () => {
+      const el = tileRef.current;
+      if (el) {
+        // Only glow if speaking AND not muted
+        const isSp = lkParticipant.isSpeaking && !showMuted;
+        const targetVol = isSp ? lkParticipant.audioLevel : 0;
+
+        // Smooth transition (exponential smoothing)
+        currentVolume = currentVolume + (targetVol - currentVolume) * 0.15;
+        if (currentVolume < 0.001) {
+          currentVolume = 0;
+        }
+
+        el.style.setProperty('--speaking-volume', currentVolume.toFixed(4));
+        el.style.setProperty('--speaking-opacity', isSp ? '1' : '0');
+      }
+      animId = requestAnimationFrame(updateGlow);
+    };
+
+    updateGlow();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      const el = tileRef.current;
+      if (el) {
+        el.style.setProperty('--speaking-volume', '0');
+        el.style.setProperty('--speaking-opacity', '0');
+      }
+    };
+  }, [lkParticipant, showMuted]);
+
   // Determine if menu should open upwards to prevent clipping at the bottom of the screen
   const indexInList = callParticipants.findIndex(part => part.id === p.id);
   const totalCount = callParticipants.length;
@@ -62,6 +107,7 @@ export function ParticipantTile({
     const isSpotlightActive = p.id === spotlightParticipantId;
     return (
       <div 
+        ref={tileRef}
         className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''} ${showCamOff ? 'camera-off' : ''}`}
         onClick={() => {
           if (p.sharing) {
@@ -238,6 +284,7 @@ export function ParticipantTile({
   
   return (
     <div 
+      ref={tileRef}
       className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${showCamOff ? 'camera-off' : ''}`}
       onClick={() => {
         if (p.sharing) {

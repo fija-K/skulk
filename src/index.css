@@ -2764,7 +2764,8 @@ div[id^="dailymotion-player-"] > div {
 /* Sidebar Toggle & Collapsible Styles */
 .sidebar-toggle-btn {
   position: absolute;
-  top: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 28px;
   height: 40px;
   background-color: var(--panel-bg, #1e222b);
@@ -2822,6 +2823,35 @@ div[id^="dailymotion-player-"] > div {
 
 .call-sidebar {
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-left 0.3s ease;
+}
+
+/* Dynamic Live Speaking Indicator Glow Styles */
+.participant-tile, .spotlight-thumbnail-tile {
+  --speaking-volume: 0;
+  --speaking-opacity: 0;
+}
+
+.participant-tile {
+  box-shadow: 0 0 calc(var(--speaking-volume) * 24px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent);
+  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.spotlight-thumbnail-tile {
+  box-shadow: 0 0 calc(var(--speaking-volume) * 12px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent) !important;
+  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Compact Grid View Avatar Glow (Tighter, crisper multi-layer glow to avoid blurry smudging) */
+.grid-layout .participant-tile .participant-avatar-large {
+  box-shadow: 
+    0 0 calc(var(--speaking-volume) * 6px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent),
+    0 0 calc(var(--speaking-volume) * 12px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 50%), transparent) !important;
+  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
+  border-width: 2px;
+  border-style: solid;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 
