@@ -224,7 +224,10 @@ export function usePresence(
           todRequestedSpin: data.todRequestedSpin || null,
           todRequestedChoice: data.todRequestedChoice || null,
           todRequestedReset: data.todRequestedReset || null,
-          status: data.status || null
+          status: data.status || null,
+          castVote: data.castVote || null,
+          handRaised: data.handRaised ?? false,
+          handRaisedAt: data.handRaisedAt || null
         });
       });
 

@@ -8402,31 +8402,24 @@ function AppContent() {
 
                       const myId = getMyId();
                       const myPresence = callParticipants.find(part => part.id === myId);
+                      
+                      const raisedHandList = list.filter(p => p.handRaised);
+                      const normalList = list.filter(p => !p.handRaised);
 
-                      // Sort by:
-                      // 1. handRaised: true first (ordered by handRaisedAt ascending so oldest hand raise is at the top)
-                      // 2. bots at the bottom
-                      // 3. other participants
-                      list.sort((a, b) => {
-                        const aHand = a.handRaised ? 1 : 0;
-                        const bHand = b.handRaised ? 1 : 0;
-                        if (aHand !== bHand) return bHand - aHand; // raised hands first
-                        
-                        if (a.handRaised && b.handRaised) {
-                          const aTime = a.handRaisedAt || 0;
-                          const bTime = b.handRaisedAt || 0;
-                          return aTime - bTime; // oldest hand raise first
-                        }
-                        
+                      raisedHandList.sort((a, b) => {
+                        const aTime = a.handRaisedAt || 0;
+                        const bTime = b.handRaisedAt || 0;
+                        return aTime - bTime;
+                      });
+
+                      normalList.sort((a, b) => {
                         const aBot = (a.role === 'bot' || a.isBot) ? 1 : 0;
                         const bBot = (b.role === 'bot' || b.isBot) ? 1 : 0;
-                        if (aBot !== bBot) return aBot - bBot; // bots last
-                        
+                        if (aBot !== bBot) return aBot - bBot;
                         return 0;
                       });
-                      
-                      return list.map((item) => {
-                        const p = item as any;
+
+                      const renderPersonRow = (p: any) => {
                         const isBot = p.role === 'bot' || p.isBot;
                         const isUser = p.id === getMyId();
                         const showMuted = isUser ? isMicMuted : p.isMuted;
@@ -8613,7 +8606,7 @@ function AppContent() {
                                   </svg>
                                   {/* camera icon status */}
                                   <svg className="person-status-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    {isUser && isCamOff ? (
+                                    {isUser ? isCamOff : p.isCamOff ? (
                                       <>
                                         <line x1="1" y1="1" x2="23" y2="23"></line>
                                         <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8a2 2 0 0 1-.18.83l-4-4"></path>
@@ -8630,14 +8623,55 @@ function AppContent() {
                             </div>
                           </div>
                         );
-                      });
+                      };
+
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                          {raisedHandList.length > 0 && (
+                            <div className="people-list-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <div className="people-list-section-header" style={{
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.05em',
+                                color: 'var(--primary-color, #f1c40f)',
+                                padding: '8px 12px 4px',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}>
+                                ✋ Raised hands ({raisedHandList.length})
+                              </div>
+                              {raisedHandList.map((p) => renderPersonRow(p))}
+                            </div>
+                          )}
+                          
+                          <div className="people-list-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {raisedHandList.length > 0 && (
+                              <div className="people-list-section-header" style={{
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.05em',
+                                color: 'var(--text-secondary, #94a3b8)',
+                                padding: '8px 12px 4px',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                                marginBottom: '4px'
+                              }}>
+                                Everyone Else ({normalList.length})
+                              </div>
+                            )}
+                            {normalList.map((p) => renderPersonRow(p))}
+                          </div>
+                        </div>
+                      );
                     })()}
                   </div>
-                )}
+                )
+              }
 
                   {callTab === 'tools' && (() => {
-                    const myId = getMyId();
-                    const myPresence = callParticipants.find(p => p.id === myId);
                     return (
                       <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     
@@ -8851,25 +8885,6 @@ function AppContent() {
                                <div className="tool-card-info">
                                  <span className="tool-card-title">Study Buddies</span>
                                  <span className="tool-card-desc">Add virtual study companions to chat.</span>
-                               </div>
-                             </div>
-
-                             {/* Raise Hand Card */}
-                             <div 
-                               className={`tool-card ${myPresence?.handRaised ? 'active' : ''}`}
-                               onClick={toggleRaiseHand}
-                               title={myPresence?.handRaised ? 'Lower your hand' : 'Raise your hand'}
-                             >
-                               <div className="tool-card-icon-wrapper" style={{ color: myPresence?.handRaised ? 'var(--primary-color)' : 'inherit' }}>
-                                 ✋
-                               </div>
-                               <div className="tool-card-info">
-                                 <span className="tool-card-title">
-                                   {myPresence?.handRaised ? 'Lower Hand' : 'Raise Hand'}
-                                 </span>
-                                 <span className="tool-card-desc">
-                                   {myPresence?.handRaised ? 'Lower your hand now.' : 'Let others know you want to speak.'}
-                                 </span>
                                </div>
                              </div>
 
@@ -9789,6 +9804,25 @@ function AppContent() {
             >
               Leave
             </button>
+            
+            {/* Raise Hand Button */}
+            {(() => {
+              const myId = getMyId();
+              const myPresence = callParticipants.find(p => p.id === myId);
+              const handRaised = !!myPresence?.handRaised;
+              return (
+                <button
+                  onClick={toggleRaiseHand}
+                  className={`dock-btn ${handRaised ? 'active' : ''}`}
+                  style={{ marginRight: '8px' }}
+                  title={handRaised ? 'Lower your hand' : 'Raise your hand'}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill={handRaised ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5m-4 0V5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7M6 14V9a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v6c0 4.42 3.58 8 8 8h3c3.87 0 7-3.13 7-7v-3a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v3" />
+                  </svg>
+                </button>
+              );
+            })()}
             
             {/* End Room Button */}
             {(callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 

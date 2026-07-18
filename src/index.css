@@ -1690,6 +1690,17 @@ body {
   background-color: #dc2626;
 }
 
+.dock-btn.active {
+  background-color: var(--primary-color, #f1c40f);
+  border-color: var(--primary-color, #f1c40f);
+  color: #0f1013;
+}
+
+.dock-btn.active:hover {
+  background-color: var(--primary-hover, #e0b30d);
+  border-color: var(--primary-hover, #e0b30d);
+}
+
 .dock-btn-leave {
   background-color: #ef4444;
   border-color: #ef4444;
