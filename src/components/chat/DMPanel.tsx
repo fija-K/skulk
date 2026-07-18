@@ -327,7 +327,8 @@ export function DMPanel({
                 botId: 'Mentor',
                 message: finalVal.trim(),
                 chatHistory: history,
-                topPriorityTask
+                topPriorityTask,
+                userName: user.displayName || ''
               })
             });
 

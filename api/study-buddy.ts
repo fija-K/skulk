@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { botId, message, chatHistory, topPriorityTask } = req.body || {};
+  const { botId, message, chatHistory, topPriorityTask, userName } = req.body || {};
 
   if (!botId || !message) {
     return res.status(400).json({ error: 'botId and message are required' });
@@ -72,6 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (botId === 'Mentor') {
+    // Inject user's real name so Mentor can address them naturally (not every message, just where it fits)
+    if (userName) {
+      prompt += `\nThe user's name is "${userName}". Use their name naturally in your replies where it fits — the same way a real mentor would, not in every single sentence, just where it feels direct and personal.`;
+    }
     if (topPriorityTask) {
       prompt += `\nThe user's current top priority task is: "${topPriorityTask}". Reference this task by name in your reply to push them toward doing it first, unless safety triggers require dropping the persona.`;
     } else {
