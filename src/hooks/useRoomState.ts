@@ -74,7 +74,13 @@ export function useRoomState(
           creatorEmail: data.creatorEmail ?? base.creatorEmail,
           type: data.type ?? base.type,
           roomMode: data.roomMode ?? base.roomMode ?? 'chill',
-          allowFunTools: data.allowFunTools ?? base.allowFunTools ?? true
+          allowFunTools: data.allowFunTools ?? base.allowFunTools ?? true,
+          voteQuestion: data.voteQuestion ?? null,
+          voteOptions: data.voteOptions ?? null,
+          voteCreatorId: data.voteCreatorId ?? null,
+          voteCreatorName: data.voteCreatorName ?? null,
+          voteStatus: data.voteStatus ?? null,
+          voteResults: data.voteResults ?? null
         };
       });
 

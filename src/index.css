@@ -2723,4 +2723,22 @@ body.theme-active .theme-picker-dropdown {
   background-color: rgba(21, 23, 28, 0.93) !important;
 }
 
+.tile-hand-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: rgba(15, 16, 19, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in srgb, var(--primary-color) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--primary-color) 20%, transparent), 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-left: 6px;
+  font-size: 13px;
+  color: var(--primary-color);
+}
+
 

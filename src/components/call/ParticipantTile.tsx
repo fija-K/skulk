@@ -24,6 +24,7 @@ interface ParticipantTileProps {
   checkCanKick: (myRole: string, targetRole: string) => boolean;
   handleParticipantRemove: (id: string, name: string) => void;
   handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
+  handleClearParticipantChat?: (participantId: string, participantName: string) => void;
 }
 
 const drawWaveform = (canvas: HTMLCanvasElement, volume: number, phase: number) => {
@@ -102,7 +103,8 @@ export function ParticipantTile({
   handleParticipantRoleChange,
   checkCanKick,
   handleParticipantRemove,
-  handleOpenProfile
+  handleOpenProfile,
+  handleClearParticipantChat
 }: ParticipantTileProps) {
   const isUser = p.id === myId;
   const showMuted = isUser ? isMicMuted : p.isMuted;
@@ -844,6 +846,11 @@ export function ParticipantTile({
               </span>
             )}
           </div>
+          {p.handRaised && (
+            <div className="tile-hand-badge" title="Hand raised">
+              <span>✋</span>
+            </div>
+          )}
           {showMuted && (
             <div className="tile-mic-badge muted">
               <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -968,6 +975,23 @@ export function ParticipantTile({
                   style={{ color: '#ef4444' }}
                 >
                   Kick out
+                </button>
+              )}
+
+              {/* Clear participant's chat action – moderators only, not on own tile */}
+              {p.id !== myId && handleClearParticipantChat && (['host', 'cohost', 'admin'].includes(
+                callParticipants.find(part => part.id === myId)?.role || 'member'
+              )) && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Clear all messages from ${p.name}? This cannot be undone.`)) {
+                      handleClearParticipantChat(p.id, p.name);
+                    }
+                  }}
+                  className="tile-menu-item"
+                  style={{ color: '#f97316' }}
+                >
+                  🗑️ Clear {p.name.split(' ')[0]}'s Chat
                 </button>
               )}
             </div>

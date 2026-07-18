@@ -18,7 +18,8 @@ import {
   query,
   orderBy,
   limit,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import tdData from '../td.json';
@@ -66,6 +67,14 @@ export interface Room {
   emptySince?: number;
   roomMode?: 'chill' | 'discuss' | 'non-discuss';
   allowFunTools?: boolean;
+
+  // Voting system fields
+  voteQuestion?: string | null;
+  voteOptions?: string[] | null;
+  voteCreatorId?: string | null;
+  voteCreatorName?: string | null;
+  voteStatus?: 'active' | 'closed' | null;
+  voteResults?: Record<string, number> | null;
 }
 
 export interface Participant {
@@ -103,6 +112,12 @@ export interface Participant {
   uid?: string;
   joinedAt?: string | null;
   sessionId?: string | null;
+
+  // Hand Raise & Voting states
+  handRaised?: boolean;
+  handRaisedAt?: number | null;
+  castVote?: string | null;
+  isBot?: boolean;
 }
 
 export type ViewingShare = {
@@ -119,6 +134,7 @@ export interface ChatMessage {
   text: string;
   createdAt?: string;
   mentionedId?: string;
+  deleted?: boolean;
 }
 
 interface LocalSpeakerTrackerProps {
@@ -463,7 +479,9 @@ function PipWindowContent({
                       }}
                     >
                       <span style={{ fontSize: '10px', fontWeight: 700, color: isMe ? '#f1c40f' : '#94a3b8' }}>{msg.sender}</span>
-                      {msg.text.startsWith('[IMAGE]:') || msg.text.startsWith('[GIF]:') || msg.text.startsWith('[STICKER]:') ? (
+                      {msg.deleted ? (
+                        <span style={{ fontSize: '11px', color: '#475569', fontStyle: 'italic', marginTop: '1px' }}>🚫 This message was deleted</span>
+                      ) : msg.text.startsWith('[IMAGE]:') || msg.text.startsWith('[GIF]:') || msg.text.startsWith('[STICKER]:') ? (
                         <img 
                           src={msg.text.slice(msg.text.indexOf(':') + 1)} 
                           alt="Shared media" 
@@ -477,7 +495,10 @@ function PipWindowContent({
                           }} 
                         />
                       ) : (
-                        <span style={{ fontSize: '11px', color: '#e2e8f0', wordBreak: 'break-word', marginTop: '1px' }}>{msg.text}</span>
+                        <span style={{ fontSize: '11px', color: '#e2e8f0', wordBreak: 'break-word', marginTop: '1px' }}>
+                          {msg.text}
+                          {msg.edited && <span style={{ fontSize: '9px', color: '#475569', marginLeft: '3px', fontStyle: 'italic' }}>(edited)</span>}
+                        </span>
                       )}
                     </div>
                   );
@@ -1639,6 +1660,33 @@ function AppContent() {
     }
   }, [currentRoom?.id, micBlockedUntil]);
 
+  const lastRoomModeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentRoom) {
+      lastRoomModeRef.current = null;
+      return;
+    }
+    const currentMode = currentRoom.roomMode || 'chill';
+    if (lastRoomModeRef.current !== null && lastRoomModeRef.current !== currentMode) {
+      updateMySharing({
+        handRaised: false,
+        handRaisedAt: null,
+        castVote: null
+      }).catch(() => {});
+      showToast(`Hand raised and votes reset due to room mode change`);
+    }
+    lastRoomModeRef.current = currentMode;
+  }, [currentRoom?.roomMode, currentRoom?.id]);
+
+  useEffect(() => {
+    if (!currentRoom || currentRoom.voteStatus !== 'active') {
+      const myPresence = callParticipants.find(p => p.id === getMyId());
+      if (myPresence?.castVote) {
+        updateMySharing({ castVote: null }).catch(() => {});
+      }
+    }
+  }, [currentRoom?.voteStatus, currentRoom?.id, callParticipants]);
+
 
   leavePresenceFn = leavePresence;
   const isInitialLoadRef = useRef(true);
@@ -2184,6 +2232,11 @@ function AppContent() {
   const [looseActiveIndex, setLooseActiveIndex] = useState(0);
   const [looseTimerSeconds, setLooseTimerSeconds] = useState(0);
   const [looseIsRunning, setLooseIsRunning] = useState(false);
+
+  // Voting Poll Creator local states
+  const [voteQuestionInput, setVoteQuestionInput] = useState('');
+  const [voteMode, setVoteMode] = useState<'yesno' | 'custom'>('yesno');
+  const [voteOptionsInputs, setVoteOptionsInputs] = useState<string[]>(['Option A', 'Option B']);
 
   // Guest Profile Identity State
   // Spotlight view state
@@ -3900,12 +3953,56 @@ function AppContent() {
     }
   };
 
+  const toggleRaiseHand = async () => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isRaised = !!myPresence?.handRaised;
+    try {
+      await updateMySharing({
+        handRaised: !isRaised,
+        handRaisedAt: isRaised ? null : Date.now()
+      });
+      showToast(isRaised ? "Hand lowered" : "Hand raised ✋");
+    } catch (e) {
+      console.warn("Failed to toggle hand raise:", e);
+    }
+  };
+
+  const handleLowerHand = async (participantId: string) => {
+    if (!currentRoom) return;
+    try {
+      const myId = getMyId();
+      const myPresence = callParticipants.find(p => p.id === myId);
+      const isSelf = participantId === myId;
+      const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+
+      if (!isSelf && !isHostOrAdmin) {
+        showToast("❌ Only hosts, co-hosts, and admins can lower other participants' hands.");
+        return;
+      }
+
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'participants', participantId), {
+        handRaised: false,
+        handRaisedAt: null
+      });
+      showToast(isSelf ? "Hand lowered" : "Lowered participant's hand");
+    } catch (e) {
+      console.warn("Failed to lower hand:", e);
+    }
+  };
+
   const handleSelectRoomMode = async (mode: 'chill' | 'discuss' | 'non-discuss') => {
     if (!currentRoom) return;
     try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        roomMode: mode
-      });
+      const updateData: any = { roomMode: mode };
+      if (currentRoom.voteStatus === 'active') {
+        updateData.voteStatus = 'closed';
+        updateData.voteQuestion = null;
+        updateData.voteOptions = null;
+        updateData.voteCreatorId = null;
+        updateData.voteCreatorName = null;
+      }
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), updateData);
       showToast(`Room mode changed to ${mode === 'chill' ? 'Chill Mode' : mode === 'discuss' ? 'Focus Mode' : 'Ultra Pro Max Focus Mode'}`);
     } catch (e) {
       console.warn("Failed to select room mode:", e);
@@ -4880,6 +4977,60 @@ function AppContent() {
     }
   };
 
+  const deleteChatMessage = async (msgId: string) => {
+    if (!currentRoom) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), {
+        deleted: true,
+        text: 'This message was deleted'
+      });
+      showToast('Message deleted.');
+    } catch (e) {
+      console.error("Failed to delete message:", e);
+      showToast('❌ Failed to delete message.');
+    }
+  };
+
+  const editChatMessage = async (msgId: string, newText: string) => {
+    if (!currentRoom || !newText.trim()) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), {
+        text: newText.trim(),
+        edited: true
+      });
+      showToast('Message edited.');
+    } catch (e) {
+      console.error("Failed to edit message:", e);
+      showToast('❌ Failed to edit message.');
+    }
+  };
+
+  const handleClearParticipantChat = async (participantId: string, participantName: string) => {
+    if (!currentRoom) return;
+    try {
+      const messagesRef = collection(db, 'rooms', roomDocId(currentRoom), 'messages');
+      const q = query(messagesRef, where('senderId', '==', participantId));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        showToast(`No messages found for ${participantName}.`);
+        setActiveMenuParticipantId(null);
+        return;
+      }
+
+      const batch = writeBatch(db);
+      snapshot.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+      showToast(`Cleared messages for ${participantName}.`);
+    } catch (e) {
+      console.error("Failed to clear participant chat:", e);
+      showToast('❌ Failed to clear messages.');
+    }
+    setActiveMenuParticipantId(null);
+  };
+
   // Local chat submission
   // Co-host control triggers (Mute, Pin, Remove)
   const handleParticipantMuteToggle = async (id: string, name: string) => {
@@ -5510,6 +5661,322 @@ function AppContent() {
     );
   };
 
+  const renderVotingUI = () => {
+    const myId = getMyId();
+    const myPresence = callParticipants.find(p => p.id === myId);
+    const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
+    const isVoteActive = currentRoom?.voteStatus === 'active';
+
+    if (!isVoteActive) {
+      if (!isHostOrAdmin) {
+        return (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>
+            <span style={{ fontSize: '32px', display: 'block', marginBottom: '12px' }}>🗳️</span>
+            <strong>No active polls</strong>
+            <p style={{ marginTop: '8px', fontSize: '11px', lineHeight: 1.4 }}>Waiting for a host or co-host to start a poll.</p>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
+          <div>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+              Poll Question / Title
+            </label>
+            <input 
+              type="text"
+              className="room-input"
+              value={voteQuestionInput}
+              onChange={(e) => setVoteQuestionInput(e.target.value)}
+              placeholder="e.g., Should we take a 5-min break?"
+              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', height: '36px' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+              Poll Format
+            </label>
+            <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '2px', gap: '2px' }}>
+              <button
+                type="button"
+                onClick={() => setVoteMode('yesno')}
+                style={{
+                  flex: 1,
+                  padding: '6px 4px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  borderRadius: '6px',
+                  border: voteMode === 'yesno' ? '1px solid color-mix(in srgb, var(--primary-color) 30%, transparent)' : '1px solid transparent',
+                  backgroundColor: voteMode === 'yesno' ? 'color-mix(in srgb, var(--primary-color) 15%, transparent)' : 'transparent',
+                  color: voteMode === 'yesno' ? 'var(--primary-color)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Yes / No
+              </button>
+              <button
+                type="button"
+                onClick={() => setVoteMode('custom')}
+                style={{
+                  flex: 1,
+                  padding: '6px 4px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  borderRadius: '6px',
+                  border: voteMode === 'custom' ? '1px solid color-mix(in srgb, var(--primary-color) 30%, transparent)' : '1px solid transparent',
+                  backgroundColor: voteMode === 'custom' ? 'color-mix(in srgb, var(--primary-color) 15%, transparent)' : 'transparent',
+                  color: voteMode === 'custom' ? 'var(--primary-color)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Custom Options
+              </button>
+            </div>
+          </div>
+
+          {voteMode === 'custom' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block' }}>
+                Options
+              </label>
+              {voteOptionsInputs.map((opt, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="room-input"
+                    value={opt}
+                    onChange={(e) => {
+                      const newOpts = [...voteOptionsInputs];
+                      newOpts[idx] = e.target.value;
+                      setVoteOptionsInputs(newOpts);
+                    }}
+                    placeholder={`Option ${idx + 1}`}
+                    style={{ flex: 1, padding: '6px 10px', fontSize: '12px', height: '32px' }}
+                  />
+                  {voteOptionsInputs.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoteOptionsInputs(voteOptionsInputs.filter((_, i) => i !== idx));
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#ef4444',
+                        fontSize: '16px',
+                        cursor: 'pointer',
+                        padding: '4px'
+                      }}
+                      title="Remove option"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+              {voteOptionsInputs.length < 4 && (
+                <button
+                  type="button"
+                  onClick={() => setVoteOptionsInputs([...voteOptionsInputs, ''])}
+                  style={{
+                    alignSelf: 'flex-start',
+                    background: 'none',
+                    border: '1px dashed var(--border-color)',
+                    borderRadius: '4px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    marginTop: '4px'
+                  }}
+                >
+                  + Add Option
+                </button>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="btn-signin"
+            onClick={async () => {
+              if (!voteQuestionInput.trim()) {
+                showToast("Please enter a question.");
+                return;
+              }
+              const options = voteMode === 'yesno' ? ['Yes', 'No'] : voteOptionsInputs.map(o => o.trim()).filter(Boolean);
+              if (options.length < 2) {
+                showToast("Please define at least 2 options.");
+                return;
+              }
+              try {
+                await updateDoc(doc(db, 'rooms', roomDocId(currentRoom!)), {
+                  voteQuestion: voteQuestionInput.trim(),
+                  voteCreatorId: myId,
+                  voteCreatorName: myPresence?.name.replace(' (You)', '') || 'Participant',
+                  voteStatus: 'active',
+                  voteOptions: options,
+                  voteResults: null
+                });
+                showToast("Poll started!");
+              } catch (e) {
+                console.error("Failed to start poll:", e);
+                showToast("❌ Failed to start poll.");
+              }
+            }}
+            style={{ width: '100%', marginTop: '8px', height: '36px' }}
+          >
+            Start Poll
+          </button>
+        </div>
+      );
+    }
+
+    const options = currentRoom.voteOptions || [];
+    const myVote = myPresence?.castVote;
+
+    const totalVotesCount = callParticipants.filter(p => p.castVote && options.includes(p.castVote)).length;
+    const tally: Record<string, number> = {};
+    options.forEach(opt => {
+      tally[opt] = callParticipants.filter(p => p.castVote === opt).length;
+    });
+
+    const isCreator = currentRoom.voteCreatorId === myId;
+    const creatorStillInRoom = callParticipants.some(p => p.id === currentRoom.voteCreatorId);
+    const canEnd = isCreator || (!creatorStillInRoom && isHostOrAdmin);
+
+    const handleCastVote = async (opt: string) => {
+      try {
+        await updateMySharing({ castVote: opt });
+        showToast(`Vote cast for: ${opt}`);
+      } catch (e) {
+        console.error("Failed to cast vote:", e);
+      }
+    };
+
+    const handleEndVote = async () => {
+      try {
+        let text = `🗳️ **Poll Finished: "${currentRoom.voteQuestion}"**\n`;
+        options.forEach(opt => {
+          const count = tally[opt] || 0;
+          const pct = totalVotesCount > 0 ? Math.round((count / totalVotesCount) * 100) : 0;
+          text += `• **${opt}**: ${count} vote(s) (${pct}%)\n`;
+        });
+        text += `Total votes: ${totalVotesCount}`;
+
+        await sendChatMessage(text);
+
+        await updateDoc(doc(db, 'rooms', roomDocId(currentRoom!)), {
+          voteQuestion: null,
+          voteCreatorId: null,
+          voteCreatorName: null,
+          voteStatus: 'closed',
+          voteOptions: null,
+          voteResults: tally
+        });
+
+        setVoteQuestionInput('');
+        setVoteOptionsInputs(['Option A', 'Option B']);
+        setVoteMode('yesno');
+
+        showToast("Poll ended & results posted!");
+      } catch (e) {
+        console.error("Failed to end poll:", e);
+        showToast("❌ Failed to end poll.");
+      }
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
+        <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+            Active Poll by {currentRoom.voteCreatorName || 'Host'}
+          </span>
+          <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+            {currentRoom.voteQuestion}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {options.map((opt) => {
+            const isMyChoice = myVote === opt;
+            const count = tally[opt] || 0;
+            const percentage = totalVotesCount > 0 ? Math.round((count / totalVotesCount) * 100) : 0;
+
+            return (
+              <div key={opt} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleCastVote(opt)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: isMyChoice ? '1px solid var(--primary-color)' : '1px solid var(--border-color)',
+                    backgroundColor: isMyChoice ? 'color-mix(in srgb, var(--primary-color) 15%, transparent)' : 'rgba(255, 255, 255, 0.01)',
+                    color: isMyChoice ? 'var(--text-primary)' : 'var(--text-primary)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontSize: '12px',
+                    fontWeight: isMyChoice ? 'bold' : 'normal',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    zIndex: 1,
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    bottom: 0,
+                    width: `${percentage}%`,
+                    backgroundColor: isMyChoice ? 'color-mix(in srgb, var(--primary-color) 10%, transparent)' : 'rgba(255, 255, 255, 0.02)',
+                    zIndex: -1,
+                    transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+                  }} />
+                  <span style={{ flex: 1 }}>{opt}</span>
+                  <span style={{ fontSize: '11px', color: isMyChoice ? 'var(--primary-color)' : 'var(--text-secondary)', fontWeight: 'bold' }}>
+                    {count} ({percentage}%)
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <span style={{ fontSize: '10px', color: 'var(--text-secondary)', textAlign: 'center', display: 'block' }}>
+          Total votes cast: {totalVotesCount} / {callParticipants.length}
+        </span>
+
+        {canEnd && (
+          <button
+            type="button"
+            className="btn-signin"
+            onClick={handleEndVote}
+            style={{
+              width: '100%',
+              marginTop: '8px',
+              height: '36px',
+              backgroundColor: '#ef4444',
+              borderColor: '#ef4444',
+              color: '#ffffff'
+            }}
+          >
+            {!isCreator ? 'Force End Poll (Fallback) 🗳️' : 'End Poll & Post Results 🗳️'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const renderRoomSettingsUI = () => {
     const myId = getMyId();
     const myPresence = callParticipants.find(p => p.id === myId);
@@ -5601,7 +6068,7 @@ function AppContent() {
               <input 
                 type="number" 
                 min="2"
-                max="10"
+                max="18"
                 className="room-input"
                 style={{ textAlign: 'center', width: '60px', padding: '0', height: '36px', fontSize: '13px', fontWeight: 'bold' }}
                 value={maxPartInput}
@@ -5626,7 +6093,7 @@ function AppContent() {
                 type="button"
                 onClick={() => {
                   const val = typeof maxPartInput === 'number' ? maxPartInput : 10;
-                  const nextVal = Math.min(10, val + 1);
+                  const nextVal = Math.min(18, val + 1);
                   setMaxPartInput(nextVal);
                   handleChangeMaxParticipants(nextVal);
                 }}
@@ -5634,7 +6101,7 @@ function AppContent() {
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
               </button>
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Capacity cap (10 max)</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Capacity cap (18 max)</span>
             </div>
             <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', display: 'block' }}>
               Current active participants: {callParticipants.length}
@@ -7495,6 +7962,7 @@ function AppContent() {
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
                         handleOpenProfile={handleOpenProfile}
+                        handleClearParticipantChat={handleClearParticipantChat}
                       />
                     ))}
                   </div>
@@ -7621,6 +8089,7 @@ function AppContent() {
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
                         handleOpenProfile={handleOpenProfile}
+                        handleClearParticipantChat={handleClearParticipantChat}
                       />
                     ))}
                   </div>
@@ -7655,6 +8124,7 @@ function AppContent() {
                         checkCanKick={checkCanKick}
                         handleParticipantRemove={handleParticipantRemove}
                         handleOpenProfile={handleOpenProfile}
+                        handleClearParticipantChat={handleClearParticipantChat}
                       />
                     ))}
                       </div>
@@ -7685,6 +8155,7 @@ function AppContent() {
                                   checkCanKick={checkCanKick}
                                   handleParticipantRemove={handleParticipantRemove}
                                   handleOpenProfile={handleOpenProfile}
+                                  handleClearParticipantChat={handleClearParticipantChat}
                                 />
                               )}
                               <button 
@@ -7766,6 +8237,7 @@ function AppContent() {
                             checkCanKick={checkCanKick}
                             handleParticipantRemove={handleParticipantRemove}
                             handleOpenProfile={handleOpenProfile}
+                            handleClearParticipantChat={handleClearParticipantChat}
                       />
                     ))}
                       </div>
@@ -7888,6 +8360,9 @@ function AppContent() {
                     handleOpenProfile={handleOpenProfile}
                     activeBots={activeBots}
                     botTypingIds={botTypingIds}
+                    myId={getMyId()}
+                    deleteChatMessage={deleteChatMessage}
+                    editChatMessage={editChatMessage}
                   />
                 )}
 
@@ -7922,6 +8397,31 @@ function AppContent() {
                             isBot: true
                           } as any);
                         }
+                      });
+
+                      const myId = getMyId();
+                      const myPresence = callParticipants.find(part => part.id === myId);
+
+                      // Sort by:
+                      // 1. handRaised: true first (ordered by handRaisedAt ascending so oldest hand raise is at the top)
+                      // 2. bots at the bottom
+                      // 3. other participants
+                      list.sort((a, b) => {
+                        const aHand = a.handRaised ? 1 : 0;
+                        const bHand = b.handRaised ? 1 : 0;
+                        if (aHand !== bHand) return bHand - aHand; // raised hands first
+                        
+                        if (a.handRaised && b.handRaised) {
+                          const aTime = a.handRaisedAt || 0;
+                          const bTime = b.handRaisedAt || 0;
+                          return aTime - bTime; // oldest hand raise first
+                        }
+                        
+                        const aBot = (a.role === 'bot' || a.isBot) ? 1 : 0;
+                        const bBot = (b.role === 'bot' || b.isBot) ? 1 : 0;
+                        if (aBot !== bBot) return aBot - bBot; // bots last
+                        
+                        return 0;
                       });
                       
                       return list.map((item) => {
@@ -8003,6 +8503,11 @@ function AppContent() {
                                 <span className="person-name">
                                   {p.name}
                                 </span>
+                                {p.handRaised && (
+                                  <span style={{ fontSize: '14px', marginLeft: '6px', color: 'var(--primary-color, #f1c40f)', display: 'inline-flex', alignItems: 'center' }} title="Hand raised">
+                                    ✋
+                                  </span>
+                                )}
                                 {p.role && p.role !== 'member' && (
                                   <span className={p.role === 'bot' ? 'role-badge-bot' : `role-badge-${p.role}`} style={{
                                     fontSize: '9px',
@@ -8037,6 +8542,32 @@ function AppContent() {
                               </div>
                             </div>
                             <div className="person-status-icons" style={{ display: 'flex', alignItems: 'center' }}>
+                              {p.handRaised && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleLowerHand(p.id);
+                                  }}
+                                  style={{
+                                    background: 'rgba(239, 68, 68, 0.1)',
+                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                    borderRadius: '4px',
+                                    padding: '2px 6px',
+                                    fontSize: '9px',
+                                    fontWeight: 'bold',
+                                    color: '#ef4444',
+                                    cursor: 'pointer',
+                                    marginRight: '8px',
+                                    lineHeight: '1.2',
+                                    display: (getMyId() === p.id || myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin') ? 'inline-flex' : 'none',
+                                    alignItems: 'center'
+                                  }}
+                                  title={getMyId() === p.id ? "Lower your hand" : "Lower participant's hand"}
+                                >
+                                  Lower
+                                </button>
+                              )}
                               {!isBot && user && !isUser && (
                                 <button
                                   onClick={() => handleToggleFollow(p.id)}
@@ -8103,8 +8634,11 @@ function AppContent() {
                   </div>
                 )}
 
-                  {callTab === 'tools' && (
-                  <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+                  {callTab === 'tools' && (() => {
+                    const myId = getMyId();
+                    const myPresence = callParticipants.find(p => p.id === myId);
+                    return (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     
                     {activeToolDetail === 'none' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -8316,6 +8850,45 @@ function AppContent() {
                                <div className="tool-card-info">
                                  <span className="tool-card-title">Study Buddies</span>
                                  <span className="tool-card-desc">Add virtual study companions to chat.</span>
+                               </div>
+                             </div>
+
+                             {/* Raise Hand Card */}
+                             <div 
+                               className={`tool-card ${myPresence?.handRaised ? 'active' : ''}`}
+                               onClick={toggleRaiseHand}
+                               title={myPresence?.handRaised ? 'Lower your hand' : 'Raise your hand'}
+                             >
+                               <div className="tool-card-icon-wrapper" style={{ color: myPresence?.handRaised ? 'var(--primary-color)' : 'inherit' }}>
+                                 ✋
+                               </div>
+                               <div className="tool-card-info">
+                                 <span className="tool-card-title">
+                                   {myPresence?.handRaised ? 'Lower Hand' : 'Raise Hand'}
+                                 </span>
+                                 <span className="tool-card-desc">
+                                   {myPresence?.handRaised ? 'Lower your hand now.' : 'Let others know you want to speak.'}
+                                 </span>
+                               </div>
+                             </div>
+
+                             {/* Voting Polls Card */}
+                             <div 
+                               className={`tool-card ${currentRoom?.voteStatus === 'active' ? 'active' : ''}`}
+                               onClick={() => {
+                                 setActiveToolDetail('voting');
+                                 setActiveGameId(null);
+                               }}
+                               title="Start or participate in a poll"
+                             >
+                               <div className="tool-card-icon-wrapper" style={{ color: currentRoom?.voteStatus === 'active' ? 'var(--primary-color)' : 'inherit' }}>
+                                 🗳️
+                               </div>
+                               <div className="tool-card-info">
+                                 <span className="tool-card-title">Voting & Polls</span>
+                                 <span className="tool-card-desc">
+                                   {currentRoom?.voteStatus === 'active' ? 'Poll is active — vote now!' : 'Create a yes/no or multiple-choice poll.'}
+                                 </span>
                                </div>
                              </div>
 
@@ -9015,10 +9588,26 @@ function AppContent() {
                       </div>
                     )}
 
+                    {/* Sub-panel View 9: Voting & Polls */}
+                    {activeToolDetail === 'voting' && (
+                      <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div className="tools-sub-panel-header">
+                          <button onClick={() => setActiveToolDetail('none')} className="tools-back-btn" title="Back">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12"></line>
+                              <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                          </button>
+                          <span className="tools-sub-panel-title">Voting & Polls</span>
+                        </div>
+                        {renderVotingUI()}
+                      </div>
+                    )}
+
 
 
                   </div>
-                )}
+                ); })()}
 
               </div>
             </div>

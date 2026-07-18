@@ -13,6 +13,9 @@ interface ChatPanelProps {
   botTypingIds?: string[];
   roomId?: string;
   roomMode?: 'chill' | 'discuss' | 'non-discuss';
+  myId?: string;
+  deleteChatMessage?: (msgId: string) => Promise<void>;
+  editChatMessage?: (msgId: string, newText: string) => Promise<void>;
 }
 
 const POPULAR_EMOJIS = [
@@ -41,7 +44,10 @@ export function ChatPanel({
   activeBots,
   botTypingIds = [],
   roomId,
-  roomMode = 'chill'
+  roomMode = 'chill',
+  myId,
+  deleteChatMessage,
+  editChatMessage
 }: ChatPanelProps) {
   const [chatMessageText, setChatMessageText] = useState('');
   const [chatCount, setChatCount] = useState(0);
@@ -74,6 +80,8 @@ export function ChatPanel({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [activeExpandedImageUrl, setActiveExpandedImageUrl] = useState<string | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   
   const [favoriteMedias, setFavoriteMedias] = useState<{ url: string; type: 'gifs' | 'stickers' }[]>(() => {
     try {
@@ -576,8 +584,79 @@ export function ChatPanel({
                       setActiveExpandedImageUrl(url);
                     }}
                   />
+                ) : msg.deleted ? (
+                  <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic', marginTop: '2px' }}>🚫 This message was deleted</span>
+                ) : editingMsgId === msg.id ? (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (editChatMessage && editText.trim()) {
+                        await editChatMessage(msg.id, editText);
+                      }
+                      setEditingMsgId(null);
+                    }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}
+                  >
+                    <input
+                      autoFocus
+                      value={editText}
+                      onChange={e => setEditText(e.target.value)}
+                      style={{
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid var(--primary-color, #f1c40f)',
+                        borderRadius: '6px',
+                        color: '#e2e8f0',
+                        fontSize: '13px',
+                        padding: '5px 8px',
+                        outline: 'none',
+                        width: '100%',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="submit"
+                        style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '4px', background: 'var(--primary-color, #f1c40f)', color: '#0f1013', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                      >Save</button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingMsgId(null)}
+                        style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '4px', background: 'rgba(255,255,255,0.07)', color: '#94a3b8', border: 'none', cursor: 'pointer' }}
+                      >Cancel</button>
+                    </div>
+                  </form>
                 ) : (
-                  <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px', wordBreak: 'break-word' }}>{msg.text}</span>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '2px' }}>
+                    <span className="chat-text" style={{ fontSize: '13px', color: 'var(--text-secondary, #94a3b8)', wordBreak: 'break-word', flex: 1 }}>
+                      {msg.text}
+                      {msg.edited && <span style={{ fontSize: '10px', color: '#475569', marginLeft: '4px', fontStyle: 'italic' }}>(edited)</span>}
+                    </span>
+                    {myId && msg.senderId === myId && !msg.deleted && (
+                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0, opacity: 0.5, transition: 'opacity 0.15s' }}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = '1'}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = '0.5'}
+                      >
+                        {editChatMessage && !isMedia && (
+                          <button
+                            title="Edit message"
+                            onClick={() => { setEditingMsgId(msg.id); setEditText(msg.text); }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '2px 4px', borderRadius: '3px', color: '#94a3b8' }}
+                          >✏️</button>
+                        )}
+                        {deleteChatMessage && (
+                          <button
+                            title="Delete message"
+                            onClick={async () => {
+                              if (window.confirm('Delete this message for everyone?')) {
+                                await deleteChatMessage(msg.id);
+                              }
+                            }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '2px 4px', borderRadius: '3px', color: '#ef4444' }}
+                          >🗑️</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             );

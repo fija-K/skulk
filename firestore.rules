@@ -91,11 +91,33 @@ service cloud.firestore {
         )
       ) && 
       request.resource.data.creatorId == resource.data.creatorId &&
+      (
+        !("voteStatus" in resource.data) || resource.data.voteStatus == request.resource.data.voteStatus ||
+        (
+          (request.resource.data.voteStatus == 'active' && 
+           (
+             (request.auth != null && (resource.data.creatorId == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'])) ||
+             (resource.data.creatorId.startsWith('guest_') && request.auth == null)
+           )
+          ) ||
+          (request.resource.data.voteStatus == 'closed' &&
+           (
+             (request.auth != null && request.auth.uid == resource.data.voteCreatorId) ||
+             (resource.data.voteCreatorId.startsWith('guest_') && request.auth == null) ||
+             (
+               !exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(resource.data.voteCreatorId)) &&
+               (request.auth != null && (resource.data.creatorId == request.auth.uid || get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']))
+             )
+           )
+          )
+        )
+      ) &&
       request.resource.data.keys().hasOnly([
         'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
         'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
         'spinResult', 'spinPool', 'spinCheckedIds',
-        'emptySince', 'roomMode', 'allowFunTools'
+        'emptySince', 'roomMode', 'allowFunTools',
+        'voteQuestion', 'voteOptions', 'voteCreatorId', 'voteCreatorName', 'voteStatus', 'voteResults'
       ]);
         
       // Deletion rules
@@ -113,7 +135,7 @@ service cloud.firestore {
                         request.auth != null && 
                         (
                           participantId == request.auth.uid &&
-                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                          request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status', 'handRaised', 'handRaisedAt', 'castVote']) &&
                           (
                             (request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId && request.resource.data.role == 'host') ||
                             ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
@@ -129,7 +151,7 @@ service cloud.firestore {
                       ) || 
                       (
                         participantId.startsWith('guest_') &&
-                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status', 'handRaised', 'handRaisedAt', 'castVote']) &&
                         (
                           request.resource.data.role == 'member' ||
                           (request.resource.data.role == 'host' && participantId == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId) ||
@@ -145,7 +167,7 @@ service cloud.firestore {
                         request.auth != null && 
                         (
                           (
-                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status', 'handRaised', 'handRaisedAt', 'castVote']) &&
                             (
                               (participantId == request.auth.uid && 
                                (request.resource.data.role == resource.data.role || 
@@ -196,7 +218,7 @@ service cloud.firestore {
                           // Allow watchers to edit whiteboard if allowed by the presenter
                           (
                             participantId != request.auth.uid &&
-                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status']) &&
+                            request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status', 'handRaised', 'handRaisedAt', 'castVote']) &&
                             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['whiteboardData']) &&
                             resource.data.sharing == 'whiteboard' &&
                             resource.data.whiteboardEditAllowed == true &&
@@ -206,7 +228,7 @@ service cloud.firestore {
                       ) ||
                       (
                         participantId.startsWith('guest_') &&
-                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status'])
+                        request.resource.data.keys().hasOnly(['uid', 'name', 'photoURL', 'initials', 'color', 'joinedAt', 'role', 'mutedBy', 'camOffBy', 'sessionId', 'isMuted', 'isCamOff', 'isSpeaking', 'isPinned', 'isHost', 'sharing', 'sharingYoutubeId', 'whiteboardData', 'ytPlaying', 'ytTime', 'ytUpdateTimestamp', 'ytSpeed', 'ytPlaylistIndex', 'ytVideoId', 'todJoined', 'todPending', 'todRequestedSpin', 'todRequestedChoice', 'todRequestedReset', 'whiteboardEditAllowed', 'micOn', 'camOn', 'micRestricted', 'camRestricted', 'status', 'handRaised', 'handRaisedAt', 'castVote'])
                       );
                       
         allow delete: if (
@@ -231,9 +253,34 @@ service cloud.firestore {
                         (request.resource.data.senderId.startsWith('guest_')) ||
                         request.resource.data.senderId.matches('^bot_.*')
                       ) &&
-                      request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt', 'mentionedId']) &&
+                      request.resource.data.keys().hasOnly(['id', 'sender', 'senderId', 'senderRole', 'text', 'createdAt', 'mentionedId', 'deleted', 'edited']) &&
                       exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.resource.data.senderId));
-        allow update, delete: if false;
+
+        // Allow sender to soft-delete (set deleted=true) or edit their own message
+        allow update: if (
+          // Authenticated sender editing or soft-deleting their own message
+          (request.auth != null && resource.data.senderId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'deleted', 'edited'])
+          ) ||
+          // Guest sender soft-deleting their own message
+          (resource.data.senderId.startsWith('guest_') &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'deleted', 'edited'])
+          ) ||
+          // Moderator soft-deleting any message (set deleted=true)
+          (request.auth != null &&
+            get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'] &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'deleted'])
+          )
+        );
+
+        // Allow sender or moderator to hard-delete (used by handleClearParticipantChat)
+        allow delete: if (
+          (request.auth != null && resource.data.senderId == request.auth.uid) ||
+          (resource.data.senderId.startsWith('guest_')) ||
+          (request.auth != null &&
+            get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
+          )
+        );
       }
 
       // 10. Study Buddy Bots subcollection
