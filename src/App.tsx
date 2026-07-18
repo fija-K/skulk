@@ -46,6 +46,7 @@ import { DeviceRecoveryManager } from './components/call/DeviceRecoveryManager';
 import { usePresence } from './hooks/usePresence';
 import { useRoomState } from './hooks/useRoomState';
 import { UserProfileCard } from './components/social/UserProfileCard';
+import { DMPanel } from './components/chat/DMPanel';
 
 export interface Room {
   id: string;
@@ -975,7 +976,7 @@ function AppContent() {
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'rooms' | 'community' | 'reflect'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'community' | 'reflect' | 'dm'>('rooms');
   
   // Real-time rooms state list
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -2132,6 +2133,39 @@ function AppContent() {
     const mutual = followingUserIds.filter(id => followerUserIds.includes(id));
     setConnectionsCount(mutual.length);
   }, [followingUserIds, followerUserIds]);
+
+  // Listen to DM Threads
+  const [dmThreads, setDmThreads] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user) {
+      setDmThreads([]);
+      setUnreadDmCount(0);
+      return;
+    }
+
+    const qDms = query(collection(db, 'dm_threads'), where('participants', 'array-contains', user.uid));
+    const unsubDms = onSnapshot(qDms, (snap) => {
+      const threads = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as any));
+      setDmThreads(threads);
+      
+      // Calculate total unread count: count how many threads have current user's unread flag = true
+      let unreadCount = 0;
+      threads.forEach(t => {
+        if (t.unread && t.unread[user.uid] === true) {
+          unreadCount++;
+        }
+      });
+      setUnreadDmCount(unreadCount);
+    }, (err) => {
+      console.warn("Failed to listen to DM threads:", err);
+    });
+
+    return () => unsubDms();
+  }, [user]);
 
   // Background self-healing for denormalized follow counts
   useEffect(() => {
@@ -6526,7 +6560,6 @@ function AppContent() {
             </div>
           </header>
 
-          {/* Tabs */}
           <div className="tabs-container">
             <button 
               onClick={() => setActiveTab('rooms')} 
@@ -6535,12 +6568,24 @@ function AppContent() {
               Rooms
             </button>
             {user && (
-              <button 
-                onClick={() => setActiveTab('reflect')} 
-                className={`tab-btn ${activeTab === 'reflect' ? 'active' : ''}`}
-              >
-                Reflect
-              </button>
+              <>
+                <button 
+                  onClick={() => setActiveTab('reflect')} 
+                  className={`tab-btn ${activeTab === 'reflect' ? 'active' : ''}`}
+                >
+                  Reflect
+                </button>
+                <button 
+                  onClick={() => setActiveTab('dm')} 
+                  className={`tab-btn ${activeTab === 'dm' ? 'active' : ''}`}
+                  style={{ position: 'relative' }}
+                >
+                  DM
+                  {activeTab !== 'dm' && unreadDmCount > 0 && (
+                    <span className="tab-unread-dot dm-dot" />
+                  )}
+                </button>
+              </>
             )}
             <button 
               onClick={() => setActiveTab('community')} 
@@ -7297,6 +7342,23 @@ function AppContent() {
             ) : (
               <div className="placeholder-container">
                 <p>Please sign in to view your Reflect stats.</p>
+              </div>
+            )
+          ) : activeTab === 'dm' ? (
+            user ? (
+              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px', maxWidth: '800px', margin: '0 auto', paddingBottom: '48px', width: '100%', height: 'calc(100vh - 240px)' }}>
+                <DMPanel
+                  user={user}
+                  dmThreads={dmThreads}
+                  communityUsers={communityUsers}
+                  followingUserIds={followingUserIds}
+                  followerUserIds={followerUserIds}
+                  showToast={showToast}
+                />
+              </div>
+            ) : (
+              <div className="placeholder-container">
+                <p>Please sign in to view your direct messages.</p>
               </div>
             )
           ) : (
@@ -8344,6 +8406,16 @@ function AppContent() {
                       className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
                     >
                       Tools
+                    </button>
+                    <button 
+                      onClick={() => setCallTab('dm')} 
+                      className={`sidebar-tab-btn ${callTab === 'dm' ? 'active' : ''}`}
+                      style={{ position: 'relative' }}
+                    >
+                      DM
+                      {callTab !== 'dm' && unreadDmCount > 0 && (
+                        <span className="tab-unread-dot dm-dot" />
+                      )}
                     </button>
                   </div>
 
@@ -9624,6 +9696,17 @@ function AppContent() {
 
                   </div>
                 ); })()}
+
+                {callTab === 'dm' && (
+                  <DMPanel
+                    user={user}
+                    dmThreads={dmThreads}
+                    communityUsers={communityUsers}
+                    followingUserIds={followingUserIds}
+                    followerUserIds={followerUserIds}
+                    showToast={showToast}
+                  />
+                )}
 
               </div>
             </div>
