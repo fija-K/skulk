@@ -2684,4 +2684,43 @@ body.theme-active .chat-panel {
   border-color: var(--primary-color) !important;
 }
 
+/* Room Settings Redesign Styles */
+.room-input {
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-primary);
+  border-radius: var(--btn-radius);
+  transition: all var(--transition-speed) ease;
+}
+
+.room-input:focus {
+  outline: none;
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 20%, transparent);
+}
+
+.stepper-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--button-secondary-bg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-speed) ease;
+}
+
+.stepper-btn:hover {
+  background-color: var(--button-secondary-hover);
+  border-color: var(--primary-color);
+}
+
+body.theme-active .theme-picker-dropdown {
+  background-color: rgba(21, 23, 28, 0.93) !important;
+}
+
 

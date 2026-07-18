@@ -5516,9 +5516,9 @@ function AppContent() {
     const isHostOrAdmin = myPresence?.role === 'host' || myPresence?.role === 'cohost' || myPresence?.role === 'admin';
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '4px' }}>
-        {/* Room Name setting */}
-        <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', padding: '4px 0' }}>
+        {/* Room Topic Name setting */}
+        <div style={{ paddingBottom: '16px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
           <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Room Topic (Name)</label>
           <div style={{ display: 'flex', gap: '8px' }}>
             <input 
@@ -5531,51 +5531,59 @@ function AppContent() {
                 }
               }}
               className="room-input" 
-              style={{ flex: 1, padding: '8px 12px', fontSize: '13px' }}
+              style={{ flex: 1, padding: '8px 12px', fontSize: '13px', height: '36px' }}
               placeholder="e.g. Algorithms Study Group"
             />
           </div>
-          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can update the room topic/name.</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', display: 'block' }}>Anyone can update the room topic/name.</span>
         </div>
 
-        {/* Room Privacy setting */}
-        <div>
+        {/* Room Privacy Type setting */}
+        <div style={{ paddingBottom: '16px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
           <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Room Privacy Type</label>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
-              <input 
-                type="radio" 
-                name="roomTypeSetting" 
-                checked={currentRoom?.type === 'public'} 
-                onChange={() => handleChangeRoomType('public')} 
-              />
-              Public
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
-              <input 
-                type="radio" 
-                name="roomTypeSetting" 
-                checked={currentRoom?.type === 'public-ask'} 
-                onChange={() => handleChangeRoomType('public-ask')} 
-              />
-              Ask to Join
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
-              <input 
-                type="radio" 
-                name="roomTypeSetting" 
-                checked={currentRoom?.type === 'private'} 
-                onChange={() => handleChangeRoomType('private')} 
-              />
-              Private
-            </label>
+          <div style={{
+            display: 'flex',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            padding: '2px',
+            gap: '2px',
+            width: '100%'
+          }}>
+            {(['public', 'public-ask', 'private'] as const).map(t => {
+              const isActive = currentRoom?.type === t;
+              const label = t === 'public' ? 'Public' : t === 'public-ask' ? 'Ask to Join' : 'Private';
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => handleChangeRoomType(t)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 4px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    border: isActive ? '1px solid color-mix(in srgb, var(--primary-color) 30%, transparent)' : '1px solid transparent',
+                    backgroundColor: isActive ? 'color-mix(in srgb, var(--primary-color) 15%, transparent)' : 'transparent',
+                    color: isActive ? 'var(--primary-color)' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone can change room privacy in this room.</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', display: 'block' }}>Anyone can change room privacy in this room.</span>
         </div>
 
         {/* Max Participants setting (Host/Cohost/Admin only) */}
         {isHostOrAdmin && (
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+          <div style={{ paddingBottom: '16px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
             <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Max Participants</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button 
@@ -5586,16 +5594,16 @@ function AppContent() {
                   setMaxPartInput(nextVal);
                   handleChangeMaxParticipants(nextVal);
                 }}
-                style={{ width: '36px', height: '36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                className="stepper-btn"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
               </button>
               <input 
                 type="number" 
                 min="2"
                 max="10"
                 className="room-input"
-                style={{ textAlign: 'center', width: '60px', padding: '8px 0', fontSize: '13px' }}
+                style={{ textAlign: 'center', width: '60px', padding: '0', height: '36px', fontSize: '13px', fontWeight: 'bold' }}
                 value={maxPartInput}
                 onChange={(e) => {
                   const val = e.target.value === '' ? '' : parseInt(e.target.value);
@@ -5622,13 +5630,13 @@ function AppContent() {
                   setMaxPartInput(nextVal);
                   handleChangeMaxParticipants(nextVal);
                 }}
-                style={{ width: '36px', height: '36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--panel-bg)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                className="stepper-btn"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
               </button>
               <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Capacity cap (10 max)</span>
             </div>
-            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '6px', display: 'block' }}>
               Current active participants: {callParticipants.length}
             </span>
           </div>
@@ -5636,10 +5644,10 @@ function AppContent() {
 
         {/* Room Mode Toggle Section */}
         {currentRoom && (
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ paddingBottom: roomJoinKey ? '16px' : '0', borderBottom: roomJoinKey ? '1px solid rgba(255, 255, 255, 0.05)' : 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Room Mode</span>
-              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block' }}>Room Mode</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
                 {isHostOrAdmin ? 'Set study focus mode guidelines for all participants in this room.' : 'Only hosts or co-hosts can change the room mode.'}
               </span>
             </div>
@@ -5656,10 +5664,10 @@ function AppContent() {
             }}>
               {(['chill', 'discuss', 'non-discuss'] as const).map(m => {
                 const isActive = (currentRoom.roomMode || 'chill') === m;
-                const label = m === 'chill' ? 'Chill Mode' : m === 'discuss' ? 'Focus Mode' : 'Ultra Pro Max Focus Mode';
-                const activeColor = m === 'chill' ? 'rgba(46, 204, 113, 0.15)' : m === 'discuss' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)';
-                const activeTextColor = m === 'chill' ? '#2ecc71' : m === 'discuss' ? '#3b82f6' : '#ef4444';
-                const activeBorder = m === 'chill' ? 'rgba(46, 204, 113, 0.3)' : m === 'discuss' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+                const label = m === 'chill' ? 'Chill Mode' : m === 'discuss' ? 'Focus Mode' : 'Ultra Focus Mode';
+                const activeColor = m === 'chill' ? 'rgba(46, 204, 113, 0.15)' : m === 'discuss' ? 'color-mix(in srgb, var(--primary-color) 15%, transparent)' : 'rgba(239, 68, 68, 0.15)';
+                const activeTextColor = m === 'chill' ? '#2ecc71' : m === 'discuss' ? 'var(--primary-color)' : '#ef4444';
+                const activeBorder = m === 'chill' ? 'rgba(46, 204, 113, 0.3)' : m === 'discuss' ? 'color-mix(in srgb, var(--primary-color) 30%, transparent)' : 'rgba(239, 68, 68, 0.3)';
 
                 return (
                   <button
@@ -5691,7 +5699,7 @@ function AppContent() {
 
         {/* Shareable Join Key display for Host/Cohost/Admin */}
         {isHostOrAdmin && roomJoinKey && currentRoom && (
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+          <div>
             <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Invite Link with Secret Key</label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input 
@@ -5699,7 +5707,7 @@ function AppContent() {
                 readOnly 
                 value={`${window.location.origin}/room/${currentRoom.id}?key=${roomJoinKey}`}
                 className="room-input"
-                style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}
+                style={{ flex: 1, padding: '8px 12px', fontSize: '12px', height: '36px' }}
                 onClick={(e) => e.currentTarget.select()}
               />
               <button 
@@ -5708,13 +5716,13 @@ function AppContent() {
                   navigator.clipboard.writeText(`${window.location.origin}/room/${currentRoom.id}?key=${roomJoinKey}`);
                   showToast("Invite link copied to clipboard!");
                 }}
-                className="btn-create"
-                style={{ padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap', justifyContent: 'center' }}
+                className="btn-signin"
+                style={{ padding: '0 16px', height: '36px', fontSize: '12px', whiteSpace: 'nowrap', borderRadius: 'var(--btn-radius)' }}
               >
                 Copy
               </button>
             </div>
-            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>Anyone with this link will bypass the join approval flow.</span>
+            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '6px', display: 'block' }}>Anyone with this link will bypass the join approval flow.</span>
           </div>
         )}
       </div>
