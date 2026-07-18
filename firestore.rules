@@ -69,7 +69,7 @@ service cloud.firestore {
         (request.auth != null && request.resource.data.creatorId == request.auth.uid) ||
         (request.resource.data.creatorId.startsWith('guest_'))
       ) && 
-      request.resource.data.keys().hasOnly(['id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName']) &&
+      request.resource.data.keys().hasOnly(['id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName', 'roomMode', 'allowFunTools']) &&
       (
         request.resource.data.creatorId.startsWith('guest_') ||
         !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||

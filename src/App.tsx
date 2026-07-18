@@ -1036,6 +1036,7 @@ function AppContent() {
     const roomsRef = collection(db, 'rooms');
     
     const unsubscribe = onSnapshot(roomsRef, async (snapshot) => {
+      setIsFirestoreBlocked(false); // connection is working — clear any previous block flag
       if (snapshot.empty) {
         setRooms(getLocalRooms());
       } else {
