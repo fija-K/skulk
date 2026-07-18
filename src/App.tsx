@@ -5920,7 +5920,7 @@ function AppContent() {
             {/* Header (top bar) */}
           <header className="header">
             <a href="/" className="logo-container">
-              <div className="logo-circle">S</div>
+              <img src="/logo.png" alt="Skulk Logo" style={{ width: '32px', height: '32px', objectFit: 'contain', borderRadius: '4px' }} />
               <span>Skulk</span>
             </a>
             
@@ -7039,7 +7039,18 @@ function AppContent() {
               {/* Call Header */}
               <div className="call-top-bar">
             <div className="call-room-info">
-              <a href="/" onClick={(e) => { e.preventDefault(); if (window.confirm("Do you want to return to the homepage? You will leave the current room.")) { handleLeaveCall(); } }} className="logo-circle" style={{ width: '28px', height: '28px', fontSize: '15px', textDecoration: 'none' }}>S</a>
+              <a 
+                href="/" 
+                onClick={(e) => { 
+                  e.preventDefault(); 
+                  if (window.confirm("Do you want to return to the homepage? You will leave the current room.")) { 
+                    handleLeaveCall(); 
+                  } 
+                }} 
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '6px' }}
+              >
+                <img src="/logo.png" alt="Skulk Logo" style={{ width: '28px', height: '28px', objectFit: 'contain', borderRadius: '4px' }} />
+              </a>
               <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
               {currentRoom.creatorName && (() => {
                 const isAdminCreator = (currentRoom.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') ||
