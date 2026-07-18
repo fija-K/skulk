@@ -11,6 +11,8 @@ interface ChatPanelProps {
   handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
   activeBots: { id: string; name: string; addedBy: string }[];
   botTypingIds?: string[];
+  roomId?: string;
+  roomMode?: 'chill' | 'discuss' | 'non-discuss';
 }
 
 const POPULAR_EMOJIS = [
@@ -33,13 +35,25 @@ export function ChatPanel({
   chatMessages,
   systemMessages,
   callParticipants,
-  sendChatMessage,
+  sendChatMessage: originalSendChatMessage,
   callTab,
   handleOpenProfile,
   activeBots,
-  botTypingIds = []
+  botTypingIds = [],
+  roomId,
+  roomMode = 'chill'
 }: ChatPanelProps) {
   const [chatMessageText, setChatMessageText] = useState('');
+  const [chatCount, setChatCount] = useState(0);
+  const [chatBlockedUntil, setChatBlockedUntil] = useState<number | null>(null);
+
+  const sendChatMessage = async (text: string, mentionedId?: string) => {
+    if (roomMode === 'non-discuss' && chatBlockedUntil && Date.now() < chatBlockedUntil) {
+      return;
+    }
+    await originalSendChatMessage(text, mentionedId);
+  };
+
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearchText, setMentionSearchText] = useState('');
   const [mentionedId, setMentionedId] = useState<string | null>(null);
@@ -191,9 +205,84 @@ export function ChatPanel({
     return () => clearTimeout(timer);
   }, [gifQuery, showGifPicker, gifTab]);
 
+  // Load chat block state from LocalStorage or sync on roomId / roomMode change
+  useEffect(() => {
+    if (!roomId || roomMode !== 'non-discuss') {
+      setChatBlockedUntil(null);
+      setChatCount(0);
+      return;
+    }
+    const stored = localStorage.getItem(`skulk_chat_blocked_until_${roomId}`);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (parsed > Date.now()) {
+        setChatBlockedUntil(parsed);
+      } else {
+        localStorage.removeItem(`skulk_chat_blocked_until_${roomId}`);
+      }
+    }
+  }, [roomId, roomMode]);
+
+  // Listen to clear event from App.tsx
+  useEffect(() => {
+    const handleClear = () => {
+      setChatBlockedUntil(null);
+      setChatCount(0);
+      if (roomId) {
+        localStorage.removeItem(`skulk_chat_blocked_until_${roomId}`);
+      }
+    };
+    window.addEventListener('skulk_clear_chat_quota', handleClear);
+    return () => window.removeEventListener('skulk_clear_chat_quota', handleClear);
+  }, [roomId]);
+
+  // Countdown tick
+  useEffect(() => {
+    if (!chatBlockedUntil) return;
+    const interval = setInterval(() => {
+      if (Date.now() >= chatBlockedUntil) {
+        setChatBlockedUntil(null);
+        setChatCount(0);
+        if (roomId) {
+          localStorage.removeItem(`skulk_chat_blocked_until_${roomId}`);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [chatBlockedUntil, roomId]);
+
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessageText.trim()) return;
+
+    if (roomMode === 'non-discuss') {
+      const now = Date.now();
+      if (chatBlockedUntil && now < chatBlockedUntil) {
+        return;
+      }
+
+      // Check silence reset:
+      const lastMsg = chatMessages[chatMessages.length - 1];
+      const lastMsgTime = lastMsg?.createdAt ? new Date(lastMsg.createdAt).getTime() : 0;
+      const secondsSinceLastMsg = (now - lastMsgTime) / 1000;
+
+      let currentCount = chatCount;
+      if (secondsSinceLastMsg >= 10) {
+        currentCount = 0;
+      }
+
+      const nextCount = currentCount + 1;
+      if (nextCount >= 5) {
+        const blockedTime = now + 60000;
+        setChatBlockedUntil(blockedTime);
+        if (roomId) {
+          localStorage.setItem(`skulk_chat_blocked_until_${roomId}`, blockedTime.toString());
+        }
+        setChatCount(0);
+      } else {
+        setChatCount(nextCount);
+      }
+    }
 
     let finalMentionedId = mentionedId;
     if (!finalMentionedId) {
@@ -1024,25 +1113,48 @@ export function ChatPanel({
         </div>
       )}
       
-      <form onSubmit={handleSendChatMessage} className="chat-input-form" style={{ borderTop: 'none' }}>
-        <input 
-          ref={inputRef}
-          type="text" 
-          placeholder="Message the room..." 
-          className="search-input"
-          style={{ paddingLeft: '14px', fontSize: '13px' }}
-          value={chatMessageText}
-          onChange={handleInputChange}
-          onPaste={handlePaste}
-          required
-        />
-        <button type="submit" className="btn-signin" style={{ padding: '8px 12px' }}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
-      </form>
+      {(() => {
+        const isChatBlocked = !!(chatBlockedUntil && Date.now() < chatBlockedUntil);
+        const remainingChatSeconds = isChatBlocked ? Math.max(0, Math.ceil((chatBlockedUntil - Date.now()) / 1000)) : 0;
+        return (
+          <form onSubmit={handleSendChatMessage} className="chat-input-form" style={{ borderTop: 'none' }}>
+            <input 
+              ref={inputRef}
+              type="text" 
+              placeholder={isChatBlocked ? `Rate-limited. Reopens in ${remainingChatSeconds}s...` : "Message the room..."} 
+              className="search-input"
+              style={{
+                paddingLeft: '14px',
+                fontSize: '13px',
+                backgroundColor: isChatBlocked ? 'rgba(239, 68, 68, 0.05)' : undefined,
+                color: isChatBlocked ? '#ef4444' : undefined,
+                cursor: isChatBlocked ? 'not-allowed' : undefined,
+                opacity: isChatBlocked ? 0.7 : 1
+              }}
+              value={isChatBlocked ? '' : chatMessageText}
+              onChange={handleInputChange}
+              onPaste={handlePaste}
+              required={!isChatBlocked}
+              disabled={isChatBlocked}
+            />
+            <button
+              type="submit"
+              className="btn-signin"
+              disabled={isChatBlocked}
+              style={{
+                padding: '8px 12px',
+                opacity: isChatBlocked ? 0.5 : 1,
+                cursor: isChatBlocked ? 'not-allowed' : undefined
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </form>
+        );
+      })()}
       {activeExpandedImageUrl && (
         <div 
           className="image-modal-overlay animate-fade-in"

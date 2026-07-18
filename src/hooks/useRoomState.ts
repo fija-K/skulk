@@ -59,16 +59,22 @@ export function useRoomState(
       const data = docSnap.data();
       
       setCurrentRoom((prev: Room | null) => {
-        if (!prev) return null;
-        if (prev.name === data.name && prev.creatorName === data.creatorName && prev.creatorEmail === data.creatorEmail && prev.type === data.type) {
-          return prev;
-        }
+        const base = prev || ({
+          id: docSnap.id,
+          name: data.name || '',
+          type: data.type || 'public',
+          buttonText: data.type === 'public-ask' ? 'Ask to join' : 'Join',
+          participants: data.participants || [],
+          maxParticipants: data.maxParticipants || 10,
+        } as Room);
         return {
-          ...prev,
-          name: data.name || prev.name,
-          creatorName: data.creatorName || prev.creatorName,
-          creatorEmail: data.creatorEmail || prev.creatorEmail,
-          type: data.type || prev.type
+          ...base,
+          name: data.name ?? base.name,
+          creatorName: data.creatorName ?? base.creatorName,
+          creatorEmail: data.creatorEmail ?? base.creatorEmail,
+          type: data.type ?? base.type,
+          roomMode: data.roomMode ?? base.roomMode ?? 'chill',
+          allowFunTools: data.allowFunTools ?? base.allowFunTools ?? true
         };
       });
 

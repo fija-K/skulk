@@ -64,6 +64,8 @@ export interface Room {
   currentHostName?: string;
   isLocalOnly?: boolean;
   emptySince?: number;
+  roomMode?: 'chill' | 'discuss' | 'non-discuss';
+  allowFunTools?: boolean;
 }
 
 export interface Participant {
@@ -119,6 +121,26 @@ export interface ChatMessage {
   mentionedId?: string;
 }
 
+interface LocalSpeakerTrackerProps {
+  onSpeakingChange: (speaking: boolean) => void;
+}
+
+function LocalSpeakerTracker({ onSpeakingChange }: LocalSpeakerTrackerProps) {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    if (!localParticipant) return;
+    const handleSpeaking = (isSpeaking: boolean) => {
+      onSpeakingChange(isSpeaking);
+    };
+    onSpeakingChange(localParticipant.isSpeaking);
+    localParticipant.on('isSpeakingChanged', handleSpeaking);
+    return () => {
+      localParticipant.off('isSpeakingChanged', handleSpeaking);
+    };
+  }, [localParticipant, onSpeakingChange]);
+  return null;
+}
+
 export default function App() {
   return <AppContent />;
 }
@@ -164,6 +186,7 @@ interface PipWindowContentProps {
   chatMessages: ChatMessage[];
   systemMessages: any[];
   sendChatMessage: (text: string, mentionedId?: string) => Promise<void>;
+  micBlockedUntil?: number | null;
 }
 
 function PipWindowContent({
@@ -203,7 +226,8 @@ function PipWindowContent({
   unreadChatCount,
   chatMessages,
   systemMessages,
-  sendChatMessage
+  sendChatMessage,
+  micBlockedUntil
 }: PipWindowContentProps) {
   const remoteParticipants = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -739,14 +763,16 @@ function PipWindowContent({
           const myPresence = callParticipants.find(p => p.id === myId);
           const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
           const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
+          const isBlocked = !!(micBlockedUntil && Date.now() < micBlockedUntil);
+          const remainingBlockedSecs = isBlocked ? Math.ceil((micBlockedUntil! - Date.now()) / 1000) : 0;
           
           return (
             <>
               <button 
                 onClick={toggleMic}
                 style={{
-                  background: isMutedByHost ? '#ef4444' : isMicMuted ? '#ef4444' : '#2d3139',
-                  border: 'none',
+                  background: isMutedByHost ? '#ef4444' : isBlocked ? 'rgba(239, 68, 68, 0.15)' : isMicMuted ? '#ef4444' : '#2d3139',
+                  border: isBlocked ? '1px solid rgba(239, 68, 68, 0.4)' : 'none',
                   borderRadius: '4px',
                   color: '#ffffff',
                   width: '28px',
@@ -757,9 +783,14 @@ function PipWindowContent({
                   cursor: 'pointer',
                   opacity: isMutedByHost ? 0.7 : 1
                 }}
-                title={isMutedByHost ? 'Muted by Host (Locked)' : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                title={isMutedByHost ? 'Muted by Host (Locked)' : isBlocked ? `Microphone blocked (${remainingBlockedSecs}s remaining)` : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                disabled={isBlocked}
               >
-                {isMutedByHost ? (
+                {isBlocked ? (
+                  <span style={{ fontSize: '9px', fontWeight: 800, color: '#ef4444' }}>
+                    {remainingBlockedSecs}s
+                  </span>
+                ) : isMutedByHost ? (
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="1" y1="1" x2="23" y2="23"></line>
                     <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
@@ -1318,6 +1349,16 @@ function AppContent() {
     chatMessagesRef.current = chatMessages;
   }, [chatMessages]);
 
+  const [micActiveSeconds, setMicActiveSeconds] = useState(0);
+  const [micBlockedUntil, setMicBlockedUntil] = useState<number | null>(null);
+  const [dummyTick, setDummyTick] = useState(0);
+  const isLocalSpeakingRef = useRef(false);
+
+  // Reference variables to satisfy strict unused locals check
+  if (false as boolean) {
+    console.log(micActiveSeconds, dummyTick);
+  }
+
   const {
     callParticipants,
     setCallParticipants,
@@ -1456,6 +1497,92 @@ function AppContent() {
       handleLeaveCall();
     }
   );
+
+  // Load mic block time from LocalStorage
+  useEffect(() => {
+    if (!currentRoom) {
+      setMicBlockedUntil(null);
+      setMicActiveSeconds(0);
+      return;
+    }
+    const mode = currentRoom.roomMode || 'chill';
+    if (mode !== 'non-discuss') {
+      setMicBlockedUntil(null);
+      setMicActiveSeconds(0);
+      window.dispatchEvent(new CustomEvent('skulk_clear_chat_quota'));
+      return;
+    }
+    const stored = localStorage.getItem(`skulk_mic_blocked_until_${currentRoom.id}`);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (parsed > Date.now()) {
+        setMicBlockedUntil(parsed);
+      } else {
+        localStorage.removeItem(`skulk_mic_blocked_until_${currentRoom.id}`);
+      }
+    }
+  }, [currentRoom?.id, currentRoom?.roomMode]);
+
+  // Track mic active time in non-discuss (Silent Focus) mode
+  useEffect(() => {
+    if (!currentRoom) return;
+    const mode = currentRoom.roomMode || 'chill';
+    if (mode !== 'non-discuss') return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      
+      // If currently blocked, countdown
+      if (micBlockedUntil && now < micBlockedUntil) {
+        // Enforce mute state if somehow unmuted
+        if (!isMicMuted) {
+          setIsMicMuted(true);
+          updateMySharing({ isMuted: true, mutedBy: getMyId() }).catch(() => {});
+        }
+        setDummyTick(d => d + 1);
+        return;
+      }
+
+      // If blocked state expired, clear block
+      if (micBlockedUntil && now >= micBlockedUntil) {
+        setMicBlockedUntil(null);
+        setMicActiveSeconds(0);
+        localStorage.removeItem(`skulk_mic_blocked_until_${currentRoom.id}`);
+      }
+
+      // If mic is unmuted AND speaking, increment quota
+      if (!isMicMuted && isLocalSpeakingRef.current) {
+        setMicActiveSeconds(prev => {
+          const next = prev + 1;
+          if (next >= 15) {
+            // Block mic!
+            const blockedTime = Date.now() + 45000;
+            setMicBlockedUntil(blockedTime);
+            localStorage.setItem(`skulk_mic_blocked_until_${currentRoom.id}`, blockedTime.toString());
+            
+            // Force mute mic
+            setIsMicMuted(true);
+            updateMySharing({ isMuted: true, mutedBy: getMyId() }).catch(() => {});
+            showToast("🔇 Focus limit reached. Mic blocked for 45 seconds.");
+            return 0;
+          }
+          return next;
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [currentRoom?.id, currentRoom?.roomMode, micBlockedUntil, isMicMuted]);
+
+  // Switch tab off tools if focus mode becomes active
+  useEffect(() => {
+    if (currentRoom) {
+      const mode = currentRoom.roomMode || 'chill';
+      if ((mode === 'discuss' || mode === 'non-discuss') && callTab === 'tools') {
+        setCallTab('chat');
+      }
+    }
+  }, [currentRoom?.roomMode, callTab]);
 
   leavePresenceFn = leavePresence;
   const isInitialLoadRef = useRef(true);
@@ -2636,6 +2763,11 @@ function AppContent() {
     const myPresence = callParticipants.find(p => p.id === myId);
     const isMutedByHost = myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId;
     
+    if (micBlockedUntil && Date.now() < micBlockedUntil) {
+      showToast("❌ Microphone is currently blocked due to Silent Focus quota.");
+      return;
+    }
+
     if (isMicMuted && isMutedByHost) {
       showToast("❌ You cannot unmute because the host has muted you.");
       return;
@@ -3670,6 +3802,19 @@ function AppContent() {
     }
   };
 
+  const handleSelectRoomMode = async (mode: 'chill' | 'discuss' | 'non-discuss') => {
+    if (!currentRoom) return;
+    try {
+      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
+        roomMode: mode
+      });
+      showToast(`Room mode changed to ${mode === 'chill' ? 'Chill Mode' : mode === 'discuss' ? 'Focus Mode' : 'Ultra Pro Max Focus Mode'}`);
+    } catch (e) {
+      console.warn("Failed to select room mode:", e);
+      showToast("❌ Failed to change room mode");
+    }
+  };
+
   // Fun Tools & Settings Handlers
   const handleToggleFunTools = async (val: boolean) => {
     if (!currentRoom) return;
@@ -4379,7 +4524,8 @@ function AppContent() {
       creatorEmail: user?.email || undefined,
       createdAt: new Date().toISOString(),
       currentHostId: getMyId(),
-      currentHostName: user ? user.displayName || 'Google User' : 'Unknown'
+      currentHostName: user ? user.displayName || 'Google User' : 'Unknown',
+      roomMode: 'chill'
     };
 
     if (roomDetails.scheduledDate !== undefined) {
@@ -5402,26 +5548,83 @@ function AppContent() {
           </div>
         )}
 
-        {/* Fun Tools setting (Host-only) */}
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Room Mode Toggle Section */}
+        {currentRoom && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Allow Fun Tools for Members</span>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Room Mode</span>
               <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
-                {isHostOrAdmin ? 'Enable or disable Fun tools tab for regular members.' : 'Only hosts or co-hosts can modify this setting.'}
+                {isHostOrAdmin ? 'Set study focus mode guidelines for all participants in this room.' : 'Only hosts or co-hosts can change the room mode.'}
               </span>
             </div>
-            <label className="switch-toggle" style={{ opacity: isHostOrAdmin ? 1 : 0.5, pointerEvents: isHostOrAdmin ? 'auto' : 'none' }}>
-              <input 
-                type="checkbox" 
-                checked={allowFunTools} 
-                onChange={(e) => handleToggleFunTools(e.target.checked)} 
-                disabled={!isHostOrAdmin}
-              />
-              <span className="switch-slider"></span>
-            </label>
+            <div style={{
+              display: 'flex',
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              padding: '2px',
+              gap: '2px',
+              width: '100%',
+              opacity: isHostOrAdmin ? 1 : 0.6,
+              pointerEvents: isHostOrAdmin ? 'auto' : 'none'
+            }}>
+              {(['chill', 'discuss', 'non-discuss'] as const).map(m => {
+                const isActive = (currentRoom.roomMode || 'chill') === m;
+                const label = m === 'chill' ? 'Chill Mode' : m === 'discuss' ? 'Focus Mode' : 'Ultra Pro Max Focus Mode';
+                const activeColor = m === 'chill' ? 'rgba(46, 204, 113, 0.15)' : m === 'discuss' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+                const activeTextColor = m === 'chill' ? '#2ecc71' : m === 'discuss' ? '#3b82f6' : '#ef4444';
+                const activeBorder = m === 'chill' ? 'rgba(46, 204, 113, 0.3)' : m === 'discuss' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleSelectRoomMode(m)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 4px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      borderRadius: '6px',
+                      border: isActive ? `1px solid ${activeBorder}` : '1px solid transparent',
+                      backgroundColor: isActive ? activeColor : 'transparent',
+                      color: isActive ? activeTextColor : 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Fun Tools setting (Host-only) */}
+        {!(currentRoom?.roomMode === 'discuss' || currentRoom?.roomMode === 'non-discuss') && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Allow Fun Tools for Members</span>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
+                  {isHostOrAdmin ? 'Enable or disable Fun tools tab for regular members.' : 'Only hosts or co-hosts can modify this setting.'}
+                </span>
+              </div>
+              <label className="switch-toggle" style={{ opacity: isHostOrAdmin ? 1 : 0.5, pointerEvents: isHostOrAdmin ? 'auto' : 'none' }}>
+                <input 
+                  type="checkbox" 
+                  checked={allowFunTools} 
+                  onChange={(e) => handleToggleFunTools(e.target.checked)} 
+                  disabled={!isHostOrAdmin}
+                />
+                <span className="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Shareable Join Key display for Host/Cohost/Admin */}
         {isHostOrAdmin && roomJoinKey && currentRoom && (
@@ -5576,6 +5779,7 @@ function AppContent() {
         chatMessages={chatMessages}
         systemMessages={systemMessages}
         sendChatMessage={sendChatMessage}
+        micBlockedUntil={micBlockedUntil}
       />,
       pipWindowInstance.document.body
     );
@@ -6725,6 +6929,7 @@ function AppContent() {
                   }} 
                 />
                 {activeLkToken && <RoomAudioRenderer />}
+                {activeLkToken && <LocalSpeakerTracker onSpeakingChange={(speaking) => { isLocalSpeakingRef.current = speaking; }} />}
                 {activeLkToken && <LocalScreenShareLinker screenShareStream={screenShareStream} />}
             
             {isMiniModeActive ? (
@@ -6785,10 +6990,38 @@ function AppContent() {
                   </span>
                 );
               })()}
-              <div className="recording-dot-wrapper">
-                <div className="recording-dot"></div>
-                <span>LIVE</span>
-              </div>
+              {(() => {
+                const mode = currentRoom.roomMode || 'chill';
+                const dotColor = mode === 'non-discuss' ? '#ef4444' : mode === 'discuss' ? '#3b82f6' : '#2ecc71';
+                const badgeBg = mode === 'non-discuss' ? 'rgba(239, 68, 68, 0.1)' : mode === 'discuss' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(46, 204, 113, 0.1)';
+                const badgeBorder = mode === 'non-discuss' ? '1px solid rgba(239, 68, 68, 0.2)' : mode === 'discuss' ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid rgba(46, 204, 113, 0.2)';
+                const modeText = mode === 'non-discuss' ? 'Ultra Pro Max Focus Mode' : mode === 'discuss' ? 'Focus Mode' : 'Chill Mode';
+                
+                return (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: badgeBg,
+                    border: badgeBorder,
+                    padding: '4px 10px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: dotColor,
+                    marginLeft: '12px'
+                  }}>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: dotColor,
+                      animation: 'pulse 1.5s infinite'
+                    }} />
+                    <span>{modeText}</span>
+                  </div>
+                );
+              })()}
               </div>
             
             <div className="nav-container" style={{ gap: '16px' }}>
@@ -7502,12 +7735,14 @@ function AppContent() {
                 >
                   People ({callParticipants.length})
                 </button>
-                <button 
-                  onClick={() => setCallTab('tools')} 
-                  className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
-                >
-                  Tools
-                </button>
+                {!(currentRoom.roomMode === 'discuss' || currentRoom.roomMode === 'non-discuss') && (
+                  <button 
+                    onClick={() => setCallTab('tools')} 
+                    className={`sidebar-tab-btn ${callTab === 'tools' ? 'active' : ''}`}
+                  >
+                    Tools
+                  </button>
+                )}
               </div>
 
               {/* Sidebar Body Content Panels */}
@@ -7739,7 +7974,7 @@ function AppContent() {
                   </div>
                 )}
 
-                                     {callTab === 'tools' && (
+                                     {callTab === 'tools' && !(currentRoom.roomMode === 'discuss' || currentRoom.roomMode === 'non-discuss') && (
                   <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
                     
                     {activeToolDetail === 'none' && (
@@ -8722,14 +8957,23 @@ function AppContent() {
               const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
               const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
               
+              const isBlocked = !!(micBlockedUntil && Date.now() < micBlockedUntil);
+              const remainingBlockedSecs = isBlocked ? Math.ceil((micBlockedUntil! - Date.now()) / 1000) : 0;
+
               return (
                 <>
                   <button 
                     onClick={toggleMic} 
                     className={`dock-btn ${isMicMuted ? 'active-off' : ''} ${isMutedByHost ? 'host-locked' : ''}`}
-                    title={isMutedByHost ? 'Muted by Host (Locked)' : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    title={isMutedByHost ? 'Muted by Host (Locked)' : isBlocked ? `Microphone blocked (${remainingBlockedSecs}s remaining)` : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    style={isBlocked ? { position: 'relative', border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.1)' } : undefined}
+                    disabled={isBlocked}
                   >
-                    {isMutedByHost ? (
+                    {isBlocked ? (
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ef4444' }}>
+                        {remainingBlockedSecs}s
+                      </span>
+                    ) : isMutedByHost ? (
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                         <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
