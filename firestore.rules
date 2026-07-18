@@ -119,7 +119,11 @@ service cloud.firestore {
                             ((request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && request.resource.data.role == 'admin') ||
                             (!(request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.creatorId) && 
                              !(request.auth.token.email == 'fijakhan7127@gmail.com' || request.auth.token.email == '000fijakhan123@gmail.com') && 
-                             request.resource.data.role == 'member')
+                             (
+                               request.resource.data.role == 'member' ||
+                               (exists(/databases/$(database)/documents/rooms/$(roomId)/approvedUsers/$(request.auth.uid)) && 
+                                request.resource.data.role == get(/databases/$(database)/documents/rooms/$(roomId)/approvedUsers/$(request.auth.uid)).data.role)
+                             ))
                           )
                         )
                       ) || 
