@@ -4,6 +4,7 @@ import {
   doc, 
   setDoc, 
   addDoc, 
+  getDocs,
   query, 
   orderBy, 
   onSnapshot, 
@@ -84,7 +85,7 @@ const MENTOR_GREETINGS: Record<string, string> = {
 export function DMPanel({
   user,
   dmThreads,
-  communityUsers,
+  communityUsers: _communityUsers,
   followingUserIds,
   followerUserIds,
   showToast,
@@ -784,10 +785,10 @@ export function DMPanel({
       displayMessages = [{
         id: 'greeting_virtual',
         senderId: otherUid,
-        senderName: otherName,
+        sender: otherName,
         text: greetingText,
         createdAt: new Date().toISOString() as any
-      }];
+      } as ChatMessage];
     }
 
     return (
@@ -895,7 +896,7 @@ export function DMPanel({
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '10px', fontWeight: 700, opacity: 0.8 }}>
-                    {isMe ? 'You' : msg.senderName}
+                    {isMe ? 'You' : msg.sender}
                   </span>
                   {msg.createdAt && (
                     <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>
@@ -1431,5 +1432,4 @@ export function DMPanel({
       {showMentorPicker && renderMentorPickerModal()}
     </div>
   );
-}
 }
