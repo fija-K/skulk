@@ -637,17 +637,8 @@ body {
 
 .radio-card.active {
   border-color: var(--primary-color);
-  background-color: rgba(59, 130, 246, 0.05);
+  background-color: color-mix(in srgb, var(--primary-color) 5%, transparent);
 }
-
-/* Custom overlay colors based on active theme */
-html.theme-nightwatch .radio-card.active { background-color: rgba(241, 196, 15, 0.05); }
-html.theme-reactor .radio-card.active { background-color: rgba(231, 76, 60, 0.05); }
-html.theme-crimson .radio-card.active { background-color: rgba(220, 38, 38, 0.05); }
-html.theme-deduction .radio-card.active { background-color: rgba(255, 255, 255, 0.05); }
-html.theme-bloom .radio-card.active { background-color: rgba(236, 72, 153, 0.05); }
-html.theme-symbiote .radio-card.active { background-color: rgba(132, 204, 22, 0.05); }
-html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0.05); }
 
 .radio-indicator {
   width: 18px;
@@ -1929,16 +1920,8 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
 
 .pomodoro-timer-circle.active-focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 16px rgba(241, 196, 15, 0.15); /* Nightwatch gold glow default */
+  box-shadow: 0 0 16px color-mix(in srgb, var(--primary-color) 20%, transparent);
 }
-
-/* Custom glow borders per active theme */
-html.theme-nightwatch .pomodoro-timer-circle.active-focus { border-color: #f1c40f; box-shadow: 0 0 16px rgba(241, 196, 15, 0.2); }
-html.theme-reactor .pomodoro-timer-circle.active-focus { border-color: #e74c3c; box-shadow: 0 0 16px rgba(231, 76, 60, 0.2); }
-html.theme-crimson .pomodoro-timer-circle.active-focus { border-color: #dc2626; box-shadow: 0 0 16px rgba(220, 38, 38, 0.2); }
-html.theme-bloom .pomodoro-timer-circle.active-focus { border-color: #ec4899; box-shadow: 0 0 16px rgba(236, 72, 153, 0.2); }
-html.theme-symbiote .pomodoro-timer-circle.active-focus { border-color: #84cc16; box-shadow: 0 0 16px rgba(132, 204, 22, 0.2); }
-html.theme-webslinger .pomodoro-timer-circle.active-focus { border-color: #e11d48; box-shadow: 0 0 16px rgba(225, 29, 72, 0.2); }
 
 .pomodoro-timer-circle.active-break {
   border-color: #3b82f6; /* Blue for breaks */

@@ -149,15 +149,15 @@ const truthQuestions = tdData.game.td.truths;
 const dareQuestions = tdData.game.td.dares;
 
 const THEME_PRESETS = [
-  { key: 'gotham-3d', name: 'Gotham City (3D)', imageUrl: '/themes/gotham_3d.webp' },
-  { key: 'gotham-comic', name: 'Gotham City (Comic)', imageUrl: '/themes/gotham_comic.webp' },
-  { key: 'matrix-green', name: 'Matrix Code (Green)', imageUrl: '/themes/matrix_green.webp' },
-  { key: 'matrix-pink', name: 'Matrix Code (Pink)', imageUrl: '/themes/matrix_pink.webp' },
-  { key: 'tech-workbench', name: 'Tech Workbench', imageUrl: '/themes/tech_workbench.webp' },
-  { key: 'steampunk-mary', name: 'Cyber Mary', imageUrl: '/themes/steampunk_mary.webp' },
-  { key: 'babushka-animals', name: 'Babushka Animals', imageUrl: '/themes/babushka_animals.webp' },
-  { key: 'oriental-collage', name: 'Oriental Collage', imageUrl: '/themes/oriental_collage.webp' },
-  { key: 'pop-art', name: 'Pop-Art Collage', imageUrl: '/themes/pop_art.webp' }
+  { key: 'gotham-3d', name: 'Gotham City (3D)', imageUrl: '/themes/gotham_3d.jpg', accentColor: '#38bdf8', accentHoverColor: '#0ea5e9' },
+  { key: 'gotham-comic', name: 'Gotham City (Comic)', imageUrl: '/themes/gotham_comic.jpg', accentColor: '#facc15', accentHoverColor: '#eab308' },
+  { key: 'matrix-green', name: 'Matrix Code (Green)', imageUrl: '/themes/matrix_green.jpg', accentColor: '#22c55e', accentHoverColor: '#16a34a' },
+  { key: 'matrix-pink', name: 'Matrix Code (Pink)', imageUrl: '/themes/matrix_pink.jpg', accentColor: '#ec4899', accentHoverColor: '#db2777' },
+  { key: 'tech-workbench', name: 'Tech Workbench', imageUrl: '/themes/tech_workbench.jpg', accentColor: '#06b6d4', accentHoverColor: '#0891b2' },
+  { key: 'steampunk-mary', name: 'Cyber Mary', imageUrl: '/themes/steampunk_mary.jpg', accentColor: '#f97316', accentHoverColor: '#ea580c' },
+  { key: 'babushka-animals', name: 'Babushka Animals', imageUrl: '/themes/babushka_animals.jpg', accentColor: '#f59e0b', accentHoverColor: '#d97706' },
+  { key: 'oriental-collage', name: 'Oriental Collage', imageUrl: '/themes/oriental_collage.jpg', accentColor: '#e11d48', accentHoverColor: '#be123c' },
+  { key: 'pop-art', name: 'Pop-Art Collage', imageUrl: '/themes/pop_art.jpg', accentColor: '#a855f7', accentHoverColor: '#9333ea' }
 ];
 
 interface PipWindowContentProps {
@@ -1194,9 +1194,6 @@ function AppContent() {
   const [generatedRoomLink, setGeneratedRoomLink] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
-  // Theme Picker State (7 selectable themes, nightwatch default)
-  const [theme, setTheme] = useState<string>('nightwatch');
-
   // Active background theme image state
   const [activeTheme, setActiveTheme] = useState<string>(() => {
     try {
@@ -1874,12 +1871,25 @@ function AppContent() {
     }
   }, [user, userDataState]);
 
-  // Sync activeTheme class to body element
+  // Sync activeTheme class to body element and update accent color CSS variables dynamically
   useEffect(() => {
+    const root = window.document.documentElement;
     if (activeTheme && activeTheme !== 'default') {
       document.body.classList.add('theme-active');
+      const preset = THEME_PRESETS.find(p => p.key === activeTheme);
+      if (preset && preset.accentColor) {
+        root.style.setProperty('--primary-color', preset.accentColor);
+        root.style.setProperty('--primary-hover', preset.accentHoverColor);
+        root.style.setProperty('--card-hover-border', preset.accentColor);
+        root.style.setProperty('--input-focus-border', preset.accentColor);
+      }
     } else {
       document.body.classList.remove('theme-active');
+      // Reset to default Nightwatch colors
+      root.style.setProperty('--primary-color', '#f1c40f');
+      root.style.setProperty('--primary-hover', '#d4ac0d');
+      root.style.setProperty('--card-hover-border', '#f1c40f');
+      root.style.setProperty('--input-focus-border', '#f1c40f');
     }
   }, [activeTheme]);
 
@@ -2255,25 +2265,6 @@ function AppContent() {
     
     return () => clearInterval(cleanupInterval);
   }, [rooms, roomsParticipants, currentRoom]);
-
-  const themes = [
-    { id: 'nightwatch', name: 'Nightwatch', bg: '#0f1013', accent: '#f1c40f' },
-    { id: 'reactor', name: 'Reactor', bg: '#0b0c10', accent: '#e74c3c' },
-    { id: 'crimson', name: 'Crimson', bg: '#000000', accent: '#dc2626' },
-    { id: 'deduction', name: 'Deduction', bg: '#000000', accent: '#ffffff' },
-    { id: 'bloom', name: 'Bloom', bg: '#fff9fa', accent: '#ec4899' },
-    { id: 'symbiote', name: 'Symbiote', bg: '#040404', accent: '#84cc16' },
-    { id: 'webslinger', name: 'Webslinger', bg: '#070913', accent: '#e11d48' },
-  ];
-
-  // Sync theme class to html element
-  useEffect(() => {
-    const root = window.document.documentElement;
-    // Strip other theme classes
-    const classesToRemove = Array.from(root.classList).filter(c => c.startsWith('theme-'));
-    classesToRemove.forEach(c => root.classList.remove(c));
-    root.classList.add(`theme-${theme}`);
-  }, [theme]);
 
   // Pre-load media sharing APIs in the background for instant Watch Together loading
   useEffect(() => {
@@ -9750,17 +9741,17 @@ function AppContent() {
             </div>
 
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px', marginTop: 0 }}>
-              Select a custom background theme and UI color accent palette for your Skulk experience.
+              Select a custom background theme that will automatically apply a matching UI color accent.
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div>
                 <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--text-primary)', fontWeight: 700 }}>🖼️ Background Image</h3>
                 <div style={{ 
                   display: 'grid', 
                   gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', 
                   gap: '12px',
-                  maxHeight: '220px',
+                  maxHeight: '380px',
                   overflowY: 'auto',
                   paddingRight: '6px'
                 }}>
@@ -9828,51 +9819,6 @@ function AppContent() {
                       </span>
                       {activeTheme === preset.key && (
                         <div style={{ position: 'absolute', top: '8px', right: '8px', backgroundColor: 'var(--primary-color)', color: '#000', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>✓</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--text-primary)', fontWeight: 700 }}>🎨 UI Color Palette</h3>
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', 
-                  gap: '10px',
-                  maxHeight: '160px',
-                  overflowY: 'auto',
-                  paddingRight: '6px'
-                }}>
-                  {themes.map((t) => (
-                    <div 
-                      key={t.id}
-                      onClick={() => setTheme(t.id)}
-                      className="theme-grid-card"
-                      style={{
-                        border: theme === t.id ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
-                        borderRadius: '8px',
-                        padding: '8px',
-                        cursor: 'pointer',
-                        backgroundColor: 'rgba(255,255,255,0.02)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        position: 'relative'
-                      }}
-                    >
-                      <div 
-                        style={{ 
-                          width: '20px', 
-                          height: '20px', 
-                          borderRadius: '4px', 
-                          background: `linear-gradient(135deg, ${t.bg} 50%, ${t.accent} 50%)`,
-                          border: '1px solid rgba(255,255,255,0.1)'
-                        }} 
-                      />
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)' }}>{t.name}</span>
-                      {theme === t.id && (
-                        <div style={{ position: 'absolute', top: '4px', right: '4px', backgroundColor: 'var(--primary-color)', color: '#000', borderRadius: '50%', width: '12px', height: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold' }}>✓</div>
                       )}
                     </div>
                   ))}
