@@ -19,7 +19,8 @@ import {
   orderBy,
   limit,
   where,
-  writeBatch
+  writeBatch,
+  addDoc
 } from 'firebase/firestore';
 import { auth, googleProvider, signInWithPopup, signOut, db } from './firebase';
 import tdData from '../td.json';
@@ -2165,6 +2166,146 @@ function AppContent() {
     });
 
     return () => unsubDms();
+  }, [user]);
+
+  // ─── Tier 1: Hourly Wellness Pings ────────────────────────────────────────
+  // Runs only while the tab is open. Duplicate-tab prevention: before posting,
+  // reads the mentor thread doc and checks lastWellnessPingTime — skips if
+  // another tab already posted within the last 55 minutes.
+  const WELLNESS_ROTATION = [
+    { type: 'water',   text: "💧 Drink water. Right now — before you touch anything else. Go." },
+    { type: 'eyes',    text: "👁️ Close your eyes for 20 seconds. Look at something 20 feet away. Do it." },
+    { type: 'stretch', text: "🧘 Stand up. Stretch your back and neck for 30 seconds. Then sit back down and work." }
+  ];
+
+  useEffect(() => {
+    if (!user) return;
+    const mentorThreadId = `mentor_${user.uid}`;
+    let pingIndex = 0;
+
+    const runWellnessPing = async () => {
+      try {
+        const threadRef = doc(db, 'dm_threads', mentorThreadId);
+        const threadSnap = await getDoc(threadRef);
+
+        // Duplicate tab guard: skip if another tab already pinged within 55 min
+        if (threadSnap.exists()) {
+          const lastPingTs = threadSnap.data()?.lastWellnessPingTime;
+          if (lastPingTs) {
+            const lastMs = lastPingTs.toDate ? lastPingTs.toDate().getTime() : new Date(lastPingTs).getTime();
+            if (Date.now() - lastMs < 55 * 60 * 1000) {
+              return; // Another tab already pinged — skip silently
+            }
+          }
+        }
+
+        const ping = WELLNESS_ROTATION[pingIndex % WELLNESS_ROTATION.length];
+        pingIndex++;
+
+        const now = serverTimestamp();
+
+        // Ensure mentor thread exists
+        await setDoc(threadRef, {
+          participants: [user.uid, 'bot_mentor'],
+          lastMessageText: ping.text,
+          lastMessageTime: now,
+          lastWellnessPingTime: now,
+          unread: { [user.uid]: true },
+          createdAt: now
+        }, { merge: true });
+
+        // Write the wellness message (no expiresAt — persists forever)
+        await addDoc(collection(db, 'dm_threads', mentorThreadId, 'messages'), {
+          senderId: 'bot_mentor',
+          senderName: 'Mentor',
+          text: ping.text,
+          createdAt: now,
+          wellnessType: ping.type
+        });
+
+        showToast(`🧠 Mentor: ${ping.text}`);
+      } catch (err) {
+        console.warn('Wellness ping failed:', err);
+      }
+    };
+
+    // Fire first ping after 60 minutes, then every 60 minutes
+    const intervalId = setInterval(runWellnessPing, 60 * 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, [user]);
+
+  // ─── Tier 2: Custom Reminder Listener ─────────────────────────────────────
+  // Listens to user's reminders subcollection and fires them at their scheduled time.
+  useEffect(() => {
+    if (!user) return;
+    const remindersRef = collection(db, 'users', user.uid, 'reminders');
+    const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    const unsubReminders = onSnapshot(remindersRef, (snap) => {
+      // Clear any stale timers for docs that no longer exist
+      const currentIds = new Set(snap.docs.map(d => d.id));
+      activeTimers.forEach((timer, id) => {
+        if (!currentIds.has(id)) {
+          clearTimeout(timer);
+          activeTimers.delete(id);
+        }
+      });
+
+      snap.docs.forEach((reminderDoc) => {
+        const data = reminderDoc.data();
+        if (data.fired) return; // Already delivered
+
+        const fireAt: number = data.fireAt?.toDate
+          ? data.fireAt.toDate().getTime()
+          : new Date(data.fireAt).getTime();
+
+        const delay = fireAt - Date.now();
+        if (delay < 0) return; // Past — skip
+
+        // Don't reset a timer that already exists for this reminder
+        if (activeTimers.has(reminderDoc.id)) return;
+
+        const timerId = setTimeout(async () => {
+          try {
+            const mentorThreadId = `mentor_${user.uid}`;
+            const threadRef = doc(db, 'dm_threads', mentorThreadId);
+            const now = serverTimestamp();
+            const text = `⏰ Reminder: ${data.text}`;
+
+            await setDoc(threadRef, {
+              participants: [user.uid, 'bot_mentor'],
+              lastMessageText: text,
+              lastMessageTime: now,
+              unread: { [user.uid]: true },
+              createdAt: now
+            }, { merge: true });
+
+            await addDoc(collection(db, 'dm_threads', mentorThreadId, 'messages'), {
+              senderId: 'bot_mentor',
+              senderName: 'Mentor',
+              text,
+              createdAt: now
+            });
+
+            // Mark reminder as fired so it doesn't re-trigger
+            await setDoc(doc(db, 'users', user.uid, 'reminders', reminderDoc.id), { fired: true }, { merge: true });
+
+            showToast(text);
+          } catch (err) {
+            console.warn('Reminder delivery failed:', err);
+          }
+          activeTimers.delete(reminderDoc.id);
+        }, delay);
+
+        activeTimers.set(reminderDoc.id, timerId);
+      });
+    });
+
+    return () => {
+      unsubReminders();
+      activeTimers.forEach(clearTimeout);
+      activeTimers.clear();
+    };
   }, [user]);
 
   // Background self-healing for denormalized follow counts
@@ -7354,6 +7495,7 @@ function AppContent() {
                   followingUserIds={followingUserIds}
                   followerUserIds={followerUserIds}
                   showToast={showToast}
+                  targetsList={targetsList}
                 />
               </div>
             ) : (
@@ -9705,6 +9847,7 @@ function AppContent() {
                     followingUserIds={followingUserIds}
                     followerUserIds={followerUserIds}
                     showToast={showToast}
+                    targetsList={targetsList}
                   />
                 )}
 

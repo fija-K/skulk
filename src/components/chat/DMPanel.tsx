@@ -3,7 +3,6 @@ import {
   collection, 
   doc, 
   setDoc, 
-  updateDoc, 
   addDoc, 
   query, 
   orderBy, 
@@ -21,6 +20,7 @@ interface DMPanelProps {
   followingUserIds: string[];
   followerUserIds: string[];
   showToast: (msg: string) => void;
+  targetsList?: any[];
 }
 
 const POPULAR_EMOJIS = [
@@ -44,7 +44,8 @@ export function DMPanel({
   dmThreads,
   followingUserIds,
   followerUserIds,
-  showToast
+  showToast,
+  targetsList
 }: DMPanelProps) {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,11 +56,36 @@ export function DMPanel({
   const [gifs, setGifs] = useState<string[]>(DEFAULT_GIFS);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [searchConnectionText, setSearchConnectionText] = useState('');
+  const [showReminderForm, setShowReminderForm] = useState(false);
+  const [reminderText, setReminderText] = useState('');
+  const [reminderTime, setReminderTime] = useState('');
   
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // Compute mutual connection IDs
   const mutualIds = followingUserIds.filter(id => followerUserIds.includes(id));
+
+  // Merge permanent Mentor thread
+  const mergedThreads = useMemo(() => {
+    if (!user) return dmThreads;
+    const mentorThreadId = `mentor_${user.uid}`;
+    const hasMentorDoc = dmThreads.some(t => t.id === mentorThreadId);
+    
+    if (hasMentorDoc) {
+      return dmThreads;
+    } else {
+      // Add a virtual/default mentor thread
+      const virtualMentorThread = {
+        id: mentorThreadId,
+        participants: [user.uid, 'bot_mentor'],
+        lastMessageText: 'Your personal study mentor is ready.',
+        lastMessageTime: null,
+        unread: { [user.uid]: false },
+        createdAt: null
+      };
+      return [virtualMentorThread, ...dmThreads];
+    }
+  }, [dmThreads, user?.uid]);
 
   // State to hold resolved user profiles of participants and mutual connections in real time
   const [resolvedConnections, setResolvedConnections] = useState<any[]>([]);
@@ -67,7 +93,7 @@ export function DMPanel({
   // Get unique user IDs we need profiles for: mutualIds + other participants in active DM threads
   const resolveUserIds = useMemo(() => {
     const ids = new Set<string>(mutualIds);
-    dmThreads.forEach(t => {
+    mergedThreads.forEach(t => {
       if (t.participants) {
         t.participants.forEach((pId: string) => {
           if (pId !== user?.uid) {
@@ -77,7 +103,7 @@ export function DMPanel({
       }
     });
     return Array.from(ids);
-  }, [mutualIds, dmThreads, user?.uid]);
+  }, [mutualIds, mergedThreads, user?.uid]);
 
   // Subscribe to profile documents of required users in real time
   useEffect(() => {
@@ -87,6 +113,21 @@ export function DMPanel({
     }
 
     const unsubscribes = resolveUserIds.map(uid => {
+      if (uid === 'bot_mentor') {
+        const profile = {
+          id: 'bot_mentor',
+          name: 'Mentor',
+          initials: '🧠',
+          color: '#10b981',
+          photoURL: null
+        };
+        setResolvedConnections(prev => {
+          const filtered = prev.filter(p => p.id !== uid);
+          return [...filtered, profile];
+        });
+        return () => {}; // Dummy unsubscribe
+      }
+
       return onSnapshot(doc(db, 'users', uid), (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -173,9 +214,10 @@ export function DMPanel({
     const markAsRead = async () => {
       try {
         const threadRef = doc(db, 'dm_threads', activeThreadId);
-        await updateDoc(threadRef, {
+        // Use setDoc+merge so it works even if the Mentor thread doc doesn't exist yet
+        await setDoc(threadRef, {
           [`unread.${user.uid}`]: false
-        });
+        }, { merge: true });
       } catch (e) {
         console.warn("Failed to mark thread as read:", e);
       }
@@ -217,14 +259,16 @@ export function DMPanel({
     const finalVal = textToSend || inputText;
     if (!finalVal.trim() || !activeThreadId || !user) return;
 
-    const thread = dmThreads.find(t => t.id === activeThreadId);
+    const thread = mergedThreads.find(t => t.id === activeThreadId);
     if (!thread) return;
 
     const otherUid = thread.participants.find((pId: string) => pId !== user.uid);
     if (!otherUid) return;
 
+    const isMentor = otherUid === 'bot_mentor';
+
     // Check if connection is still active (for frontend gating toast)
-    const activeConnection = mutualIds.includes(otherUid);
+    const activeConnection = isMentor || mutualIds.includes(otherUid);
     if (!activeConnection) {
       showToast("❌ DMs are only allowed between mutual Connections.");
       return;
@@ -238,22 +282,85 @@ export function DMPanel({
 
       // 1. Add message document
       const messagesRef = collection(db, 'dm_threads', activeThreadId, 'messages');
-      await addDoc(messagesRef, {
+      const msgData: any = {
         senderId: user.uid,
         senderName: user.displayName || 'Google User',
         text: finalVal,
-        createdAt: serverTime,
-        expiresAt: expiresTime
-      });
+        createdAt: serverTime
+      };
+      if (!isMentor) {
+        msgData.expiresAt = expiresTime;
+      }
+      await addDoc(messagesRef, msgData);
 
-      // 2. Update thread document
+      // 2. Update or create thread document
       const threadRef = doc(db, 'dm_threads', activeThreadId);
-      await updateDoc(threadRef, {
+      await setDoc(threadRef, {
+        participants: thread.participants,
         lastMessageText: finalVal.startsWith('[GIF]:') ? 'GIF 🖼️' : finalVal,
         lastMessageTime: serverTime,
-        [`unread.${otherUid}`]: true,
-        [`unread.${user.uid}`]: false
-      });
+        unread: {
+          [otherUid]: true,
+          [user.uid]: false
+        },
+        // Write createdAt only if thread doesn't exist
+        ...(thread.createdAt ? {} : { createdAt: serverTime })
+      }, { merge: true });
+
+      // 3. Trigger Mentor AI response if applicable
+      if (isMentor) {
+        // Run asynchronously
+        setTimeout(async () => {
+          try {
+            // Prepare chat history (exclude system/wellness markers if needed, or send all)
+            const history = messages.slice(-10).map(m => ({
+              senderRole: m.senderId === 'bot_mentor' ? 'bot' : 'user',
+              text: m.text
+            }));
+
+            const topPriorityTask = targetsList?.find((t: any) => !t.completed)?.text || '';
+
+            const response = await fetch('/api/study-buddy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                botId: 'Mentor',
+                message: finalVal.trim(),
+                chatHistory: history,
+                topPriorityTask
+              })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.error || 'Failed to get mentor response');
+            }
+
+            // Write Mentor response message
+            const replyServerTime = serverTimestamp();
+            await addDoc(collection(db, 'dm_threads', activeThreadId, 'messages'), {
+              senderId: 'bot_mentor',
+              senderName: 'Mentor',
+              text: data.reply,
+              createdAt: replyServerTime
+            });
+
+            // Update thread with last message
+            await setDoc(threadRef, {
+              lastMessageText: data.reply,
+              lastMessageTime: replyServerTime,
+              unread: {
+                [user.uid]: true
+              }
+            }, { merge: true });
+
+          } catch (err: any) {
+            console.error("Mentor reply generation failed:", err);
+            showToast("⚠️ Mentor response failed. Please try again.");
+          }
+        }, 500);
+      }
+
     } catch (e) {
       console.warn("Failed to send DM message:", e);
       showToast("⚠️ Failed to send message. Connections may have changed.");
@@ -292,9 +399,16 @@ export function DMPanel({
   // Render inbox list of threads
   const renderInboxList = () => {
     // Sort active threads by last activity time descending
-    const sortedThreads = [...dmThreads].sort((a, b) => {
-      const timeA = a.lastMessageTime?.seconds || 0;
-      const timeB = b.lastMessageTime?.seconds || 0;
+    const sortedThreads = [...mergedThreads].sort((a, b) => {
+      const getSecs = (t: any) => {
+        if (!t) return 0;
+        if (t.seconds !== undefined) return t.seconds;
+        if (t.toDate) return t.toDate().getTime() / 1000;
+        return new Date(t).getTime() / 1000 || 0;
+      };
+      // Give Mentor a slight fallback advantage to stay near the top if no messages yet
+      const timeA = a.id.startsWith('mentor_') && !a.lastMessageTime ? Date.now() / 1000 - 100000 : getSecs(a.lastMessageTime);
+      const timeB = b.id.startsWith('mentor_') && !b.lastMessageTime ? Date.now() / 1000 - 100000 : getSecs(b.lastMessageTime);
       return timeB - timeA;
     });
 
@@ -470,17 +584,18 @@ export function DMPanel({
 
   // Render conversation thread view
   const renderThreadView = () => {
-    const thread = dmThreads.find(t => t.id === activeThreadId);
+    const thread = mergedThreads.find(t => t.id === activeThreadId);
     if (!thread) return null;
 
     const otherUid = thread.participants.find((pId: string) => pId !== user?.uid);
     const otherUser = resolvedConnections.find(u => u.id === otherUid);
-    const otherName = otherUser ? otherUser.name : 'Anonymous User';
-    const otherColor = otherUser ? otherUser.color : '#3b82f6';
-    const otherPhoto = otherUser ? otherUser.photoURL : null;
-    const otherInitials = otherUser ? otherUser.initials : '??';
+    const isMentorThread = otherUid === 'bot_mentor';
+    const otherName = isMentorThread ? 'Mentor' : (otherUser ? otherUser.name : 'Anonymous User');
+    const otherColor = isMentorThread ? '#10b981' : (otherUser ? otherUser.color : '#3b82f6');
+    const otherPhoto = isMentorThread ? null : (otherUser ? otherUser.photoURL : null);
+    const otherInitials = isMentorThread ? '🧠' : (otherUser ? otherUser.initials : '??');
 
-    const isConnected = mutualIds.includes(otherUid);
+    const isConnected = isMentorThread || mutualIds.includes(otherUid);
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -517,9 +632,10 @@ export function DMPanel({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '10px',
+            fontSize: isMentorThread ? '14px' : '10px',
             fontWeight: 'bold',
-            flexShrink: 0
+            flexShrink: 0,
+            boxShadow: isMentorThread ? '0 0 10px #10b98140' : 'none'
           }}>
             {otherPhoto ? <img src={otherPhoto} alt={otherName} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : otherInitials}
           </div>
@@ -528,9 +644,15 @@ export function DMPanel({
             <span style={{ fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {otherName}
             </span>
-            <span style={{ fontSize: '9px', color: isConnected ? '#10b981' : '#ef4444', fontWeight: 'bold', textTransform: 'uppercase' }}>
-              {isConnected ? '● Connected' : '✕ Disconnected'}
-            </span>
+            {isMentorThread ? (
+              <span style={{ fontSize: '9px', color: '#10b981', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                ● Your Personal Mentor
+              </span>
+            ) : (
+              <span style={{ fontSize: '9px', color: isConnected ? '#10b981' : '#ef4444', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                {isConnected ? '● Connected' : '✕ Disconnected'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -583,9 +705,14 @@ export function DMPanel({
                     fontSize: '13px',
                     lineHeight: '1.4',
                     wordBreak: 'break-word',
-                    backgroundColor: isMe ? 'var(--primary-color, #f1c40f)' : 'rgba(255, 255, 255, 0.05)',
+                    backgroundColor: isMe
+                      ? 'var(--primary-color, #f1c40f)'
+                      : msg.senderId === 'bot_mentor'
+                        ? 'rgba(16, 185, 129, 0.12)'
+                        : 'rgba(255, 255, 255, 0.05)',
                     color: isMe ? '#0f1013' : 'var(--text-primary)',
-                    fontWeight: isMe ? 500 : 'normal'
+                    fontWeight: isMe ? 500 : 'normal',
+                    borderLeft: msg.senderId === 'bot_mentor' ? '3px solid #10b981' : 'none'
                   }}>
                     {msg.text}
                   </div>
@@ -599,39 +726,58 @@ export function DMPanel({
         {/* Input area */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '10px', position: 'relative' }}>
           
-          <div style={{
-            fontSize: '9px',
-            color: 'var(--text-secondary)',
-            marginBottom: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            paddingLeft: '4px'
-          }}>
-            ✋ Messages disappear after 10 days
-          </div>
+          {!isMentorThread && (
+            <div style={{
+              fontSize: '9px',
+              color: 'var(--text-secondary)',
+              marginBottom: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              paddingLeft: '4px'
+            }}>
+              ✋ Messages disappear after 10 days
+            </div>
+          )}
+          {isMentorThread && (
+            <div style={{
+              fontSize: '9px',
+              color: '#10b981',
+              marginBottom: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              paddingLeft: '4px'
+            }}>
+              🧠 Mentor messages persist forever
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              type="button"
-              onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '4px' }}
-              title="Emoji Picker"
-            >
-              😀
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '4px' }}
-              title="GIF Picker"
-            >
-              🖼️
-            </button>
+            {!isMentorThread && (
+              <button
+                type="button"
+                onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '4px' }}
+                title="Emoji Picker"
+              >
+                😀
+              </button>
+            )}
+            {!isMentorThread && (
+              <button
+                type="button"
+                onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '4px' }}
+                title="GIF Picker"
+              >
+                🖼️
+              </button>
+            )}
 
             <input
               type="text"
-              placeholder={isConnected ? "Type a direct message..." : "Direct messaging disabled (not connected)"}
+              placeholder={isMentorThread ? "Talk to your Mentor..." : (isConnected ? "Type a direct message..." : "Direct messaging disabled (not connected)")}
               disabled={!isConnected}
               value={inputText}
               onChange={e => setInputText(e.target.value)}
@@ -641,7 +787,7 @@ export function DMPanel({
               style={{
                 flex: 1,
                 backgroundColor: 'rgba(0,0,0,0.2)',
-                border: '1px solid var(--border-color)',
+                border: isMentorThread ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-color)',
                 borderRadius: '6px',
                 color: '#fff',
                 fontSize: '12px',
@@ -669,6 +815,111 @@ export function DMPanel({
               Send
             </button>
           </div>
+
+          {/* Tier 2: Add Reminder button (Mentor thread only) */}
+          {isMentorThread && (
+            <div style={{ marginTop: '10px', borderTop: '1px solid rgba(16,185,129,0.15)', paddingTop: '8px' }}>
+              {!showReminderForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReminderForm(true)}
+                  style={{
+                    background: 'none',
+                    border: '1px dashed rgba(16,185,129,0.4)',
+                    color: '#10b981',
+                    borderRadius: '6px',
+                    padding: '5px 12px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    width: '100%',
+                    fontWeight: 600
+                  }}
+                >
+                  + Set a Reminder
+                </button>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      placeholder="Reminder text (e.g. Review chapter 5)"
+                      value={reminderText}
+                      onChange={e => setReminderText(e.target.value)}
+                      style={{
+                        flex: 2,
+                        backgroundColor: 'rgba(0,0,0,0.2)',
+                        border: '1px solid rgba(16,185,129,0.3)',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontSize: '11px',
+                        padding: '5px 8px',
+                        outline: 'none'
+                      }}
+                    />
+                    <input
+                      type="datetime-local"
+                      value={reminderTime}
+                      onChange={e => setReminderTime(e.target.value)}
+                      style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(0,0,0,0.2)',
+                        border: '1px solid rgba(16,185,129,0.3)',
+                        borderRadius: '6px',
+                        color: '#fff',
+                        fontSize: '11px',
+                        padding: '5px 8px',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setShowReminderForm(false); setReminderText(''); setReminderTime(''); }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!reminderText.trim() || !reminderTime}
+                      onClick={async () => {
+                        if (!user || !reminderText.trim() || !reminderTime) return;
+                        try {
+                          const fireAt = new Date(reminderTime);
+                          await addDoc(collection(db, 'users', user.uid, 'reminders'), {
+                            text: reminderText.trim(),
+                            fireAt,
+                            fired: false,
+                            createdAt: serverTimestamp()
+                          });
+                          showToast('⏰ Reminder set!');
+                          setShowReminderForm(false);
+                          setReminderText('');
+                          setReminderTime('');
+                        } catch (err) {
+                          console.warn('Failed to save reminder:', err);
+                          showToast('❌ Failed to save reminder.');
+                        }
+                      }}
+                      style={{
+                        padding: '5px 12px',
+                        backgroundColor: reminderText.trim() && reminderTime ? '#10b981' : 'rgba(255,255,255,0.05)',
+                        color: reminderText.trim() && reminderTime ? '#fff' : 'var(--text-secondary)',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        border: 'none',
+                        cursor: reminderText.trim() && reminderTime ? 'pointer' : 'default'
+                      }}
+                    >
+                      Save Reminder
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Emoji Picker Drawer */}
           {showEmojiPicker && (
