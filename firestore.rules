@@ -108,7 +108,8 @@ service cloud.firestore {
           && request.auth.uid == request.resource.data.senderId
           && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants)
           && request.resource.data.createdAt == request.time
-          && request.resource.data.expiresAt == request.resource.data.createdAt + duration.value(10, 'd')
+          && request.resource.data.expiresAt >= request.time + duration.value(10, 'd') - duration.value(15, 'm')
+          && request.resource.data.expiresAt <= request.time + duration.value(10, 'd') + duration.value(15, 'm')
           && isConnected(
                get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants[0], 
                get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants[1]
