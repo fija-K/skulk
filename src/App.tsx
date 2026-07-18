@@ -9814,12 +9814,10 @@ function AppContent() {
                 <button
                   onClick={toggleRaiseHand}
                   className={`dock-btn ${handRaised ? 'active' : ''}`}
-                  style={{ marginRight: '8px' }}
+                  style={{ marginRight: '8px', fontSize: '20px' }}
                   title={handRaised ? 'Lower your hand' : 'Raise your hand'}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill={handRaised ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5m-4 0V5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7M6 14V9a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v6c0 4.42 3.58 8 8 8h3c3.87 0 7-3.13 7-7v-3a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v3" />
-                  </svg>
+                  ✋
                 </button>
               );
             })()}
