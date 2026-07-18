@@ -921,7 +921,7 @@ export function ChatPanel({
         >
           {(() => {
             const filteredAll = (mentionSearchText === '' || 'all'.includes(mentionSearchText.toLowerCase()))
-              ? [{ id: 'all', name: 'all', type: 'bot' as const, photoURL: null, initials: '🤖', color: '#6366f1' }]
+              ? [{ id: 'all', name: 'all', type: 'all' as const, photoURL: null, initials: '📢', color: '#6366f1' }]
               : [];
 
             const filteredBots = activeBots
@@ -963,7 +963,7 @@ export function ChatPanel({
                     
                     const newText = `${beforeAt}@${item.name} ${afterCursor}`;
                     setChatMessageText(newText);
-                    setMentionedId(item.type === 'bot' ? `bot_${item.id}` : item.id);
+                    setMentionedId(item.type === 'bot' ? `bot_${item.id}` : item.type === 'all' ? 'bot_all' : item.id);
                     setShowMentionDropdown(false);
                     inputRef.current?.focus();
                   }}
@@ -1007,6 +1007,10 @@ export function ChatPanel({
                   {item.type === 'bot' ? (
                     <span style={{ fontSize: '9px', background: 'rgba(29, 185, 84, 0.15)', color: '#1db954', border: '1px solid rgba(29, 185, 84, 0.3)', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', fontWeight: 'bold' }}>
                       🤖 Buddy
+                    </span>
+                  ) : item.type === 'all' ? (
+                    <span style={{ fontSize: '9px', background: 'rgba(99, 102, 241, 0.15)', color: '#6366f1', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                      📢 Everyone
                     </span>
                   ) : (
                     <span style={{ fontSize: '9px', background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', fontWeight: 'bold' }}>
