@@ -3815,18 +3815,6 @@ function AppContent() {
     }
   };
 
-  // Fun Tools & Settings Handlers
-  const handleToggleFunTools = async (val: boolean) => {
-    if (!currentRoom) return;
-    try {
-      await updateDoc(doc(db, 'rooms', roomDocId(currentRoom)), {
-        allowFunTools: val
-      });
-      showToast(val ? "🔓 Fun tools enabled by host" : "🔒 Fun tools disabled by host");
-    } catch (e) {
-      console.warn("Failed to toggle fun tools:", e);
-    }
-  };
 
   const handleJoinTodGame = async () => {
     if (!currentRoom) return;
@@ -5599,29 +5587,6 @@ function AppContent() {
                   </button>
                 );
               })}
-            </div>
-          </div>
-        )}
-
-        {/* Fun Tools setting (Host-only) */}
-        {!(currentRoom?.roomMode === 'discuss' || currentRoom?.roomMode === 'non-discuss') && (
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Allow Fun Tools for Members</span>
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
-                  {isHostOrAdmin ? 'Enable or disable Fun tools tab for regular members.' : 'Only hosts or co-hosts can modify this setting.'}
-                </span>
-              </div>
-              <label className="switch-toggle" style={{ opacity: isHostOrAdmin ? 1 : 0.5, pointerEvents: isHostOrAdmin ? 'auto' : 'none' }}>
-                <input 
-                  type="checkbox" 
-                  checked={allowFunTools} 
-                  onChange={(e) => handleToggleFunTools(e.target.checked)} 
-                  disabled={!isHostOrAdmin}
-                />
-                <span className="switch-slider"></span>
-              </label>
             </div>
           </div>
         )}

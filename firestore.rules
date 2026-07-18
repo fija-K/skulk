@@ -95,7 +95,7 @@ service cloud.firestore {
         'id', 'name', 'type', 'buttonText', 'participants', 'maxParticipants', 'link', 'creatorId', 'creatorName', 'creatorEmail', 'createdAt', 'scheduledDate', 'scheduledTime', 'currentHostId', 'currentHostName',
         'todSpinResult', 'todSpinPool', 'todState', 'todChoice', 'todText', 'todSelectedId', 'todSpinInProgress',
         'spinResult', 'spinPool', 'spinCheckedIds',
-        'emptySince'
+        'emptySince', 'roomMode', 'allowFunTools'
       ]);
         
       // Deletion rules
