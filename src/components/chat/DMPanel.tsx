@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   collection, 
   doc, 
@@ -42,7 +42,6 @@ const DEFAULT_GIFS = [
 export function DMPanel({
   user,
   dmThreads,
-  communityUsers,
   followingUserIds,
   followerUserIds,
   showToast
@@ -61,7 +60,77 @@ export function DMPanel({
 
   // Compute mutual connection IDs
   const mutualIds = followingUserIds.filter(id => followerUserIds.includes(id));
-  const mutualConnections = communityUsers.filter(u => mutualIds.includes(u.id));
+
+  // State to hold resolved user profiles of participants and mutual connections in real time
+  const [resolvedConnections, setResolvedConnections] = useState<any[]>([]);
+
+  // Get unique user IDs we need profiles for: mutualIds + other participants in active DM threads
+  const resolveUserIds = useMemo(() => {
+    const ids = new Set<string>(mutualIds);
+    dmThreads.forEach(t => {
+      if (t.participants) {
+        t.participants.forEach((pId: string) => {
+          if (pId !== user?.uid) {
+            ids.add(pId);
+          }
+        });
+      }
+    });
+    return Array.from(ids);
+  }, [mutualIds, dmThreads, user?.uid]);
+
+  // Subscribe to profile documents of required users in real time
+  useEffect(() => {
+    if (resolveUserIds.length === 0) {
+      setResolvedConnections([]);
+      return;
+    }
+
+    const unsubscribes = resolveUserIds.map(uid => {
+      return onSnapshot(doc(db, 'users', uid), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const name = data.displayName || 'Google User';
+          const initials = name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || '??';
+          const profile = {
+            id: uid,
+            name,
+            initials,
+            color: data.color || '#3b82f6',
+            photoURL: data.photoURL || null
+          };
+          setResolvedConnections(prev => {
+            const filtered = prev.filter(p => p.id !== uid);
+            return [...filtered, profile];
+          });
+        } else {
+          // Fallback user profile
+          const profile = {
+            id: uid,
+            name: 'Guest User',
+            initials: 'GU',
+            color: '#4b5563',
+            photoURL: null
+          };
+          setResolvedConnections(prev => {
+            const filtered = prev.filter(p => p.id !== uid);
+            return [...filtered, profile];
+          });
+        }
+      }, (err) => {
+        console.warn(`Failed to listen to profile ${uid}:`, err);
+      });
+    });
+
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [JSON.stringify(resolveUserIds)]);
+
+  // Compute mutualConnections list from resolvedConnections
+  const mutualConnections = useMemo(() => {
+    return resolvedConnections.filter(c => mutualIds.includes(c.id));
+  }, [resolvedConnections, mutualIds]);
 
   // Subscribe to messages in active thread
   useEffect(() => {
@@ -321,7 +390,7 @@ export function DMPanel({
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {sortedThreads.map(thread => {
             const otherUid = thread.participants.find((pId: string) => pId !== user?.uid);
-            const otherUser = communityUsers.find(u => u.id === otherUid);
+            const otherUser = resolvedConnections.find(u => u.id === otherUid);
             const otherName = otherUser ? otherUser.name : 'Anonymous User';
             const otherColor = otherUser ? otherUser.color : '#3b82f6';
             const otherInitials = otherUser ? otherUser.initials : '??';
@@ -405,7 +474,7 @@ export function DMPanel({
     if (!thread) return null;
 
     const otherUid = thread.participants.find((pId: string) => pId !== user?.uid);
-    const otherUser = communityUsers.find(u => u.id === otherUid);
+    const otherUser = resolvedConnections.find(u => u.id === otherUid);
     const otherName = otherUser ? otherUser.name : 'Anonymous User';
     const otherColor = otherUser ? otherUser.color : '#3b82f6';
     const otherPhoto = otherUser ? otherUser.photoURL : null;
