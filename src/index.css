@@ -1101,10 +1101,6 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   border: 2px solid var(--primary-color);
 }
 
-.participant-tile.speaker-active {
-  border: 2px solid var(--primary-color);
-  box-shadow: 0 0 16px var(--primary-color);
-}
 
 .participant-avatar-large {
   width: 64px;
@@ -1168,38 +1164,11 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.tile-mic-badge.active {
-  border-color: rgba(16, 185, 129, 0.4);
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
 .tile-mic-badge svg {
   position: absolute;
   width: 13px;
   height: 13px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.tile-mic-badge .tile-icon-muted {
   color: #ef4444;
-  opacity: 0;
-  transform: scale(0.7) rotate(-45deg);
-}
-
-.tile-mic-badge .tile-icon-active {
-  color: #10b981;
-  opacity: 0;
-  transform: scale(0.7) rotate(45deg);
-}
-
-.tile-mic-badge.muted .tile-icon-muted {
-  opacity: 1;
-  transform: scale(1) rotate(0deg);
-}
-
-.tile-mic-badge.active .tile-icon-active {
-  opacity: 1;
-  transform: scale(1) rotate(0deg);
 }
 
 /* Video & Avatar Transitions */
@@ -1361,10 +1330,6 @@ html.theme-webslinger .radio-card.active { background-color: rgba(225, 29, 72, 0
   padding: 8px;
 }
 
-.grid-layout .participant-tile.speaker-active .participant-avatar-large {
-  box-shadow: 0 0 16px var(--primary-color) !important;
-  border: 2px solid var(--primary-color) !important;
-}
 
 .grid-layout .participant-tile.user-tile .participant-avatar-large {
   border: 2px solid var(--primary-color) !important;
@@ -2825,33 +2790,16 @@ div[id^="dailymotion-player-"] > div {
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-left 0.3s ease;
 }
 
-/* Dynamic Live Speaking Indicator Glow Styles */
-.participant-tile, .spotlight-thumbnail-tile {
-  --speaking-volume: 0;
-  --speaking-opacity: 0;
-}
-
-.participant-tile {
-  box-shadow: 0 0 calc(var(--speaking-volume) * 24px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent);
-  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.spotlight-thumbnail-tile {
-  box-shadow: 0 0 calc(var(--speaking-volume) * 12px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent) !important;
-  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-/* Compact Grid View Avatar Glow (Tighter, crisper multi-layer glow to avoid blurry smudging) */
-.grid-layout .participant-tile .participant-avatar-large {
-  box-shadow: 
-    0 0 calc(var(--speaking-volume) * 6px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 100%), transparent),
-    0 0 calc(var(--speaking-volume) * 12px) color-mix(in srgb, var(--primary-color) calc(var(--speaking-volume) * var(--speaking-opacity) * 50%), transparent) !important;
-  border-color: color-mix(in srgb, var(--primary-color) calc(var(--speaking-opacity) * 100%), var(--border-color)) !important;
-  border-width: 2px;
-  border-style: solid;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+/* Dynamic Live ECG speaking indicator styles */
+.ecg-canvas {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 24px;
+  pointer-events: none;
+  z-index: 6;
+  background-color: transparent;
 }
 
 

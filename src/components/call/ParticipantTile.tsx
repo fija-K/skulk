@@ -26,6 +26,59 @@ interface ParticipantTileProps {
   handleOpenProfile?: (profile: any, view?: 'card' | 'followers' | 'following' | 'connections' | 'report') => void;
 }
 
+const drawWaveform = (canvas: HTMLCanvasElement, volume: number, phase: number) => {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  ctx.clearRect(0, 0, width, height);
+
+  // Get active theme's primary color dynamically
+  const rootStyle = getComputedStyle(document.documentElement);
+  const primaryColor = rootStyle.getPropertyValue('--primary-color').trim() || '#f1c40f';
+
+  // Apply a subtle neon-line glow using canvas shadow properties
+  ctx.shadowColor = primaryColor;
+  ctx.shadowBlur = volume > 0 ? 6 : 2; // slight blur when active, very faint when flat
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.strokeStyle = primaryColor;
+  ctx.lineWidth = 2.0; // thin line
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.beginPath();
+
+  const centerY = height / 2;
+  const maxAmplitude = centerY - 4; // leave margin
+  const amplitude = maxAmplitude * volume;
+
+  // Wavy lines undulate based on volume
+  const frequency = 0.04 + volume * 0.04;
+
+  ctx.moveTo(0, centerY);
+
+  // Draw the smooth sine wave step-by-step
+  for (let x = 0; x <= width; x += 2) {
+    // Fade out amplitude at the edges (0 and width) using a bell-curve window
+    const edgeWindow = Math.sin((x / width) * Math.PI);
+    const y = centerY + amplitude * edgeWindow * Math.sin(x * frequency - phase);
+    ctx.lineTo(x, y);
+  }
+
+  ctx.stroke();
+
+  // Reset shadow for performance
+  ctx.shadowBlur = 0;
+};
+
 export function ParticipantTile({
   p,
   isThumbnail = false,
@@ -53,46 +106,72 @@ export function ParticipantTile({
   const showCamOff = isUser ? isCamOff : p.isCamOff;
   const isSpeaking = p.isSpeaking && !showMuted;
 
-  // Track and update speaking glow intensity dynamically
-  const tileRef = useRef<HTMLDivElement>(null);
+  // Cache active canvas elements to avoid querying the DOM inside the 60 FPS RAF loop
+  const activeCanvasesRef = useRef<HTMLCanvasElement[]>([]);
+  const registerCanvas = (el: HTMLCanvasElement | null) => {
+    if (el) {
+      if (!activeCanvasesRef.current.includes(el)) {
+        activeCanvasesRef.current.push(el);
+      }
+    } else {
+      activeCanvasesRef.current = activeCanvasesRef.current.filter(c => c.isConnected);
+    }
+  };
+
   const { localParticipant } = useLocalParticipant();
   const lkParticipants = useParticipants();
   const lkParticipant = isUser ? localParticipant : lkParticipants.find(lp => lp.identity === p.id);
+
+  useEffect(() => {
+    return () => {
+      activeCanvasesRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     if (!lkParticipant) return;
 
     let animId: number;
     let currentVolume = 0;
+    let phase = 0;
 
-    const updateGlow = () => {
-      const el = tileRef.current;
-      if (el) {
-        // Only glow if speaking AND not muted
-        const isSp = lkParticipant.isSpeaking && !showMuted;
-        const targetVol = isSp ? lkParticipant.audioLevel : 0;
+    const updateECG = () => {
+      const isSp = lkParticipant.isSpeaking && !showMuted;
+      const targetVol = isSp ? lkParticipant.audioLevel : 0;
 
-        // Smooth transition (exponential smoothing)
-        currentVolume = currentVolume + (targetVol - currentVolume) * 0.15;
-        if (currentVolume < 0.001) {
-          currentVolume = 0;
-        }
-
-        el.style.setProperty('--speaking-volume', currentVolume.toFixed(4));
-        el.style.setProperty('--speaking-opacity', isSp ? '1' : '0');
+      // Exponential smoothing for transition in/out
+      currentVolume = currentVolume + (targetVol - currentVolume) * 0.15;
+      if (currentVolume < 0.001) {
+        currentVolume = 0;
       }
-      animId = requestAnimationFrame(updateGlow);
+
+      // Continuous phase increment for sine wave undulation
+      phase += 0.15;
+
+      // Render to all registered canvases
+      activeCanvasesRef.current.forEach((canvas) => {
+        if (showMuted) {
+          canvas.style.display = 'none';
+        } else {
+          canvas.style.display = 'block';
+          drawWaveform(canvas, currentVolume, phase);
+        }
+      });
+
+      animId = requestAnimationFrame(updateECG);
     };
 
-    updateGlow();
+    updateECG();
 
     return () => {
       cancelAnimationFrame(animId);
-      const el = tileRef.current;
-      if (el) {
-        el.style.setProperty('--speaking-volume', '0');
-        el.style.setProperty('--speaking-opacity', '0');
-      }
+      activeCanvasesRef.current.forEach((canvas) => {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        canvas.style.display = 'none';
+      });
     };
   }, [lkParticipant, showMuted]);
 
@@ -107,7 +186,6 @@ export function ParticipantTile({
     const isSpotlightActive = p.id === spotlightParticipantId;
     return (
       <div 
-        ref={tileRef}
         className={`spotlight-thumbnail-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${isSpotlightActive ? 'active' : ''} ${showCamOff ? 'camera-off' : ''}`}
         onClick={() => {
           if (p.sharing) {
@@ -230,32 +308,27 @@ export function ParticipantTile({
         })()}
 
         {/* Micro status indicator (Muted status) */}
-        <div style={{
-          position: 'absolute',
-          top: '4px',
-          right: '4px',
-          zIndex: 10,
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          borderRadius: '50%',
-          width: '16px',
-          height: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          {showMuted ? (
+        {showMuted && (
+          <div style={{
+            position: 'absolute',
+            top: '4px',
+            right: '4px',
+            zIndex: 10,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            borderRadius: '50%',
+            width: '16px',
+            height: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="1" y1="1" x2="23" y2="23"></line>
               <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
               <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
             </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-            </svg>
-          )}
-        </div>
+          </div>
+        )}
         
         {/* Small overlay name tag */}
         <div style={{
@@ -275,6 +348,22 @@ export function ParticipantTile({
         }}>
           {p.name.replace(' (You)', '')}
         </div>
+
+        {/* Dynamic ECG Line Canvas */}
+        <canvas 
+          className="ecg-canvas" 
+          ref={registerCanvas} 
+          style={{ 
+            position: 'absolute', 
+            bottom: 0, 
+            left: 0, 
+            width: '100%', 
+            height: '20px', 
+            pointerEvents: 'none', 
+            zIndex: 6, 
+            display: showMuted ? 'none' : 'block' 
+          }} 
+        />
       </div>
     );
   }
@@ -284,7 +373,6 @@ export function ParticipantTile({
   
   return (
     <div 
-      ref={tileRef}
       className={`participant-tile ${isUser ? 'user-tile' : ''} ${isSpeaking ? 'speaker-active' : ''} ${showCamOff ? 'camera-off' : ''}`}
       onClick={() => {
         if (p.sharing) {
@@ -387,6 +475,7 @@ export function ParticipantTile({
               ) : (
                 <ParticipantVideo participantId={p.id} objectFit={spotlightParticipantId === p.id ? 'contain' : 'cover'} />
               )}
+              <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '24px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
             </div>
             
             {/* Large avatar circle wrapper – status badge lives outside overflow:hidden */}
@@ -430,6 +519,7 @@ export function ParticipantTile({
                 ) : (
                   p.initials
                 )}
+                <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '24px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
               </div>
               {/* Status badge — covers bottom-left ~1/8 of avatar */}
               {p.status && p.status !== 'none' && (() => {
@@ -577,10 +667,11 @@ export function ParticipantTile({
                   {!(isUser && cameraError) && (
                     <ParticipantVideo participantId={p.id} />
                   )}
+                  <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '20px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
                 </div>
                 <div 
                   className="tile-avatar-wrapper"
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', position: 'relative' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (handleOpenProfile) {
@@ -604,6 +695,7 @@ export function ParticipantTile({
                    ) : (
                      <span className="tile-avatar-initials">{p.initials}</span>
                    )}
+                   <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '20px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
                  </div>
               </>
             )}
@@ -655,6 +747,7 @@ export function ParticipantTile({
                 {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
               </div>
             )}
+            <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '20px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
           </div>
           {/* Status badge Overlay inside wrapper */}
           {p.status && p.status !== 'none' && (() => {
@@ -749,20 +842,17 @@ export function ParticipantTile({
               </span>
             )}
           </div>
-          <div className={`tile-mic-badge ${showMuted ? 'muted' : 'active'}`}>
-            <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="1" y1="1" x2="23" y2="23"></line>
-              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
-            <svg className="tile-icon-active" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <line x1="12" y1="19" x2="12" y2="22"></line>
-            </svg>
-          </div>
+          {showMuted && (
+            <div className="tile-mic-badge muted">
+              <svg className="tile-icon-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </div>
+          )}
         </div>
       )}
 
