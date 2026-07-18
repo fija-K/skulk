@@ -43,9 +43,12 @@ const drawWaveform = (canvas: HTMLCanvasElement, volume: number, phase: number) 
   const rootStyle = getComputedStyle(document.documentElement);
   const primaryColor = rootStyle.getPropertyValue('--primary-color').trim() || '#f1c40f';
 
+  // Apply volume sensitivity boost multiplier, clamped at 1.0
+  const boostedVolume = Math.min(volume * 4.5, 1.0);
+
   // Apply a subtle neon-line glow using canvas shadow properties
   ctx.shadowColor = primaryColor;
-  ctx.shadowBlur = volume > 0 ? 6 : 2; // slight blur when active, very faint when flat
+  ctx.shadowBlur = boostedVolume > 0 ? 8 : 2; // enhanced neon glow when speaking
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
 
@@ -58,10 +61,10 @@ const drawWaveform = (canvas: HTMLCanvasElement, volume: number, phase: number) 
 
   const centerY = height / 2;
   const maxAmplitude = centerY - 4; // leave margin
-  const amplitude = maxAmplitude * volume;
+  const amplitude = maxAmplitude * boostedVolume;
 
-  // Wavy lines undulate based on volume
-  const frequency = 0.04 + volume * 0.04;
+  // Wavy lines frequency scales with boosted volume
+  const frequency = 0.04 + boostedVolume * 0.04;
 
   ctx.moveTo(0, centerY);
 
@@ -139,8 +142,8 @@ export function ParticipantTile({
       const isSp = lkParticipant.isSpeaking && !showMuted;
       const targetVol = isSp ? lkParticipant.audioLevel : 0;
 
-      // Exponential smoothing for transition in/out
-      currentVolume = currentVolume + (targetVol - currentVolume) * 0.15;
+      // Faster reactivity tracking (0.35 instead of 0.15) to follow raw speech peaks
+      currentVolume = currentVolume + (targetVol - currentVolume) * 0.35;
       if (currentVolume < 0.001) {
         currentVolume = 0;
       }
@@ -747,7 +750,6 @@ export function ParticipantTile({
                 {p.sharing === 'youtube' ? '▶' : p.sharing === 'whiteboard' ? '✎' : p.sharing === 'spotify' ? '♫' : '⛶'}
               </div>
             )}
-            <canvas className="ecg-canvas" ref={registerCanvas} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '20px', pointerEvents: 'none', zIndex: 6, display: showMuted ? 'none' : 'block' }} />
           </div>
           {/* Status badge Overlay inside wrapper */}
           {p.status && p.status !== 'none' && (() => {
@@ -971,6 +973,23 @@ export function ParticipantTile({
             </div>
           )}
         </div>
+      )}
+
+      {!isThumbnail && !isGalleryView && (
+        <canvas 
+          className="ecg-canvas" 
+          ref={registerCanvas} 
+          style={{ 
+            position: 'absolute', 
+            bottom: '4px', 
+            left: 0, 
+            width: '100%', 
+            height: '24px', 
+            pointerEvents: 'none', 
+            zIndex: 6, 
+            display: showMuted ? 'none' : 'block' 
+          }} 
+        />
       )}
     </div>
   );

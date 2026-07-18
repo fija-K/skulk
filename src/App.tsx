@@ -148,6 +148,18 @@ export default function App() {
 const truthQuestions = tdData.game.td.truths;
 const dareQuestions = tdData.game.td.dares;
 
+const THEME_PRESETS = [
+  { key: 'gotham-3d', name: 'Gotham City (3D)', imageUrl: '/themes/gotham_3d.webp' },
+  { key: 'gotham-comic', name: 'Gotham City (Comic)', imageUrl: '/themes/gotham_comic.webp' },
+  { key: 'matrix-green', name: 'Matrix Code (Green)', imageUrl: '/themes/matrix_green.webp' },
+  { key: 'matrix-pink', name: 'Matrix Code (Pink)', imageUrl: '/themes/matrix_pink.webp' },
+  { key: 'tech-workbench', name: 'Tech Workbench', imageUrl: '/themes/tech_workbench.webp' },
+  { key: 'steampunk-mary', name: 'Cyber Mary', imageUrl: '/themes/steampunk_mary.webp' },
+  { key: 'babushka-animals', name: 'Babushka Animals', imageUrl: '/themes/babushka_animals.webp' },
+  { key: 'oriental-collage', name: 'Oriental Collage', imageUrl: '/themes/oriental_collage.webp' },
+  { key: 'pop-art', name: 'Pop-Art Collage', imageUrl: '/themes/pop_art.webp' }
+];
+
 interface PipWindowContentProps {
   myId: string;
   isMicMuted: boolean;
@@ -1184,7 +1196,32 @@ function AppContent() {
 
   // Theme Picker State (7 selectable themes, nightwatch default)
   const [theme, setTheme] = useState<string>('nightwatch');
-  const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
+
+  // Active background theme image state
+  const [activeTheme, setActiveTheme] = useState<string>(() => {
+    try {
+      return localStorage.getItem('skulk_guest_theme') || 'default';
+    } catch {
+      return 'default';
+    }
+  });
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
+
+  const handleSelectTheme = async (themeKey: string) => {
+    setActiveTheme(themeKey);
+    if (user) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await setDoc(userDocRef, { activeTheme: themeKey }, { merge: true });
+      } catch (err) {
+        console.error("Failed to update active theme in Firestore:", err);
+      }
+    } else {
+      try {
+        localStorage.setItem('skulk_guest_theme', themeKey);
+      } catch {}
+    }
+  };
 
   // Active call view state
   const [pendingJoinRoom, setPendingJoinRoom] = useState<Room | null>(null);
@@ -1822,6 +1859,30 @@ function AppContent() {
       setBioInput(userDataState.bio || '');
     }
   }, [userDataState, isEditingBio]);
+
+  // Sync activeTheme with user document profile data in Firestore or localStorage fallback
+  useEffect(() => {
+    if (user && userDataState) {
+      if (userDataState.activeTheme !== undefined) {
+        setActiveTheme(userDataState.activeTheme);
+      }
+    } else if (!user) {
+      try {
+        const localTheme = localStorage.getItem('skulk_guest_theme') || 'default';
+        setActiveTheme(localTheme);
+      } catch {}
+    }
+  }, [user, userDataState]);
+
+  // Sync activeTheme class to body element
+  useEffect(() => {
+    if (activeTheme && activeTheme !== 'default') {
+      document.body.classList.add('theme-active');
+    } else {
+      document.body.classList.remove('theme-active');
+    }
+  }, [activeTheme]);
+
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
   const [followerUserIds, setFollowerUserIds] = useState<string[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
@@ -2117,7 +2178,6 @@ function AppContent() {
   // Guest Profile Identity State
   // Spotlight view state
   const modalRef = useRef<HTMLDivElement>(null);
-  const themePickerRef = useRef<HTMLDivElement>(null);
 
   const isUserAdmin = (u: any) => {
     const adminEmails = ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'];
@@ -2296,10 +2356,6 @@ function AppContent() {
   // Click outside handlers
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      // Theme picker click outside close
-      if (themePickerRef.current && !themePickerRef.current.contains(e.target as Node)) {
-        setIsThemePickerOpen(false);
-      }
       // Room settings click outside close
       if (roomSettingsRef.current && !roomSettingsRef.current.contains(e.target as Node)) {
         setIsRoomSettingsOpen(false);
@@ -5836,6 +5892,36 @@ function AppContent() {
 
   return (
     <div className="app-container">
+      {/* Global Background Theme Overlay */}
+      {activeTheme && activeTheme !== 'default' && (
+        <>
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0, left: 0,
+              width: '100vw', height: '100vh',
+              backgroundImage: `url(${THEME_PRESETS.find(p => p.key === activeTheme)?.imageUrl})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              backgroundAttachment: 'fixed',
+              zIndex: -2,
+              pointerEvents: 'none'
+            }}
+          />
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0, left: 0,
+              width: '100vw', height: '100vh',
+              backgroundColor: 'rgba(10, 11, 14, 0.65)',
+              backgroundImage: 'radial-gradient(circle at center, transparent 30%, rgba(10, 11, 14, 0.85) 100%)',
+              zIndex: -1,
+              pointerEvents: 'none'
+            }}
+          />
+        </>
+      )}
       
       <Routes>
         <Route path="/" element={
@@ -5876,72 +5962,31 @@ function AppContent() {
                 </svg>
               </a>
 
-              {/* Theme Picker Popover */}
-              <div className="theme-picker-container" ref={themePickerRef}>
-                <button 
-                  onClick={() => setIsThemePickerOpen(!isThemePickerOpen)} 
-                  className="theme-picker-btn" 
-                  aria-label="Theme settings"
-                  title="Select theme palette"
+              {/* Theme Trigger Button */}
+              <button 
+                onClick={() => setIsThemeModalOpen(true)} 
+                className="theme-picker-btn" 
+                aria-label="Theme settings"
+                title="Select background theme"
+              >
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="20" 
+                  height="20" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
                 >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    strokeWidth="2" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
-                    <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
-                  </svg>
-                </button>
-
-                {isThemePickerOpen && (
-                  <div className="theme-picker-dropdown animate-fade-in">
-                    {themes.map((t) => (
-                      <button 
-                        key={t.id} 
-                        onClick={() => {
-                          setTheme(t.id);
-                          setIsThemePickerOpen(false);
-                        }} 
-                        className="theme-item-btn"
-                      >
-                        <div className="theme-item-left">
-                          <div 
-                            className="theme-color-preview" 
-                            style={{ background: `linear-gradient(135deg, ${t.bg} 50%, ${t.accent} 50%)` }}
-                          />
-                          <span>{t.name}</span>
-                        </div>
-                        {theme === t.id && (
-                          <svg 
-                            className="theme-check-icon" 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            width="16" 
-                            height="16" 
-                            viewBox="0 0 24 24" 
-                            fill="none" 
-                            stroke="currentColor" 
-                            strokeWidth="3" 
-                            strokeLinecap="round" 
-                            strokeLinejoin="round"
-                          >
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                  <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
+                  <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
+                </svg>
+              </button>
 
               {/* Guest Profile Identity Badge */}
               {guestName && !user && (
@@ -5990,6 +6035,16 @@ function AppContent() {
                   
                   {isUserDropdownOpen && (
                     <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: 0, marginTop: '8px', minWidth: '150px' }}>
+                      <button 
+                        onClick={() => {
+                          setIsThemeModalOpen(true);
+                          setIsUserDropdownOpen(false);
+                        }} 
+                        className="theme-item-btn"
+                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                      >
+                        🎨 App Themes
+                      </button>
                       <button 
                         onClick={handleSignOut} 
                         className="theme-item-btn"
@@ -7042,42 +7097,20 @@ function AppContent() {
             
             <div className="nav-container" style={{ gap: '16px' }}>
               {/* Theme Selector inside Call */}
-              <div className="theme-picker-container" ref={themePickerRef}>
-                <button 
-                  onClick={() => setIsThemePickerOpen(!isThemePickerOpen)} 
-                  className="theme-picker-btn"
-                  aria-label="Theme settings"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
-                    <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
-                    <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
-                  </svg>
-                </button>
-                {isThemePickerOpen && (
-                  <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: '0' }}>
-                    {themes.map((t) => (
-                      <button 
-                        key={t.id} 
-                        onClick={() => { setTheme(t.id); setIsThemePickerOpen(false); }} 
-                        className="theme-item-btn"
-                      >
-                        <div className="theme-item-left">
-                          <div className="theme-color-preview" style={{ background: `linear-gradient(135deg, ${t.bg} 50%, ${t.accent} 50%)` }} />
-                          <span>{t.name}</span>
-                        </div>
-                        {theme === t.id && (
-                          <svg className="theme-check-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button 
+                onClick={() => setIsThemeModalOpen(true)} 
+                className="theme-picker-btn"
+                aria-label="Theme settings"
+                title="Select background theme"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
+                  <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
+                </svg>
+              </button>
               {/* Mini Mode Button */}
               {(isDocumentPipSupported || isVideoPipSupported) && (
                 <button 
@@ -7165,6 +7198,16 @@ function AppContent() {
                   
                   {isUserDropdownOpen && (
                     <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: 0, marginTop: '8px', minWidth: '150px', zIndex: 1000 }}>
+                      <button 
+                        onClick={() => {
+                          setIsThemeModalOpen(true);
+                          setIsUserDropdownOpen(false);
+                        }} 
+                        className="theme-item-btn"
+                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                      >
+                        🎨 App Themes
+                      </button>
                       <button 
                         onClick={handleSignOut} 
                         className="theme-item-btn"
@@ -9688,6 +9731,154 @@ function AppContent() {
                 Save changes
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Choose App Theme Modal */}
+      {isThemeModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsThemeModalOpen(false)} style={{ zIndex: 1200 }}>
+          <div className="modal-container animate-fade-in" style={{ maxWidth: '580px', width: '90%', padding: '24px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ marginBottom: '16px' }}>
+              <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '20px', fontWeight: 800 }}>🎨 Choose App Theme</h2>
+              <button onClick={() => setIsThemeModalOpen(false)} className="modal-close-btn" aria-label="Close modal">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px', marginTop: 0 }}>
+              Select a custom background theme and UI color accent palette for your Skulk experience.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div>
+                <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--text-primary)', fontWeight: 700 }}>🖼️ Background Image</h3>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', 
+                  gap: '12px',
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  paddingRight: '6px'
+                }}>
+                  {/* Default/None option */}
+                  <div 
+                    onClick={() => handleSelectTheme('default')}
+                    className="theme-grid-card"
+                    style={{
+                      border: activeTheme === 'default' ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      cursor: 'pointer',
+                      backgroundColor: 'rgba(255,255,255,0.02)',
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '110px'
+                    }}
+                  >
+                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>🚫</div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>Default / None</span>
+                    {activeTheme === 'default' && (
+                      <div style={{ position: 'absolute', top: '8px', right: '8px', backgroundColor: 'var(--primary-color)', color: '#000', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>✓</div>
+                    )}
+                  </div>
+
+                  {/* Presets mapping */}
+                  {THEME_PRESETS.map((preset) => (
+                    <div 
+                      key={preset.key}
+                      onClick={() => handleSelectTheme(preset.key)}
+                      className="theme-grid-card"
+                      style={{
+                        border: activeTheme === preset.key ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
+                        borderRadius: '10px',
+                        padding: '4px',
+                        cursor: 'pointer',
+                        backgroundColor: 'rgba(255,255,255,0.02)',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        height: '110px',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      <img 
+                        src={preset.imageUrl} 
+                        alt={preset.name} 
+                        style={{ width: '100%', height: '76px', objectFit: 'cover', borderRadius: '6px', opacity: 0.85 }} 
+                      />
+                      <span style={{ 
+                        fontSize: '11px', 
+                        fontWeight: 700, 
+                        color: 'var(--text-primary)', 
+                        textAlign: 'center', 
+                        marginTop: '6px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        padding: '0 4px'
+                      }}>
+                        {preset.name}
+                      </span>
+                      {activeTheme === preset.key && (
+                        <div style={{ position: 'absolute', top: '8px', right: '8px', backgroundColor: 'var(--primary-color)', color: '#000', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>✓</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--text-primary)', fontWeight: 700 }}>🎨 UI Color Palette</h3>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', 
+                  gap: '10px',
+                  maxHeight: '160px',
+                  overflowY: 'auto',
+                  paddingRight: '6px'
+                }}>
+                  {themes.map((t) => (
+                    <div 
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      className="theme-grid-card"
+                      style={{
+                        border: theme === t.id ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '8px',
+                        cursor: 'pointer',
+                        backgroundColor: 'rgba(255,255,255,0.02)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        position: 'relative'
+                      }}
+                    >
+                      <div 
+                        style={{ 
+                          width: '20px', 
+                          height: '20px', 
+                          borderRadius: '4px', 
+                          background: `linear-gradient(135deg, ${t.bg} 50%, ${t.accent} 50%)`,
+                          border: '1px solid rgba(255,255,255,0.1)'
+                        }} 
+                      />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)' }}>{t.name}</span>
+                      {theme === t.id && (
+                        <div style={{ position: 'absolute', top: '4px', right: '4px', backgroundColor: 'var(--primary-color)', color: '#000', borderRadius: '50%', width: '12px', height: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold' }}>✓</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

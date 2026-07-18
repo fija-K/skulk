@@ -57,144 +57,6 @@ html.theme-nightwatch {
   --dot-color: #22c55e;
 }
 
-html.theme-reactor {
-  --bg-color: #0b0c10;
-  --panel-bg: #12131a;
-  --text-primary: #c5c6c7;
-  --text-secondary: #667894;
-  --border-color: #1f2833;
-  --primary-color: #e74c3c; /* red accent */
-  --primary-text: #ffffff;
-  --primary-hover: #c0392b;
-  --button-secondary-bg: #1f2833;
-  --button-secondary-text: #c5c6c7;
-  --button-secondary-hover: #2c3e50;
-  --card-bg: #12131a;
-  --card-border: #1f2833;
-  --card-hover-border: #e67e22; /* gold/orange hover */
-  --input-bg: #1a1c24;
-  --input-border: #1f2833;
-  --input-focus-border: #e74c3c;
-  --border-radius: 12px;
-  --btn-radius: 8px;
-  --dot-color: #22c55e;
-}
-
-html.theme-crimson {
-  --bg-color: #000000;
-  --panel-bg: #0c0c0c;
-  --text-primary: #ffffff;
-  --text-secondary: #888888;
-  --border-color: #222222;
-  --primary-color: #dc2626; /* striking red accent */
-  --primary-text: #ffffff;
-  --primary-hover: #b91c1c;
-  --button-secondary-bg: #222222;
-  --button-secondary-text: #ffffff;
-  --button-secondary-hover: #333333;
-  --card-bg: #0c0c0c;
-  --card-border: #222222;
-  --card-hover-border: #dc2626;
-  --input-bg: #111111;
-  --input-border: #222222;
-  --input-focus-border: #dc2626;
-  --border-radius: 12px;
-  --btn-radius: 8px;
-  --dot-color: #22c55e;
-}
-
-html.theme-deduction {
-  --bg-color: #000000;
-  --panel-bg: #000000;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --border-color: #ffffff; /* minimalist white border */
-  --primary-color: #ffffff;
-  --primary-text: #000000;
-  --primary-hover: #e0e0e0;
-  --button-secondary-bg: #1a1a1a;
-  --button-secondary-text: #ffffff;
-  --button-secondary-hover: #333333;
-  --card-bg: #000000;
-  --card-border: #333333;
-  --card-hover-border: #ffffff;
-  --input-bg: #000000;
-  --input-border: #333333;
-  --input-focus-border: #ffffff;
-  --border-radius: 4px;
-  --btn-radius: 2px;
-  --dot-color: #22c55e;
-}
-
-html.theme-bloom {
-  --bg-color: #fff9fa;
-  --panel-bg: #ffffff;
-  --text-primary: #4a3e43;
-  --text-secondary: #9e8e95;
-  --border-color: #f7e8eb;
-  --primary-color: #ec4899; /* cherry-blossom pink */
-  --primary-text: #ffffff;
-  --primary-hover: #db2777;
-  --button-secondary-bg: #fdf2f4;
-  --button-secondary-text: #ec4899;
-  --button-secondary-hover: #fce7f3;
-  --card-bg: #ffffff;
-  --card-border: #f7e8eb;
-  --card-hover-border: #ec4899;
-  --input-bg: #fffcfd;
-  --input-border: #f7e8eb;
-  --input-focus-border: #ec4899;
-  --border-radius: 20px; /* rounded/gentle feel */
-  --btn-radius: 12px;
-  --dot-color: #ec4899;
-}
-
-html.theme-symbiote {
-  --bg-color: #040404;
-  --panel-bg: #0b0b0c;
-  --text-primary: #dbe4db;
-  --text-secondary: #717d71;
-  --border-color: #172217;
-  --primary-color: #84cc16; /* toxic lime green */
-  --primary-text: #040404;
-  --primary-hover: #65a30d;
-  --button-secondary-bg: #172217;
-  --button-secondary-text: #84cc16;
-  --button-secondary-hover: #223522;
-  --card-bg: #0b0b0c;
-  --card-border: #172217;
-  --card-hover-border: #84cc16;
-  --input-bg: #070708;
-  --input-border: #172217;
-  --input-focus-border: #84cc16;
-  --border-radius: 0px; /* sharp edges */
-  --btn-radius: 0px;
-  --dot-color: #84cc16;
-}
-
-html.theme-webslinger {
-  --bg-color: #070913;
-  --panel-bg: #0d1122;
-  --text-primary: #e2e8f0;
-  --text-secondary: #7a8fae;
-  --border-color: #1a233d;
-  --primary-color: #e11d48; /* red accent */
-  --primary-text: #ffffff;
-  --primary-hover: #be123c;
-  --button-secondary-bg: #1e3a8a; /* deep blue accent */
-  --button-secondary-text: #ffffff;
-  --button-secondary-hover: #1d4ed8;
-  --card-bg: #0d1122;
-  --card-border: #1a233d;
-  --card-hover-border: #e11d48;
-  --input-bg: #12182e;
-  --input-border: #1a233d;
-  --input-focus-border: #e11d48;
-  --border-radius: 12px;
-  --btn-radius: 8px;
-  --dot-color: #22c55e;
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -2800,6 +2662,43 @@ div[id^="dailymotion-player-"] > div {
   pointer-events: none;
   z-index: 6;
   background-color: transparent;
+}
+
+/* Theme Active Glassmorphism Overrides */
+body.theme-active {
+  --bg-color: transparent;
+  --panel-bg: rgba(21, 23, 28, 0.78);
+  --card-bg: rgba(21, 23, 28, 0.72);
+  --input-bg: rgba(28, 29, 36, 0.65);
+}
+
+body.theme-active,
+body.theme-active #root,
+body.theme-active .app-container,
+body.theme-active .main-layout {
+  background-color: transparent !important;
+}
+
+/* Scoped Backdrop Blur to Top-Level Panels (Main Containers Only) */
+body.theme-active .app-header,
+body.theme-active .call-sidebar,
+body.theme-active .modal-container,
+body.theme-active .theme-picker-dropdown,
+body.theme-active .social-profile-card,
+body.theme-active .chat-panel {
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+
+/* Themes Modal Grid Hover Animation */
+.theme-grid-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-grid-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  border-color: var(--primary-color) !important;
 }
 
 
