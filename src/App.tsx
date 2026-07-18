@@ -1533,10 +1533,17 @@ function AppContent() {
       
       // If currently blocked, countdown
       if (micBlockedUntil && now < micBlockedUntil) {
-        // Enforce mute state if somehow unmuted
-        if (!isMicMuted) {
+        // Enforce mute state and Firestore restriction if somehow unmuted or unrestricted
+        const myPresence = callParticipants.find(p => p.id === getMyId());
+        const isNotFullyRestricted = !myPresence || !myPresence.micRestricted || myPresence.mutedBy !== 'focus_limit';
+        if (!isMicMuted || isNotFullyRestricted) {
           setIsMicMuted(true);
-          updateMySharing({ isMuted: true, mutedBy: getMyId() }).catch(() => {});
+          updateMySharing({ 
+            micRestricted: true, 
+            isMuted: true, 
+            micOn: false, 
+            mutedBy: 'focus_limit' 
+          }).catch(() => {});
         }
         setDummyTick(d => d + 1);
         return;
@@ -1547,6 +1554,14 @@ function AppContent() {
         setMicBlockedUntil(null);
         setMicActiveSeconds(0);
         localStorage.removeItem(`skulk_mic_blocked_until_${currentRoom.id}`);
+        // Remove restriction! Set micRestricted to false, and mutedBy to getMyId() so they can now unmute themselves!
+        updateMySharing({ 
+          micRestricted: false, 
+          isMuted: true, 
+          micOn: false, 
+          mutedBy: getMyId() 
+        }).catch(() => {});
+        showToast("🎤 Focus limit countdown ended. You can now unmute yourself.");
       }
 
       // If mic is unmuted AND speaking, increment quota
@@ -1554,15 +1569,20 @@ function AppContent() {
         setMicActiveSeconds(prev => {
           const next = prev + 1;
           if (next >= 15) {
-            // Block mic!
-            const blockedTime = Date.now() + 45000;
+            // Block mic for 1 minute (60 seconds)
+            const blockedTime = Date.now() + 60000;
             setMicBlockedUntil(blockedTime);
             localStorage.setItem(`skulk_mic_blocked_until_${currentRoom.id}`, blockedTime.toString());
             
-            // Force mute mic
+            // Force mute mic & restrict in Firestore!
             setIsMicMuted(true);
-            updateMySharing({ isMuted: true, mutedBy: getMyId() }).catch(() => {});
-            showToast("🔇 Focus limit reached. Mic blocked for 45 seconds.");
+            updateMySharing({ 
+              micRestricted: true, 
+              isMuted: true, 
+              micOn: false, 
+              mutedBy: 'focus_limit' 
+            }).catch(() => {});
+            showToast("🔇 Focus limit reached. Mic blocked for 1 minute.");
             return 0;
           }
           return next;
@@ -1571,7 +1591,19 @@ function AppContent() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentRoom?.id, currentRoom?.roomMode, micBlockedUntil, isMicMuted]);
+  }, [currentRoom?.id, currentRoom?.roomMode, micBlockedUntil, isMicMuted, callParticipants]);
+
+  // Synchronize micBlockedUntil with Firestore presence document (useful for page reloads/rejoins)
+  useEffect(() => {
+    if (currentRoom && micBlockedUntil && Date.now() < micBlockedUntil) {
+      updateMySharing({ 
+        micRestricted: true, 
+        isMuted: true, 
+        micOn: false, 
+        mutedBy: 'focus_limit' 
+      }).catch(() => {});
+    }
+  }, [currentRoom?.id, micBlockedUntil]);
 
 
   leavePresenceFn = leavePresence;
@@ -2759,7 +2791,11 @@ function AppContent() {
     }
 
     if (isMicMuted && isMutedByHost) {
-      showToast("❌ You cannot unmute because the host has muted you.");
+      if (myPresence.mutedBy === 'focus_limit') {
+        showToast("❌ Microphone is currently blocked due to Silent Focus quota.");
+      } else {
+        showToast("❌ You cannot unmute because the host has muted you.");
+      }
       return;
     }
 
@@ -3107,7 +3143,11 @@ function AppContent() {
       // ONLY apply remote changes if they were initiated by another user (moderator)
       if (myPresence.mutedBy && myPresence.mutedBy !== myId) {
         setIsMicMuted(myPresence.isMuted);
-        showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
+        if (myPresence.mutedBy === 'focus_limit') {
+          showToast(myPresence.isMuted ? "🔇 Focus limit reached. Mic blocked for 1 minute." : "🎤 Focus limit countdown ended. You can now unmute yourself.");
+        } else {
+          showToast(myPresence.isMuted ? "🎤 You have been muted by a host." : "🎤 You have been unmuted by a host.");
+        }
       }
     }
   }, [callParticipants, currentRoom ? roomDocId(currentRoom) : null, isMicMuted]);
