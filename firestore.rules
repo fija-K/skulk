@@ -268,6 +268,7 @@ service cloud.firestore {
           ) ||
           // Moderator soft-deleting any message (set deleted=true)
           (request.auth != null &&
+            exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)) &&
             get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost'] &&
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'deleted'])
           )
@@ -278,6 +279,7 @@ service cloud.firestore {
           (request.auth != null && resource.data.senderId == request.auth.uid) ||
           (resource.data.senderId.startsWith('guest_')) ||
           (request.auth != null &&
+            exists(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)) &&
             get(/databases/$(database)/documents/rooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['admin', 'host', 'cohost']
           )
         );
