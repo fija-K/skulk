@@ -1313,6 +1313,11 @@ function AppContent() {
     activeBots
   } = useRoomState(roomId || null, user, guestId, localJoinTimeRef, showToast, handleLeaveCall);
 
+  const chatMessagesRef = useRef(chatMessages);
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
+
   const {
     callParticipants,
     setCallParticipants,
@@ -4501,60 +4506,125 @@ function AppContent() {
     try {
       await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', msgId), newMsg);
 
-      if (mentionedId && mentionedId.startsWith('bot_')) {
-        const botName = mentionedId.replace('bot_', '');
-        const history = chatMessages.slice(-10).map(m => ({
-          senderRole: m.senderRole,
-          text: m.text
-        }));
+      if (mentionedId) {
+        if (mentionedId === 'bot_all') {
+          // Trigger all active bots sequentially with a stagger delay
+          activeBots.forEach((bot, index) => {
+            const currentBotMentionId = `bot_${bot.id}`;
+            const botName = bot.name;
 
-        // Show typing indicator
-        setBotTypingIds(prev => [...prev, mentionedId]);
+            setTimeout(async () => {
+              if (!currentRoom) return;
 
-        fetch('/api/study-buddy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            botId: botName,
-            message: text.trim(),
-            chatHistory: history
+              // Read latest chat messages history from ref
+              const history = chatMessagesRef.current.slice(-10).map(m => ({
+                senderRole: m.senderRole,
+                text: m.text
+              }));
+
+              // Show typing indicator for this specific bot
+              setBotTypingIds(prev => [...prev, currentBotMentionId]);
+
+              try {
+                const response = await fetch('/api/study-buddy', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    botId: botName,
+                    message: text.trim(),
+                    chatHistory: history
+                  })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                  const errorMsg = data.details ? `${data.error} Details: ${data.details}` : (data.error || 'Failed to call backend');
+                  throw new Error(errorMsg);
+                }
+
+                const botMsgId = (Date.now() + index * 10 + 10).toString();
+                const botMsg: ChatMessage = {
+                  id: botMsgId,
+                  sender: botName,
+                  senderId: currentBotMentionId,
+                  senderRole: 'bot' as any,
+                  text: data.reply,
+                  createdAt: new Date().toISOString()
+                };
+                await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+              } catch (err: any) {
+                console.error(`Study Buddy ${botName} response generation failed:`, err);
+                const botMsgId = (Date.now() + index * 10 + 10).toString();
+                const botMsg: ChatMessage = {
+                  id: botMsgId,
+                  sender: botName,
+                  senderId: currentBotMentionId,
+                  senderRole: 'bot' as any,
+                  text: `⚠️ Error: ${err.message || 'Generation failed'}.`,
+                  createdAt: new Date().toISOString()
+                };
+                await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+              } finally {
+                // Clear typing indicator for this specific bot
+                setBotTypingIds(prev => prev.filter(id => id !== currentBotMentionId));
+              }
+            }, index * 1500); // 1.5 seconds stagger between each bot
+          });
+        } else if (mentionedId.startsWith('bot_')) {
+          const botName = mentionedId.replace('bot_', '');
+          const history = chatMessages.slice(-10).map(m => ({
+            senderRole: m.senderRole,
+            text: m.text
+          }));
+
+          // Show typing indicator
+          setBotTypingIds(prev => [...prev, mentionedId]);
+
+          fetch('/api/study-buddy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              botId: botName,
+              message: text.trim(),
+              chatHistory: history
+            })
           })
-        })
-        .then(async (response) => {
-          const data = await response.json();
-          if (!response.ok) {
-            const errorMsg = data.details ? `${data.error} Details: ${data.details}` : (data.error || 'Failed to call backend');
-            throw new Error(errorMsg);
-          }
-          
-          const botMsgId = (Date.now() + 10).toString();
-          const botMsg: ChatMessage = {
-            id: botMsgId,
-            sender: botName,
-            senderId: mentionedId,
-            senderRole: 'bot' as any,
-            text: data.reply,
-            createdAt: new Date().toISOString()
-          };
-          await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
-        })
-        .catch(async (err) => {
-          console.error("Study Buddy response generation failed:", err);
-          const botMsgId = (Date.now() + 10).toString();
-          const botMsg: ChatMessage = {
-            id: botMsgId,
-            sender: botName,
-            senderId: mentionedId,
-            senderRole: 'bot' as any,
-            text: `⚠️ Error: ${err.message || 'Generation failed'}. Make sure GEMINI_API_KEY or OPENAI_API_KEY is configured in your server/environment.`,
-            createdAt: new Date().toISOString()
-          };
-          await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
-        })
-        .finally(() => {
-          // Clear typing indicator
-          setBotTypingIds(prev => prev.filter(id => id !== mentionedId));
-        });
+          .then(async (response) => {
+            const data = await response.json();
+            if (!response.ok) {
+              const errorMsg = data.details ? `${data.error} Details: ${data.details}` : (data.error || 'Failed to call backend');
+              throw new Error(errorMsg);
+            }
+            
+            const botMsgId = (Date.now() + 10).toString();
+            const botMsg: ChatMessage = {
+              id: botMsgId,
+              sender: botName,
+              senderId: mentionedId,
+              senderRole: 'bot' as any,
+              text: data.reply,
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+          })
+          .catch(async (err) => {
+            console.error("Study Buddy response generation failed:", err);
+            const botMsgId = (Date.now() + 10).toString();
+            const botMsg: ChatMessage = {
+              id: botMsgId,
+              sender: botName,
+              senderId: mentionedId,
+              senderRole: 'bot' as any,
+              text: `⚠️ Error: ${err.message || 'Generation failed'}.`,
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'rooms', roomDocId(currentRoom), 'messages', botMsgId), botMsg);
+          })
+          .finally(() => {
+            // Clear typing indicator
+            setBotTypingIds(prev => prev.filter(id => id !== mentionedId));
+          });
+        }
       }
     } catch (err) {
       console.warn("Failed to write chat to Firestore, fallback locally:", err);
@@ -5824,8 +5894,10 @@ function AppContent() {
                   const isCreatorAdmin = (room.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') || 
                                          (room.creatorEmail && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(room.creatorEmail.toLowerCase())) ||
                                          (room.creatorId === getMyId() && isUserAdmin(user));
-                  const isAdminHost = isCreatorAdmin || currentRoomParticipants.some(p => p.uid === currentHostId && p.role === 'admin');
-                  const hostLabel = isAdminHost ? 'Admin' : (room.currentHostName || room.creatorName || 'Unknown');
+                  const isCurrentHostAdmin = (currentHostId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') ||
+                                             (currentHostId === room.creatorId && isCreatorAdmin) ||
+                                             currentRoomParticipants.some(p => (p.uid === currentHostId || p.id === currentHostId) && p.role === 'admin');
+                  const hostLabel = isCurrentHostAdmin ? 'Admin' : (room.currentHostName || room.creatorName || 'Unknown');
                   
                   return (
                     <div className="room-card" key={room.id}>

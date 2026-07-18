@@ -200,13 +200,17 @@ export function ChatPanel({
       const match = chatMessageText.match(/@(\w+)/);
       if (match) {
         const name = match[1];
-        const matchedBot = activeBots.find(b => b.name.toLowerCase() === name.toLowerCase());
-        if (matchedBot) {
-          finalMentionedId = `bot_${matchedBot.id}`;
+        if (name.toLowerCase() === 'all') {
+          finalMentionedId = 'bot_all';
         } else {
-          const matchedUser = callParticipants.find(p => p.name.replace(' (You)', '').toLowerCase() === name.toLowerCase());
-          if (matchedUser) {
-            finalMentionedId = matchedUser.id;
+          const matchedBot = activeBots.find(b => b.name.toLowerCase() === name.toLowerCase());
+          if (matchedBot) {
+            finalMentionedId = `bot_${matchedBot.id}`;
+          } else {
+            const matchedUser = callParticipants.find(p => p.name.replace(' (You)', '').toLowerCase() === name.toLowerCase());
+            if (matchedUser) {
+              finalMentionedId = matchedUser.id;
+            }
           }
         }
       }
@@ -916,6 +920,10 @@ export function ChatPanel({
           }}
         >
           {(() => {
+            const filteredAll = (mentionSearchText === '' || 'all'.includes(mentionSearchText.toLowerCase()))
+              ? [{ id: 'all', name: 'all', type: 'bot' as const, photoURL: null, initials: '🤖', color: '#6366f1' }]
+              : [];
+
             const filteredBots = activeBots
               .filter(b => b.name.toLowerCase().includes(mentionSearchText.toLowerCase()))
               .map(b => ({ id: b.id, name: b.name, type: 'bot' as const, photoURL: null, initials: '🤖', color: '#1db954' }));
@@ -931,7 +939,7 @@ export function ChatPanel({
                 color: p.color
               }));
 
-            const combined = [...filteredBots, ...filteredUsers];
+            const combined = [...filteredAll, ...filteredBots, ...filteredUsers];
 
             if (combined.length === 0) {
               return (
