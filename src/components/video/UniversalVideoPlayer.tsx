@@ -547,6 +547,14 @@ export function UniversalVideoPlayer({
   const isLocalChangeRef = useRef(false);
   const lastPresenterDataRef = useRef<any>(null);
   const hasDoneInitialSeekRef = useRef(false);
+  const lastMediaStateRef = useRef<{
+    ytPlaying?: boolean;
+    ytTime?: number;
+    ytUpdateTimestamp?: number;
+    ytSpeed?: number;
+    ytPlaylistIndex?: number;
+    ytVideoId?: string;
+  }>({});
 
   const presenterIdRef = useRef(presenterId);
   const participantsRef = useRef(participants);
@@ -1076,9 +1084,30 @@ export function UniversalVideoPlayer({
     const unsubscribe = onSnapshot(partRef, (snapshot) => {
       if (!snapshot.exists()) return;
       const data = snapshot.data();
+      
+      const mediaChanged =
+        data.ytPlaying !== lastMediaStateRef.current.ytPlaying ||
+        data.ytTime !== lastMediaStateRef.current.ytTime ||
+        data.ytUpdateTimestamp !== lastMediaStateRef.current.ytUpdateTimestamp ||
+        data.ytSpeed !== lastMediaStateRef.current.ytSpeed ||
+        data.ytPlaylistIndex !== lastMediaStateRef.current.ytPlaylistIndex ||
+        data.ytVideoId !== lastMediaStateRef.current.ytVideoId;
+        
       lastPresenterDataRef.current = data;
-      if (playerRef.current) {
-        syncToPresenterState(data, playerRef.current);
+      
+      if (mediaChanged) {
+        lastMediaStateRef.current = {
+          ytPlaying: data.ytPlaying,
+          ytTime: data.ytTime,
+          ytUpdateTimestamp: data.ytUpdateTimestamp,
+          ytSpeed: data.ytSpeed,
+          ytPlaylistIndex: data.ytPlaylistIndex,
+          ytVideoId: data.ytVideoId
+        };
+        
+        if (playerRef.current) {
+          syncToPresenterState(data, playerRef.current);
+        }
       }
     }, (err) => {
       console.warn("Failed to subscribe to presenter changes:", err);
