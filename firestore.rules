@@ -120,13 +120,18 @@ service cloud.firestore {
           // Case 1: User marking the thread as read (sets their own unread flag to false, other user's flag is unchanged, text & time unchanged)
           (
             request.resource.data.unread[request.auth.uid] == false &&
-            request.resource.data.unread[
-              request.auth.uid == resource.data.participants[0] ? resource.data.participants[1] : resource.data.participants[0]
-            ] == resource.data.unread[
-              request.auth.uid == resource.data.participants[0] ? resource.data.participants[1] : resource.data.participants[0]
-            ] &&
-            request.resource.data.lastMessageText == resource.data.lastMessageText &&
-            request.resource.data.lastMessageTime == resource.data.lastMessageTime
+            (
+              isMentorThread(threadId, request.auth.uid) ||
+              (
+                request.resource.data.unread[
+                  request.auth.uid == resource.data.participants[0] ? resource.data.participants[1] : resource.data.participants[0]
+                ] == resource.data.unread[
+                  request.auth.uid == resource.data.participants[0] ? resource.data.participants[1] : resource.data.participants[0]
+                ] &&
+                request.resource.data.lastMessageText == resource.data.lastMessageText &&
+                request.resource.data.lastMessageTime == resource.data.lastMessageTime
+              )
+            )
           ) ||
           // Case 2: Sending a message (sets the OTHER user's unread flag to true, updates lastMessageTime to server time, updates lastMessageText as string)
           (
@@ -145,26 +150,44 @@ service cloud.firestore {
             isMentorThread(threadId, request.auth.uid) &&
             request.resource.data.lastMessageTime == request.time &&
             request.resource.data.lastMessageText is string
+          ) ||
+          // Case 4: Setting preferredName on mentor thread
+          (
+            isMentorThread(threadId, request.auth.uid) &&
+            request.resource.data.preferredName is string
           )
         );
 
       // Messages subcollection
       match /messages/{messageId} {
         allow read: if request.auth != null 
-          && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants);
+          && (
+            isMentorThread(threadId, request.auth.uid)
+            || (
+              exists(/databases/$(database)/documents/dm_threads/$(threadId))
+              && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants)
+            )
+          );
         
         allow create: if request.auth != null
           && (
             request.auth.uid == request.resource.data.senderId
             || (isMentorThread(threadId, request.auth.uid) && isMentorBot(request.resource.data.senderId))
           )
-          && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants)
+          && (
+            isMentorThread(threadId, request.auth.uid)
+            || (
+              exists(/databases/$(database)/documents/dm_threads/$(threadId))
+              && (request.auth.uid in get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants)
+            )
+          )
           && request.resource.data.createdAt == request.time
           && (
             // Normal thread message TTL
             (
               request.resource.data.expiresAt >= request.time + duration.value(10, 'd') - duration.value(15, 'm')
               && request.resource.data.expiresAt <= request.time + duration.value(10, 'd') + duration.value(15, 'm')
+              && exists(/databases/$(database)/documents/dm_threads/$(threadId))
               && isConnected(
                    get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants[0], 
                    get(/databases/$(database)/documents/dm_threads/$(threadId)).data.participants[1]
