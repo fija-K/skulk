@@ -47,6 +47,7 @@ import { LocalScreenShareLinker } from './components/call/LocalScreenShareLinker
 import { DeviceRecoveryManager } from './components/call/DeviceRecoveryManager';
 import { usePresence } from './hooks/usePresence';
 import { useRoomState } from './hooks/useRoomState';
+import { useSessionLogger } from './hooks/useSessionLogger';
 import { UserProfileCard } from './components/social/UserProfileCard';
 import { DMPanel } from './components/chat/DMPanel';
 
@@ -1351,6 +1352,7 @@ function AppContent() {
     if (currentRoom) {
       const prevRoomId = roomDocId(currentRoom);
       console.log("[LEAVE EVENT] leavePresence triggered from handleLeaveCall, session:", currentSessionIdRef.current);
+      finalizeSession();
       leavePresenceFn(prevRoomId);
       currentSessionIdRef.current = null;
       setCurrentRoom(null);
@@ -1404,6 +1406,8 @@ function AppContent() {
     setPomodoroPhase,
     activeBots
   } = useRoomState(roomId || null, user, guestId, localJoinTimeRef, showToast, handleLeaveCall);
+
+  const { finalizeSession } = useSessionLogger(currentRoom, user, currentSessionIdRef, localJoinTimeRef);
 
   const chatMessagesRef = useRef(chatMessages);
   useEffect(() => {
@@ -3376,6 +3380,7 @@ function AppContent() {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         console.log("[LEAVE EVENT] leavePresence triggered from route sync useEffect else-block (dashboard route), session:", currentSessionIdRef.current);
+        finalizeSession();
         leavePresence(prevRoomId);
         currentSessionIdRef.current = null;
         setCurrentRoom(null);
@@ -3402,6 +3407,7 @@ function AppContent() {
       if (currentRoom) {
         const prevRoomId = roomDocId(currentRoom);
         console.log("[CLEANUP EFFECT CLEANUP] leavePresence triggered from cleanup useEffect, session:", sessionIdToClean);
+        finalizeSession();
         leavePresence(prevRoomId, sessionIdToClean);
       }
     };
@@ -3518,6 +3524,7 @@ function AppContent() {
               isEvictedRef.current = true;
 
               // Clean up our presence in the room we are leaving
+              finalizeSession();
               leavePresence(currentRoomId, mySessionId);
               
               // Reset local state
