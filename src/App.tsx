@@ -32,7 +32,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { VideoPresets } from 'livekit-client';
-import confetti from 'canvas-confetti';
+
 
 import { parseMediaUrl, isDrmBlockedUrl, loadYoutubeApi, loadVimeoApi, loadTwitchApi } from './utils/helpers';
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
@@ -1308,8 +1308,8 @@ function AppContent() {
   const isEvictedRef = useRef(false);
   const isEnteringRoomRef = useRef<string | null>(null);
   const prefetchedLkTokenRef = useRef<{ roomId: string; token: string } | null>(null);
-  const processedCelebrationsRef = useRef<Record<string, number>>({});
-  const [celebrateCooldown, setCelebrateCooldown] = useState<number>(0);
+
+
   
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
@@ -1818,36 +1818,7 @@ function AppContent() {
     };
   }, [currentRoom, callParticipants]);
 
-  // Synchronized Celebration effects listener
-  useEffect(() => {
-    if (callParticipants.length === 0) return;
-    
-    callParticipants.forEach(p => {
-      if (p.celebratedAt) {
-        const lastProcessed = processedCelebrationsRef.current[p.id] || 0;
-        if (p.celebratedAt > lastProcessed) {
-          // If this is initial load / new join, we don't want to retroactively fire old events
-          const isRecent = (Date.now() - p.celebratedAt) < 15000;
-          const hasRecord = p.id in processedCelebrationsRef.current;
-          
-          processedCelebrationsRef.current[p.id] = p.celebratedAt;
-          
-          if (hasRecord || isRecent) {
-            triggerCelebrationEffects();
-          }
-        }
-      }
-    });
-  }, [callParticipants]);
 
-  // Local Celebration button 10-second cooldown timer
-  useEffect(() => {
-    if (celebrateCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setCelebrateCooldown(prev => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [celebrateCooldown]);
 
   // Whole-call Mini Mode (Zoom-like Call PiP) states
   const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
@@ -4054,63 +4025,6 @@ function AppContent() {
       });
   };
 
-  const triggerCelebrationEffects = () => {
-    // 1. Trigger canvas-confetti bursts
-    const duration = 2.5 * 1000;
-    const animationEnd = Date.now() + duration;
-    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
-
-    const randomInRange = (min: number, max: number) => {
-      return Math.random() * (max - min) + min;
-    };
-
-    // Confetti rain/burst effect (continuously fire small bursts from left and right)
-    const interval = setInterval(() => {
-      const timeLeft = animationEnd - Date.now();
-
-      if (timeLeft <= 0) {
-        return clearInterval(interval);
-      }
-
-      const particleCount = 50 * (timeLeft / duration);
-      // Confetti rain falling from sides
-      confetti({
-        ...defaults,
-        particleCount,
-        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
-      });
-      confetti({
-        ...defaults,
-        particleCount,
-        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
-      });
-    }, 250);
-
-    // 3. Layer 2 firework-style explosions at 0.1s and 0.6s
-    setTimeout(() => {
-      confetti({
-        particleCount: 150,
-        spread: 80,
-        origin: { x: 0.3, y: 0.4 },
-        colors: ['#ff0000', '#ffaa00', '#ffffff', '#ff00ff'],
-        startVelocity: 45,
-        gravity: 0.8,
-        zIndex: 9999
-      });
-    }, 100);
-
-    setTimeout(() => {
-      confetti({
-        particleCount: 150,
-        spread: 80,
-        origin: { x: 0.7, y: 0.35 },
-        colors: ['#00ff00', '#00ffff', '#ffff00', '#ff00ff'],
-        startVelocity: 45,
-        gravity: 0.8,
-        zIndex: 9999
-      });
-    }, 600);
-  };
 
   const prevMessagesCountRef = useRef(0);
   useEffect(() => {
@@ -4345,20 +4259,6 @@ function AppContent() {
     }
   };
 
-  const handleCelebrate = async () => {
-    if (celebrateCooldown > 0) return;
-    
-    setCelebrateCooldown(10);
-    triggerCelebrationEffects();
-    
-    try {
-      await updateMySharing({
-        celebratedAt: Date.now()
-      });
-    } catch (e) {
-      console.warn("Failed to update celebratedAt:", e);
-    }
-  };
 
   const handleLowerHand = async (participantId: string) => {
     if (!currentRoom) return;
@@ -10080,43 +9980,6 @@ function AppContent() {
                 );
               })()}
 
-              {/* Celebrate Button */}
-              <button
-                onClick={handleCelebrate}
-                disabled={celebrateCooldown > 0}
-                className="dock-btn celebrate-btn"
-                style={{
-                  fontSize: '20px',
-                  position: 'relative',
-                  opacity: celebrateCooldown > 0 ? 0.6 : 1,
-                  cursor: celebrateCooldown > 0 ? 'not-allowed' : 'pointer'
-                }}
-                title={celebrateCooldown > 0 ? `Celebrate (Cooldown: ${celebrateCooldown}s)` : 'Celebrate! 🎉'}
-              >
-                🎉
-                {celebrateCooldown > 0 && (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: '-6px',
-                      right: '-6px',
-                      background: '#3b82f6',
-                      color: 'white',
-                      fontSize: '10px',
-                      borderRadius: '50%',
-                      width: '16px',
-                      height: '16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 'bold',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                    }}
-                  >
-                    {celebrateCooldown}
-                  </span>
-                )}
-              </button>
 
               {/* Layout Toggle Button */}
               <button 
