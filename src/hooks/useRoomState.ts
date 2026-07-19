@@ -150,8 +150,14 @@ export function useRoomState(
         return;
       }
       const data = snapshot.data();
+      // Only update viewingShare if the actual video ID changed — not on unrelated field updates
+      // (e.g. celebratedAt, handRaised, status) which would cause unnecessary re-renders and player reloads
       if (data.sharingYoutubeId && viewingShare.participantId !== getMyId()) {
-        setViewingShare((prev: ViewingShare | null) => prev ? { ...prev, youtubeVideoId: data.sharingYoutubeId } : null);
+        setViewingShare((prev: ViewingShare | null) => {
+          if (!prev) return null;
+          if (prev.youtubeVideoId === data.sharingYoutubeId) return prev; // No change, skip re-render
+          return { ...prev, youtubeVideoId: data.sharingYoutubeId };
+        });
       }
       if (!data.sharing && viewingShare.participantId !== getMyId()) {
         setViewingShare(null);
