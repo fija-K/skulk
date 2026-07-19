@@ -18,7 +18,15 @@ export function useSessionLogger(
     try {
       const userRef = doc(db, 'users', uid);
       const userSnap = await getDoc(userRef);
-      const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+      
+      const getFormattedDateStr = (dateObj: Date) => {
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const date = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${date}`;
+      };
+      
+      const todayStr = getFormattedDateStr(new Date());
 
       if (!userSnap.exists()) {
         // Automatically initialize user document with streak if it doesn't exist yet
@@ -36,7 +44,7 @@ export function useSessionLogger(
 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+      const yesterdayStr = getFormattedDateStr(yesterday);
 
       let nextStreak = currentStreak;
       if (!lastActiveDate) {
