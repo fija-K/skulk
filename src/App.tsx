@@ -7824,193 +7824,7 @@ function AppContent() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
-              {/* Call Header */}
-              <div className="call-top-bar">
-            <div className="call-room-info">
-              <a 
-                href="/" 
-                onClick={(e) => { 
-                  e.preventDefault(); 
-                  if (window.confirm("Do you want to return to the homepage? You will leave the current room.")) { 
-                    handleLeaveCall(); 
-                  } 
-                }} 
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '6px' }}
-              >
-                <img src="/logo.png" alt="Skulk Logo" style={{ width: '28px', height: '28px', objectFit: 'contain', borderRadius: '4px' }} />
-              </a>
-              <h1 className="room-title" style={{ fontSize: '18px' }}>{currentRoom.name}</h1>
-              {currentRoom.creatorName && (() => {
-                const isAdminCreator = (currentRoom.creatorId === '8OWnkdRLf5XuSmeZB6AQv1VvYyf2') ||
-                                       (currentRoom.creatorEmail && ['fijakhan7127@gmail.com', '000fijakhan123@gmail.com'].includes(currentRoom.creatorEmail.toLowerCase())) ||
-                                       (currentRoom.creatorId === getMyId() && isUserAdmin(user));
-                const displayCreatorName = isAdminCreator ? 'Admin' : currentRoom.creatorName;
-                return (
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '12px', borderLeft: '1px solid var(--border-color)', paddingLeft: '12px', display: 'flex', alignItems: 'center' }}>
-                    Created by <strong style={{ marginLeft: '4px', color: 'var(--text-primary)' }}>{displayCreatorName}</strong>
-                  </span>
-                );
-              })()}
-              {(() => {
-                const mode = currentRoom.roomMode || 'chill';
-                const dotColor = mode === 'non-discuss' ? '#ef4444' : mode === 'discuss' ? '#3b82f6' : '#2ecc71';
-                const badgeBg = mode === 'non-discuss' ? 'rgba(239, 68, 68, 0.1)' : mode === 'discuss' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(46, 204, 113, 0.1)';
-                const badgeBorder = mode === 'non-discuss' ? '1px solid rgba(239, 68, 68, 0.2)' : mode === 'discuss' ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid rgba(46, 204, 113, 0.2)';
-                const modeText = mode === 'non-discuss' ? 'Ultra Pro Max Focus Mode' : mode === 'discuss' ? 'Focus Mode' : 'Chill Mode';
-                
-                return (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    backgroundColor: badgeBg,
-                    border: badgeBorder,
-                    padding: '4px 10px',
-                    borderRadius: '9999px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: dotColor,
-                    marginLeft: '12px'
-                  }}>
-                    <div style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: dotColor,
-                      animation: 'pulse 1.5s infinite'
-                    }} />
-                    <span>{modeText}</span>
-                  </div>
-                );
-              })()}
-              </div>
-            
-            <div className="nav-container" style={{ gap: '16px' }}>
-              {/* Theme Selector inside Call */}
-              <button 
-                onClick={() => setIsThemeModalOpen(true)} 
-                className="theme-picker-btn"
-                aria-label="Theme settings"
-                title="Select background theme"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
-                  <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
-                  <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
-                  <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
-                  <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
-                </svg>
-              </button>
-              {/* Mini Mode Button */}
-              {(isDocumentPipSupported || isVideoPipSupported) && (
-                <button 
-                  onClick={toggleMiniMode} 
-                  className="theme-picker-btn"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Enter Mini Mode"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <rect x="12" y="12" width="9" height="9" rx="1" ry="1"></rect>
-                  </svg>
-                </button>
-              )}
-
-              {/* Room Settings Popover inside Call */}
-              <div className="theme-picker-container" ref={roomSettingsRef}>
-                <button 
-                  onClick={() => setIsRoomSettingsOpen(!isRoomSettingsOpen)} 
-                  className="theme-picker-btn"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  aria-label="Room settings"
-                  title="Room settings"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                  </svg>
-                </button>
-                {isRoomSettingsOpen && (
-                  <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: '0', width: '320px', padding: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '8px' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Room Settings</span>
-                      <button onClick={() => setIsRoomSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
-                    </div>
-                    {renderRoomSettingsUI()}
-                  </div>
-                )}
-              </div>
-              {/* Guest Profile Identity Badge in Call */}
-              {guestName && !user && (
-                <button 
-                  onClick={() => {
-                    setProfileEditName(guestName);
-                    setProfileEditColor(guestColor);
-                    setProfileEditPhotoURL(guestPhotoURL || '');
-                    setIsProfileModalOpen(true);
-                  }}
-                  className="guest-profile-badge"
-                  style={{ padding: '4px 10px 4px 4px', fontSize: '12px' }}
-                  title="Edit guest profile"
-                >
-                  <div className="guest-badge-avatar" style={{ backgroundColor: guestColor, width: '20px', height: '20px', fontSize: '9px' }}>
-                    {guestInitials}
-                  </div>
-                  <span>{guestName}</span>
-                </button>
-              )}
-
-              {!user ? (
-                <button onClick={handleSignIn} className="btn-signin" style={{ padding: '6px 14px', fontSize: '13px' }}>Sign in</button>
-              ) : (
-                <div className="user-profile-container" ref={userDropdownRef} style={{ position: 'relative' }}>
-                  <button 
-                    onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)} 
-                    className="guest-profile-badge"
-                    style={{ border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 10px 4px 4px', fontSize: '12px' }}
-                  >
-                    {user.photoURL ? (
-                      <img 
-                        src={user.photoURL} 
-                        alt={user.displayName || 'User'} 
-                        style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover' }} 
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="guest-badge-avatar" style={{ backgroundColor: '#8b5cf6', width: '20px', height: '20px', fontSize: '9px' }}>
-                        {guestInitials}
-                      </div>
-                    )}
-                    <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {user.displayName || 'Google User'}
-                    </span>
-                  </button>
-                  
-                  {isUserDropdownOpen && (
-                    <div className="theme-picker-dropdown animate-fade-in" style={{ top: '100%', right: 0, marginTop: '8px', minWidth: '150px', zIndex: 1000 }}>
-                      <button 
-                        onClick={() => {
-                          setIsThemeModalOpen(true);
-                          setIsUserDropdownOpen(false);
-                        }} 
-                        className="theme-item-btn"
-                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
-                      >
-                        🎨 App Themes
-                      </button>
-                      <button 
-                        onClick={handleSignOut} 
-                        className="theme-item-btn"
-                        style={{ color: '#ef4444', width: '100%', textAlign: 'left', padding: '10px 16px' }}
-                      >
-                        Sign out
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+                {/* Call Content Area */}
 
           {/* Dynamic Connection Status Alert Banner */}
           {lkConnectStatus !== 'connected' && (
@@ -9968,208 +9782,385 @@ function AppContent() {
           </div>
 
           {/* Call Control Dock (Bottom Toolbar) */}
-          <div className="call-bottom-dock" style={{ position: 'relative' }}>
+          <div className="call-bottom-dock">
             
-            {/* Status Button — bottom left */}
-            {(() => {
-              const STATUS_OPTIONS: { key: typeof myStatus; label: string; emoji: string; color: string }[] = [
-                { key: 'none',    label: 'Clear',    emoji: '😐', color: '#64748b' },
-                { key: 'dnd',     label: 'Do Not Disturb', emoji: '⛔', color: '#ef4444' },
-                { key: 'zZ',      label: 'Sleeping', emoji: '💤', color: '#8b5cf6' },
-                { key: 'brb',     label: 'Be Right Back', emoji: '🚶', color: '#f59e0b' },
-                { key: 'chillin', label: 'Chillin',  emoji: '😎', color: '#10b981' },
-              ];
-              const current = STATUS_OPTIONS.find(s => s.key === myStatus) || STATUS_OPTIONS[0];
-              return (
-                <div style={{ position: 'absolute', left: 16, bottom: '100%', marginBottom: 4, zIndex: 300 }}>
-                  {showStatusMenu && (
-                    <div className="status-popup-menu">
-                      {STATUS_OPTIONS.map(opt => (
-                        <button
-                          key={opt.key}
-                          className={`status-popup-item ${myStatus === opt.key ? 'active' : ''}`}
-                          style={{ '--status-color': opt.color } as any}
-                          onClick={() => {
-                            const next = opt.key;
-                            setMyStatus(next);
-                            setShowStatusMenu(false);
-                            if (currentRoom) {
-                              updateMyStatus(next === 'none' ? null : next);
-                            }
-                          }}
-                        >
-                          <span>{opt.emoji}</span>
-                          <span>{opt.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+            {/* Left Group: Room Info & Mode */}
+            <div className="dock-left-group">
+              <a 
+                href="/" 
+                onClick={(e) => { 
+                  e.preventDefault(); 
+                  if (window.confirm("Do you want to return to the homepage? You will leave the current room.")) { 
+                    handleLeaveCall(); 
+                  } 
+                }} 
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <img src="/logo.png" alt="Skulk Logo" style={{ width: '28px', height: '28px', objectFit: 'contain', borderRadius: '4px' }} />
+              </a>
+              <h1 className="room-title" style={{ fontSize: '14px', fontWeight: 800, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-primary)' }}>{currentRoom.name}</h1>
+              {(() => {
+                const mode = currentRoom.roomMode || 'chill';
+                const dotColor = mode === 'non-discuss' ? '#ef4444' : mode === 'discuss' ? '#3b82f6' : '#2ecc71';
+                const badgeBg = mode === 'non-discuss' ? 'rgba(239, 68, 68, 0.1)' : mode === 'discuss' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(46, 204, 113, 0.1)';
+                const badgeBorder = mode === 'non-discuss' ? '1px solid rgba(239, 68, 68, 0.2)' : mode === 'discuss' ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid rgba(46, 204, 113, 0.2)';
+                const modeText = mode === 'non-discuss' ? 'Ultra Focus' : mode === 'discuss' ? 'Focus Mode' : 'Chill Mode';
+                
+                return (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: badgeBg,
+                    border: badgeBorder,
+                    padding: '3px 8px',
+                    borderRadius: '9999px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: dotColor
+                  }}>
+                    <div style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: dotColor,
+                      animation: 'pulse 1.5s infinite'
+                    }} />
+                    <span>{modeText}</span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Center Group: Call Interactivity Actions */}
+            <div className="dock-center-group">
+              {/* Status Button */}
+              {(() => {
+                const STATUS_OPTIONS: { key: typeof myStatus; label: string; emoji: string; color: string }[] = [
+                  { key: 'none',    label: 'Clear',    emoji: '😐', color: '#64748b' },
+                  { key: 'dnd',     label: 'Do Not Disturb', emoji: '⛔', color: '#ef4444' },
+                  { key: 'zZ',      label: 'Sleeping', emoji: '💤', color: '#8b5cf6' },
+                  { key: 'brb',     label: 'Be Right Back', emoji: '🚶', color: '#f59e0b' },
+                  { key: 'chillin', label: 'Chillin',  emoji: '😎', color: '#10b981' },
+                ];
+                const current = STATUS_OPTIONS.find(s => s.key === myStatus) || STATUS_OPTIONS[0];
+                return (
+                  <div style={{ position: 'relative' }}>
+                    {showStatusMenu && (
+                      <div className="status-popup-menu" style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '8px', zIndex: 300 }}>
+                        {STATUS_OPTIONS.map(opt => (
+                          <button
+                            key={opt.key}
+                            className={`status-popup-item ${myStatus === opt.key ? 'active' : ''}`}
+                            style={{ '--status-color': opt.color } as any}
+                            onClick={() => {
+                              const next = opt.key;
+                              setMyStatus(next);
+                              setShowStatusMenu(false);
+                              if (currentRoom) {
+                                updateMyStatus(next === 'none' ? null : next);
+                              }
+                            }}
+                          >
+                            <span>{opt.emoji}</span>
+                            <span>{opt.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      id="status-toggle-btn"
+                      className="status-dock-btn"
+                      title="Set your status"
+                      onClick={() => setShowStatusMenu(v => !v)}
+                      style={{ '--status-color': current.color } as any}
+                    >
+                      <span className="status-dock-emoji">{current.emoji}</span>
+                      {myStatus !== 'none' && (
+                        <span className="status-dock-label">{current.key.toUpperCase()}</span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Mic Toggle Button */}
+              {(() => {
+                const myId = getMyId();
+                const myPresence = callParticipants.find(p => p.id === myId);
+                const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
+                const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
+                
+                const isBlocked = !!(micBlockedUntil && Date.now() < micBlockedUntil);
+                const remainingBlockedSecs = isBlocked ? Math.ceil((micBlockedUntil! - Date.now()) / 1000) : 0;
+
+                return (
+                  <>
+                    <button 
+                      onClick={toggleMic} 
+                      className={`dock-btn ${isMicMuted ? 'active-off' : ''} ${isMutedByHost ? 'host-locked' : ''}`}
+                      title={isMutedByHost ? 'Muted by Host (Locked)' : isBlocked ? `Microphone blocked (${remainingBlockedSecs}s remaining)` : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                      style={isBlocked ? { position: 'relative', border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.1)' } : undefined}
+                      disabled={isBlocked}
+                    >
+                      {isBlocked ? (
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: '#ef4444' }}>
+                          {remainingBlockedSecs}s
+                        </span>
+                      ) : isMutedByHost ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="1" y1="1" x2="23" y2="23"></line>
+                          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          {isMicMuted ? (
+                            <>
+                              <line x1="1" y1="1" x2="23" y2="23"></line>
+                              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                            </>
+                          ) : (
+                            <>
+                              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                              <line x1="12" y1="19" x2="12" y2="23"></line>
+                              <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </>
+                          )}
+                        </svg>
+                      )}
+                    </button>
+                    
+                    {/* Camera Toggle Button */}
+                    <button 
+                      onClick={toggleCamera} 
+                      className={`dock-btn ${isCamOff ? 'active-off' : ''} ${isCamDisabledByHost ? 'host-locked' : ''}`}
+                      title={isCamDisabledByHost ? 'Camera Disabled by Host (Locked)' : isCamOff ? 'Turn camera on' : 'Turn camera off'}
+                    >
+                      {isCamDisabledByHost ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="1" y1="1" x2="23" y2="23"></line>
+                          <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8c0 .28-.06.55-.18.8l-4-4"></path>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          {isCamOff ? (
+                            <>
+                              <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3m-2.11-.11l3.44-5.16a1 1 0 0 1 1.67 1.1l-2.22 3.34"></path>
+                              <line x1="1" y1="1" x2="23" y2="23"></line>
+                            </>
+                          ) : (
+                            <>
+                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                              <circle cx="12" cy="13" r="4"></circle>
+                            </>
+                          )}
+                        </svg>
+                      )}
+                    </button>
+                  </>
+                );
+              })()}
+
+              {/* Raise Hand Button */}
+              {(() => {
+                const myId = getMyId();
+                const myPresence = callParticipants.find(p => p.id === myId);
+                const handRaised = !!myPresence?.handRaised;
+                return (
                   <button
-                    id="status-toggle-btn"
-                    className="status-dock-btn"
-                    title="Set your status"
-                    onClick={() => setShowStatusMenu(v => !v)}
-                    style={{ '--status-color': current.color } as any}
+                    onClick={toggleRaiseHand}
+                    className={`dock-btn ${handRaised ? 'active' : ''}`}
+                    style={{ fontSize: '20px' }}
+                    title={handRaised ? 'Lower your hand' : 'Raise your hand'}
                   >
-                    <span className="status-dock-emoji">{current.emoji}</span>
-                    {myStatus !== 'none' && (
-                      <span className="status-dock-label">{current.key.toUpperCase()}</span>
-                    )}
+                    ✋
                   </button>
-                </div>
-              );
-            })()}
+                );
+              })()}
 
-            {/* Mic Toggle Button */}
-            {(() => {
-              const myId = getMyId();
-              const myPresence = callParticipants.find(p => p.id === myId);
-              const isMutedByHost = !!(myPresence && myPresence.mutedBy && myPresence.mutedBy !== myId);
-              const isCamDisabledByHost = !!(myPresence && myPresence.camOffBy && myPresence.camOffBy !== myId);
-              
-              const isBlocked = !!(micBlockedUntil && Date.now() < micBlockedUntil);
-              const remainingBlockedSecs = isBlocked ? Math.ceil((micBlockedUntil! - Date.now()) / 1000) : 0;
+              {/* Layout Toggle Button */}
+              <button 
+                onClick={() => {
+                  if (spotlightParticipantId) {
+                    setSpotlightParticipantId(null);
+                    setIsGalleryView(true);
+                  } else {
+                    setIsGalleryView(!isGalleryView);
+                  }
+                }} 
+                className="dock-btn"
+                title={spotlightParticipantId ? 'Switch to Gallery View' : (isGalleryView ? 'Switch to Grid View' : 'Switch to Gallery View')}
+              >
+                {spotlightParticipantId || isGalleryView ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="9"></rect>
+                    <rect x="14" y="3" width="7" height="5"></rect>
+                    <rect x="14" y="12" width="7" height="9"></rect>
+                    <rect x="3" y="16" width="7" height="5"></rect>
+                  </svg>
+                )}
+              </button>
 
-              return (
-                <>
+              {/* Leave Room Button */}
+              <button 
+                onClick={handleLeaveCall} 
+                className="dock-btn dock-btn-leave"
+                title="Leave room call"
+              >
+                Leave
+              </button>
+
+              {/* End Room Button (Host/Admin Only) */}
+              {(callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
+                callParticipants.find(part => part.id === getMyId())?.role === 'host') && (
+                <button 
+                  onClick={handleEndRoom} 
+                  className="dock-btn dock-btn-leave"
+                  style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
+                  title="End room call for everyone"
+                >
+                  End Room
+                </button>
+              )}
+            </div>
+
+            {/* Right Group: Utilities & Identity */}
+            <div className="dock-right-group">
+              {/* Theme Picker */}
+              <button 
+                onClick={() => setIsThemeModalOpen(true)} 
+                className="theme-picker-btn dock-theme-btn"
+                aria-label="Theme settings"
+                title="Select background theme"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.32832 19.4797 5.5632 19.7196 5.86178 19.8598C6.16035 20 6.56847 20 7.38471 20H8C9.10457 20 10 19.1046 10 18C10 16.8954 10.8954 16 12 16C13.1046 16 14 16.8954 14 18C14 20.2091 15.7909 22 18 22H12Z"></path>
+                  <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
+                  <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
+                </svg>
+              </button>
+
+              {/* Mini Mode Button */}
+              {(isDocumentPipSupported || isVideoPipSupported) && (
+                <button 
+                  onClick={toggleMiniMode} 
+                  className="theme-picker-btn dock-minimode-btn"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Enter Mini Mode"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <rect x="12" y="12" width="9" height="9" rx="1" ry="1"></rect>
+                  </svg>
+                </button>
+              )}
+
+              {/* Room Settings popover */}
+              <div className="theme-picker-container" ref={roomSettingsRef} style={{ position: 'relative' }}>
+                <button 
+                  onClick={() => setIsRoomSettingsOpen(!isRoomSettingsOpen)} 
+                  className="theme-picker-btn dock-settings-btn"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  aria-label="Room settings"
+                  title="Room settings"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                </button>
+                {isRoomSettingsOpen && (
+                  <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', right: '0', width: '320px', padding: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '8px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Room Settings</span>
+                      <button onClick={() => setIsRoomSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
+                    </div>
+                    {renderRoomSettingsUI()}
+                  </div>
+                )}
+              </div>
+
+              {/* Guest Profile Badging */}
+              {guestName && !user && (
+                <button 
+                  onClick={() => {
+                    setProfileEditName(guestName);
+                    setProfileEditColor(guestColor);
+                    setProfileEditPhotoURL(guestPhotoURL || '');
+                    setIsProfileModalOpen(true);
+                  }}
+                  className="guest-profile-badge"
+                  style={{ padding: '4px 10px 4px 4px', fontSize: '12px' }}
+                  title="Edit guest profile"
+                >
+                  <div className="guest-badge-avatar" style={{ backgroundColor: guestColor, width: '20px', height: '20px', fontSize: '9px' }}>
+                    {guestInitials}
+                  </div>
+                  <span>{guestName}</span>
+                </button>
+              )}
+
+              {/* User Profile Badging */}
+              {user && (
+                <div className="user-profile-container" ref={userDropdownRef} style={{ position: 'relative' }}>
                   <button 
-                    onClick={toggleMic} 
-                    className={`dock-btn ${isMicMuted ? 'active-off' : ''} ${isMutedByHost ? 'host-locked' : ''}`}
-                    title={isMutedByHost ? 'Muted by Host (Locked)' : isBlocked ? `Microphone blocked (${remainingBlockedSecs}s remaining)` : isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
-                    style={isBlocked ? { position: 'relative', border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.1)' } : undefined}
-                    disabled={isBlocked}
+                    onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)} 
+                    className="guest-profile-badge"
+                    style={{ border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 10px 4px 4px', fontSize: '12px' }}
                   >
-                    {isBlocked ? (
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ef4444' }}>
-                        {remainingBlockedSecs}s
-                      </span>
-                    ) : isMutedByHost ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="1" y1="1" x2="23" y2="23"></line>
-                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                      </svg>
+                    {user.photoURL ? (
+                      <img 
+                        src={user.photoURL} 
+                        alt={user.displayName || 'User'} 
+                        style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover' }} 
+                        referrerPolicy="no-referrer"
+                      />
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        {isMicMuted ? (
-                          <>
-                            <line x1="1" y1="1" x2="23" y2="23"></line>
-                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
-                            <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
-                          </>
-                        ) : (
-                          <>
-                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                            <line x1="12" y1="19" x2="12" y2="23"></line>
-                            <line x1="8" y1="23" x2="16" y2="23"></line>
-                          </>
-                        )}
-                      </svg>
+                      <div className="guest-badge-avatar" style={{ backgroundColor: '#8b5cf6', width: '20px', height: '20px', fontSize: '9px' }}>
+                        {guestInitials}
+                      </div>
                     )}
+                    <span>
+                      {user.displayName || 'Google User'}
+                    </span>
                   </button>
                   
-                  {/* Camera Toggle Button */}
-                  <button 
-                    onClick={toggleCamera} 
-                    className={`dock-btn ${isCamOff ? 'active-off' : ''} ${isCamDisabledByHost ? 'host-locked' : ''}`}
-                    title={isCamDisabledByHost ? 'Camera Disabled by Host (Locked)' : isCamOff ? 'Turn camera on' : 'Turn camera off'}
-                  >
-                    {isCamDisabledByHost ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="1" y1="1" x2="23" y2="23"></line>
-                        <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3 0h9a2 2 0 0 1 2 2v8c0 .28-.06.55-.18.8l-4-4"></path>
-                      </svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        {isCamOff ? (
-                          <>
-                            <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3m-2.11-.11l3.44-5.16a1 1 0 0 1 1.67 1.1l-2.22 3.34"></path>
-                            <line x1="1" y1="1" x2="23" y2="23"></line>
-                          </>
-                        ) : (
-                          <>
-                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                            <circle cx="12" cy="13" r="4"></circle>
-                          </>
-                        )}
-                      </svg>
-                    )}
-                  </button>
-                </>
-              );
-            })()}
-            
-            {/* Layout Toggle Button */}
-            <button 
-              onClick={() => {
-                if (spotlightParticipantId) {
-                  setSpotlightParticipantId(null);
-                  setIsGalleryView(true);
-                } else {
-                  setIsGalleryView(!isGalleryView);
-                }
-              }} 
-              className="dock-btn"
-              title={spotlightParticipantId ? 'Switch to Gallery View' : (isGalleryView ? 'Switch to Grid View' : 'Switch to Gallery View')}
-            >
-              {spotlightParticipantId || isGalleryView ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="14" width="7" height="7"></rect>
-                  <rect x="3" y="14" width="7" height="7"></rect>
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="9"></rect>
-                  <rect x="14" y="3" width="7" height="5"></rect>
-                  <rect x="14" y="12" width="7" height="9"></rect>
-                  <rect x="3" y="16" width="7" height="5"></rect>
-                </svg>
+                  {isUserDropdownOpen && (
+                    <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', right: 0, marginBottom: '8px', minWidth: '150px', zIndex: 1000 }}>
+                      <button 
+                        onClick={() => {
+                          setIsThemeModalOpen(true);
+                          setIsUserDropdownOpen(false);
+                        }} 
+                        className="theme-item-btn"
+                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                      >
+                        🎨 App Themes
+                      </button>
+                      <button 
+                        onClick={handleSignOut} 
+                        className="theme-item-btn"
+                        style={{ color: '#ef4444', width: '100%', textAlign: 'left', padding: '10px 16px' }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
-            </button>
-            
-            {/* Leave / End Call Button */}
-            <button 
-              onClick={handleLeaveCall} 
-              className="dock-btn dock-btn-leave"
-              style={{ marginRight: '8px' }}
-              title="Leave room call"
-            >
-              Leave
-            </button>
-            
-            {/* Raise Hand Button */}
-            {(() => {
-              const myId = getMyId();
-              const myPresence = callParticipants.find(p => p.id === myId);
-              const handRaised = !!myPresence?.handRaised;
-              return (
-                <button
-                  onClick={toggleRaiseHand}
-                  className={`dock-btn ${handRaised ? 'active' : ''}`}
-                  style={{ marginRight: '8px', fontSize: '20px' }}
-                  title={handRaised ? 'Lower your hand' : 'Raise your hand'}
-                >
-                  ✋
-                </button>
-              );
-            })()}
-            
-            {/* End Room Button */}
-            {(callParticipants.find(part => part.id === getMyId())?.role === 'admin' || 
-              callParticipants.find(part => part.id === getMyId())?.role === 'host') && (
-              <button 
-                onClick={handleEndRoom} 
-                className="dock-btn dock-btn-leave"
-                style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#ffffff' }}
-                title="End room call for everyone"
-              >
-                End Room
-              </button>
-            )}
-
+            </div>
           </div>
           </div>
           )}

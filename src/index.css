@@ -1651,9 +1651,76 @@ body {
   background-color: var(--panel-bg);
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  justify-content: space-between;
   padding: 0 24px;
+  position: relative;
+}
+
+.dock-left-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.dock-center-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.dock-right-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+/* Responsive Collapses for Unified Control Bar */
+@media (max-width: 1024px) {
+  .user-profile-container .guest-profile-badge span,
+  .guest-profile-badge span {
+    display: none !important;
+  }
+  .status-dock-btn .status-dock-label {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .dock-left-group a {
+    display: none !important;
+  }
+  .room-title {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dock-left-group div {
+    display: none !important; /* Hide room mode text badge on very small screens */
+  }
+  .dock-btn {
+    width: 42px;
+    height: 42px;
+    font-size: 14px;
+  }
+  .dock-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .call-bottom-dock {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .dock-theme-btn,
+  .dock-minimode-btn {
+    display: none !important;
+  }
 }
 
 .dock-btn {
