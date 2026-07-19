@@ -117,10 +117,13 @@ export function DMPanel({
     if (!user) return dmThreads;
     const activePersona = userDataState?.activeMentorPersona || 'leader';
     const activeThreadId = `mentor_${activePersona}_${user.uid}`;
-    const hasActiveMentorDoc = dmThreads.some(t => t.id === activeThreadId);
     
-    if (hasActiveMentorDoc) {
-      return dmThreads;
+    // Filter out all other mentor threads, keeping only the active one in the inbox list
+    const nonMentorThreads = dmThreads.filter(t => !t.id.startsWith('mentor_'));
+    const activeMentorDoc = dmThreads.find(t => t.id === activeThreadId);
+    
+    if (activeMentorDoc) {
+      return [activeMentorDoc, ...nonMentorThreads];
     } else {
       // Add a virtual/default mentor thread for the active persona
       const virtualMentorThread = {
@@ -131,7 +134,7 @@ export function DMPanel({
         unread: { [user.uid]: false },
         createdAt: null
       };
-      return [virtualMentorThread, ...dmThreads];
+      return [virtualMentorThread, ...nonMentorThreads];
     }
   }, [dmThreads, user?.uid, userDataState?.activeMentorPersona]);
 
@@ -684,13 +687,16 @@ export function DMPanel({
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {sortedThreads.map(thread => {
             const otherUid = thread.participants.find((pId: string) => pId !== user?.uid);
+            const isMentorThread = otherUid ? otherUid.startsWith('bot_mentor_') : false;
             const otherUser = resolvedConnections.find(u => u.id === otherUid);
-            const otherName = otherUser ? otherUser.name : 'Anonymous User';
-            const otherColor = otherUser ? otherUser.color : '#3b82f6';
-            const otherInitials = otherUser ? otherUser.initials : '??';
-            const otherPhoto = otherUser ? otherUser.photoURL : null;
+            
+            const otherName = isMentorThread ? 'Mentor' : (otherUser ? otherUser.name : 'Anonymous User');
+            const otherColor = isMentorThread ? '#10b981' : (otherUser ? otherUser.color : '#3b82f6');
+            const otherInitials = isMentorThread ? '🧠' : (otherUser ? otherUser.initials : '??');
+            const otherPhoto = isMentorThread ? null : (otherUser ? otherUser.photoURL : null);
 
             const isUnread = thread.unread && thread.unread[user?.uid] === true;
+            const itemColor = isMentorThread ? '#10b981' : '#3b82f6';
 
             return (
               <div
@@ -703,7 +709,7 @@ export function DMPanel({
                   padding: '10px 12px',
                   borderRadius: '10px',
                   backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                  border: isUnread ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.03)',
+                  border: isUnread ? `1px solid ${itemColor}80` : '1px solid rgba(255, 255, 255, 0.03)',
                   cursor: 'pointer',
                   transition: 'all 0.2s',
                   position: 'relative'
@@ -741,8 +747,8 @@ export function DMPanel({
                       width: '6px',
                       height: '6px',
                       borderRadius: '50%',
-                      backgroundColor: '#3b82f6',
-                      boxShadow: '0 0 6px #3b82f6',
+                      backgroundColor: itemColor,
+                      boxShadow: `0 0 6px ${itemColor}`,
                       flexShrink: 0,
                       marginLeft: '6px'
                     }}
