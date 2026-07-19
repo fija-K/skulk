@@ -581,19 +581,38 @@ export function DMPanel({
 
   // Render inbox list of threads
   const renderInboxList = () => {
-    // Sort active threads by last activity time descending
-    const sortedThreads = [...mergedThreads].sort((a, b) => {
+    // Filter out mentor threads and sort only human threads by last activity time descending
+    const humanThreads = mergedThreads.filter(t => !t.id.startsWith('mentor_'));
+    const sortedThreads = [...humanThreads].sort((a, b) => {
       const getSecs = (t: any) => {
         if (!t) return 0;
         if (t.seconds !== undefined) return t.seconds;
         if (t.toDate) return t.toDate().getTime() / 1000;
         return new Date(t).getTime() / 1000 || 0;
       };
-      // Give Mentor a slight fallback advantage to stay near the top if no messages yet
-      const timeA = a.id.startsWith('mentor_') && !a.lastMessageTime ? Date.now() / 1000 - 100000 : getSecs(a.lastMessageTime);
-      const timeB = b.id.startsWith('mentor_') && !b.lastMessageTime ? Date.now() / 1000 - 100000 : getSecs(b.lastMessageTime);
-      return timeB - timeA;
+      return getSecs(b.lastMessageTime) - getSecs(a.lastMessageTime);
     });
+
+    const activePersona = userDataState?.activeMentorPersona;
+    const activeThreadId = activePersona ? `mentor_${activePersona}_${user?.uid}` : null;
+    const activeThread = activeThreadId ? dmThreads.find(t => t.id === activeThreadId) : null;
+
+    // Resolve details for the pinned mentor entry
+    const pinnedName = activePersona ? (MENTOR_PERSONAS_LIST[activePersona]?.name || 'Mentor') : 'Mentor Bot';
+    const pinnedColor = activePersona ? (MENTOR_PERSONAS_LIST[activePersona]?.color || '#10b981') : '#10b981';
+    const pinnedPhoto = activePersona ? (MENTOR_PERSONAS_LIST[activePersona]?.avatar || null) : null;
+    const pinnedInitials = '🧠';
+    const pinnedLastMessage = activeThread ? (activeThread.lastMessageText || 'No messages yet') : 'Tap to choose your study mentor...';
+    const pinnedUnread = activeThread ? (activeThread.unread && activeThread.unread[user?.uid] === true) : false;
+
+    const handlePinnedMentorClick = () => {
+      if (!user) return;
+      if (activePersona) {
+        setActiveThreadId(`mentor_${activePersona}_${user.uid}`);
+      } else {
+        setShowMentorPicker(true);
+      }
+    };
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
@@ -685,18 +704,117 @@ export function DMPanel({
         )}
 
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          
+          {/* Pinned Mentor Entry */}
+          <div
+            onClick={handlePinnedMentorClick}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '12px 14px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(16, 185, 129, 0.05)',
+              border: pinnedUnread ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(16, 185, 129, 0.15)',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              position: 'relative',
+              marginBottom: '4px'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.08)';
+              e.currentTarget.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.05)';
+              e.currentTarget.style.border = pinnedUnread ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(16, 185, 129, 0.15)';
+            }}
+          >
+            <div style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              backgroundColor: pinnedColor,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              flexShrink: 0,
+              boxShadow: '0 0 10px rgba(16, 185, 129, 0.15)'
+            }}>
+              {pinnedPhoto ? (
+                <img 
+                  src={pinnedPhoto} 
+                  alt={pinnedName} 
+                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} 
+                />
+              ) : (
+                pinnedInitials
+              )}
+            </div>
+            
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ 
+                  fontSize: '13px', 
+                  fontWeight: 800, 
+                  color: 'var(--text-primary)', 
+                  whiteSpace: 'nowrap', 
+                  overflow: 'hidden', 
+                  textOverflow: 'ellipsis' 
+                }}>
+                  {pinnedName}
+                </span>
+                <span style={{
+                  fontSize: '8px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                  color: '#10b981',
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>Mentor</span>
+              </div>
+              <span style={{ 
+                fontSize: '11px', 
+                color: 'var(--text-secondary)', 
+                whiteSpace: 'nowrap', 
+                overflow: 'hidden', 
+                textOverflow: 'ellipsis' 
+              }}>
+                {pinnedLastMessage}
+              </span>
+            </div>
+
+            {pinnedUnread && (
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: '#10b981',
+                  boxShadow: '0 0 6px #10b981',
+                  flexShrink: 0,
+                  marginLeft: '6px'
+                }}
+              />
+            )}
+          </div>
+
+          {/* Sorted human DMs */}
           {sortedThreads.map(thread => {
             const otherUid = thread.participants.find((pId: string) => pId !== user?.uid);
-            const isMentorThread = otherUid ? otherUid.startsWith('bot_mentor_') : false;
             const otherUser = resolvedConnections.find(u => u.id === otherUid);
             
-            const otherName = isMentorThread ? 'Mentor' : (otherUser ? otherUser.name : 'Anonymous User');
-            const otherColor = isMentorThread ? '#10b981' : (otherUser ? otherUser.color : '#3b82f6');
-            const otherInitials = isMentorThread ? '🧠' : (otherUser ? otherUser.initials : '??');
-            const otherPhoto = isMentorThread ? null : (otherUser ? otherUser.photoURL : null);
+            const otherName = otherUser ? otherUser.name : 'Anonymous User';
+            const otherColor = otherUser ? otherUser.color : '#3b82f6';
+            const otherInitials = otherUser ? otherUser.initials : '??';
+            const otherPhoto = otherUser ? otherUser.photoURL : null;
 
             const isUnread = thread.unread && thread.unread[user?.uid] === true;
-            const itemColor = isMentorThread ? '#10b981' : '#3b82f6';
+            const itemColor = '#3b82f6';
 
             return (
               <div
