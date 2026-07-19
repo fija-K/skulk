@@ -9847,7 +9847,7 @@ function AppContent() {
                 return (
                   <div style={{ position: 'relative' }}>
                     {showStatusMenu && (
-                      <div className="status-popup-menu" style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '8px', zIndex: 300 }}>
+                      <div className="status-popup-menu" style={{ position: 'absolute', bottom: '100%', top: 'auto', left: '50%', transform: 'translateX(-50%)', marginBottom: '8px', zIndex: 300 }}>
                         {STATUS_OPTIONS.map(opt => (
                           <button
                             key={opt.key}
@@ -10082,7 +10082,7 @@ function AppContent() {
                   </svg>
                 </button>
                 {isRoomSettingsOpen && (
-                  <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', right: '0', width: '320px', padding: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '8px' }}>
+                  <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', top: 'auto', marginTop: 'auto', right: '0', width: '320px', padding: '16px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '8px' }}>
                       <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Room Settings</span>
                       <button onClick={() => setIsRoomSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
@@ -10138,7 +10138,7 @@ function AppContent() {
                   </button>
                   
                   {isUserDropdownOpen && (
-                    <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', right: 0, marginBottom: '8px', minWidth: '150px', zIndex: 1000 }}>
+                    <div className="theme-picker-dropdown animate-fade-in" style={{ bottom: '100%', top: 'auto', marginTop: 'auto', right: 0, marginBottom: '8px', minWidth: '150px', zIndex: 1000 }}>
                       <button 
                         onClick={() => {
                           setIsThemeModalOpen(true);
