@@ -4054,47 +4054,8 @@ function AppContent() {
       });
   };
 
-  const playCelebrateSound = () => {
-    const audio = new Audio('/assets/audio/celebrate.mp3');
-    audio.volume = 0.5;
-    audio.play()
-      .catch((err) => {
-        console.log("Audio asset /assets/audio/celebrate.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
-        try {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          if (!AudioContextClass) return;
-          const ctx = new AudioContextClass();
-          
-          const playTone = (freq: number, startDelay: number, duration: number, type: 'sine' | 'triangle' = 'sine') => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.type = type;
-            osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
-            gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
-            gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + startDelay + 0.05);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startDelay + duration);
-            osc.start(ctx.currentTime + startDelay);
-            osc.stop(ctx.currentTime + startDelay + duration);
-          };
-
-          // Play an ascending arpeggio chord of celebratory chimes (C5, E5, G5, C6) with 0.08s delays
-          playTone(523.25, 0.0, 0.5, 'sine');     // C5
-          playTone(659.25, 0.08, 0.5, 'sine');    // E5
-          playTone(783.99, 0.16, 0.5, 'sine');    // G5
-          playTone(1046.50, 0.24, 0.7, 'sine');   // C6
-        } catch (e) {
-          console.warn("Failed to play synthesized celebrate sound:", e);
-        }
-      });
-  };
-
   const triggerCelebrationEffects = () => {
-    // 1. Play the celebratory audio
-    playCelebrateSound();
-
-    // 2. Trigger canvas-confetti bursts
+    // 1. Trigger canvas-confetti bursts
     const duration = 2.5 * 1000;
     const animationEnd = Date.now() + duration;
     const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
