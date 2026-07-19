@@ -32,6 +32,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { VideoPresets } from 'livekit-client';
+import confetti from 'canvas-confetti';
 
 import { parseMediaUrl, isDrmBlockedUrl, loadYoutubeApi, loadVimeoApi, loadTwitchApi } from './utils/helpers';
 import { UniversalVideoPlayer } from './components/video/UniversalVideoPlayer';
@@ -120,6 +121,7 @@ export interface Participant {
   handRaisedAt?: number | null;
   castVote?: string | null;
   isBot?: boolean;
+  celebratedAt?: number | null;
 }
 
 export type ViewingShare = {
@@ -1306,6 +1308,8 @@ function AppContent() {
   const isEvictedRef = useRef(false);
   const isEnteringRoomRef = useRef<string | null>(null);
   const prefetchedLkTokenRef = useRef<{ roomId: string; token: string } | null>(null);
+  const processedCelebrationsRef = useRef<Record<string, number>>({});
+  const [celebrateCooldown, setCelebrateCooldown] = useState<number>(0);
   
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [isFirestoreBlocked, setIsFirestoreBlocked] = useState(false);
@@ -1813,6 +1817,38 @@ function AppContent() {
       active = false;
     };
   }, [currentRoom, callParticipants]);
+
+  // Synchronized Celebration effects listener
+  useEffect(() => {
+    if (callParticipants.length === 0) return;
+    
+    callParticipants.forEach(p => {
+      if (p.celebratedAt) {
+        const lastProcessed = processedCelebrationsRef.current[p.id] || 0;
+        if (p.celebratedAt > lastProcessed) {
+          // If this is initial load / new join, we don't want to retroactively fire old events
+          const isRecent = (Date.now() - p.celebratedAt) < 15000;
+          const hasRecord = p.id in processedCelebrationsRef.current;
+          
+          processedCelebrationsRef.current[p.id] = p.celebratedAt;
+          
+          if (hasRecord || isRecent) {
+            triggerCelebrationEffects();
+          }
+        }
+      }
+    });
+  }, [callParticipants]);
+
+  // Local Celebration button 10-second cooldown timer
+  useEffect(() => {
+    if (celebrateCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCelebrateCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [celebrateCooldown]);
+
   // Whole-call Mini Mode (Zoom-like Call PiP) states
   const [pipWindowInstance, setPipWindowInstance] = useState<Window | null>(null);
   const [isMiniModeActive, setIsMiniModeActive] = useState(false);
@@ -4018,6 +4054,103 @@ function AppContent() {
       });
   };
 
+  const playCelebrateSound = () => {
+    const audio = new Audio('/assets/audio/celebrate.mp3');
+    audio.volume = 0.5;
+    audio.play()
+      .catch((err) => {
+        console.log("Audio asset /assets/audio/celebrate.mp3 not found or blocked, falling back to Web Audio synthesis:", err);
+        try {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          const ctx = new AudioContextClass();
+          
+          const playTone = (freq: number, startDelay: number, duration: number, type: 'sine' | 'triangle' = 'sine') => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
+            gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
+            gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + startDelay + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startDelay + duration);
+            osc.start(ctx.currentTime + startDelay);
+            osc.stop(ctx.currentTime + startDelay + duration);
+          };
+
+          // Play an ascending arpeggio chord of celebratory chimes (C5, E5, G5, C6) with 0.08s delays
+          playTone(523.25, 0.0, 0.5, 'sine');     // C5
+          playTone(659.25, 0.08, 0.5, 'sine');    // E5
+          playTone(783.99, 0.16, 0.5, 'sine');    // G5
+          playTone(1046.50, 0.24, 0.7, 'sine');   // C6
+        } catch (e) {
+          console.warn("Failed to play synthesized celebrate sound:", e);
+        }
+      });
+  };
+
+  const triggerCelebrationEffects = () => {
+    // 1. Play the celebratory audio
+    playCelebrateSound();
+
+    // 2. Trigger canvas-confetti bursts
+    const duration = 2.5 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+
+    const randomInRange = (min: number, max: number) => {
+      return Math.random() * (max - min) + min;
+    };
+
+    // Confetti rain/burst effect (continuously fire small bursts from left and right)
+    const interval = setInterval(() => {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      // Confetti rain falling from sides
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }
+      });
+    }, 250);
+
+    // 3. Layer 2 firework-style explosions at 0.1s and 0.6s
+    setTimeout(() => {
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { x: 0.3, y: 0.4 },
+        colors: ['#ff0000', '#ffaa00', '#ffffff', '#ff00ff'],
+        startVelocity: 45,
+        gravity: 0.8,
+        zIndex: 9999
+      });
+    }, 100);
+
+    setTimeout(() => {
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { x: 0.7, y: 0.35 },
+        colors: ['#00ff00', '#00ffff', '#ffff00', '#ff00ff'],
+        startVelocity: 45,
+        gravity: 0.8,
+        zIndex: 9999
+      });
+    }, 600);
+  };
+
   const prevMessagesCountRef = useRef(0);
   useEffect(() => {
     if (chatMessages.length > prevMessagesCountRef.current) {
@@ -4248,6 +4381,21 @@ function AppContent() {
       showToast(isRaised ? "Hand lowered" : "Hand raised ✋");
     } catch (e) {
       console.warn("Failed to toggle hand raise:", e);
+    }
+  };
+
+  const handleCelebrate = async () => {
+    if (celebrateCooldown > 0) return;
+    
+    setCelebrateCooldown(10);
+    triggerCelebrationEffects();
+    
+    try {
+      await updateMySharing({
+        celebratedAt: Date.now()
+      });
+    } catch (e) {
+      console.warn("Failed to update celebratedAt:", e);
     }
   };
 
@@ -8371,17 +8519,7 @@ function AppContent() {
                     );
                   })()}
 
-                  {/* Layout Caption toggle */}
-                  <p className="stage-caption" onClick={() => {
-                    if (spotlightParticipantId) {
-                      setSpotlightParticipantId(null);
-                      setIsGalleryView(true);
-                    } else {
-                      setIsGalleryView(!isGalleryView);
-                    }
-                  }}>
-                    Tap the grid icon to switch to {spotlightParticipantId ? 'full gallery' : (isGalleryView ? 'compact grid' : 'full gallery')} view
-                  </p>
+                  {/* Removed stage-caption */}
                 </>
               )}
             </div>
@@ -9980,6 +10118,44 @@ function AppContent() {
                   </button>
                 );
               })()}
+
+              {/* Celebrate Button */}
+              <button
+                onClick={handleCelebrate}
+                disabled={celebrateCooldown > 0}
+                className="dock-btn celebrate-btn"
+                style={{
+                  fontSize: '20px',
+                  position: 'relative',
+                  opacity: celebrateCooldown > 0 ? 0.6 : 1,
+                  cursor: celebrateCooldown > 0 ? 'not-allowed' : 'pointer'
+                }}
+                title={celebrateCooldown > 0 ? `Celebrate (Cooldown: ${celebrateCooldown}s)` : 'Celebrate! 🎉'}
+              >
+                🎉
+                {celebrateCooldown > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '-6px',
+                      right: '-6px',
+                      background: '#3b82f6',
+                      color: 'white',
+                      fontSize: '10px',
+                      borderRadius: '50%',
+                      width: '16px',
+                      height: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                    }}
+                  >
+                    {celebrateCooldown}
+                  </span>
+                )}
+              </button>
 
               {/* Layout Toggle Button */}
               <button 

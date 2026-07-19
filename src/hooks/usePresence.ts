@@ -227,7 +227,8 @@ export function usePresence(
           status: data.status || null,
           castVote: data.castVote || null,
           handRaised: data.handRaised ?? false,
-          handRaisedAt: data.handRaisedAt || null
+          handRaisedAt: data.handRaisedAt || null,
+          celebratedAt: data.celebratedAt || null
         });
       });
 
@@ -273,7 +274,8 @@ export function usePresence(
           todRequestedSpin: null,
           todRequestedChoice: null,
           todRequestedReset: null,
-          status: null
+          status: null,
+          celebratedAt: null
         }
       ]);
     });
