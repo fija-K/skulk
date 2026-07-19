@@ -13,17 +13,15 @@ service cloud.firestore {
     // 1. User documents (rate limits, targets checklist, streaks, and profile details)
     match /users/{userId} {
       allow read: if request.auth != null; // allow signed-in users to lookup profiles for the community directory
-      allow create: if request.auth != null && request.auth.uid == userId &&
-                    request.resource.data.keys().hasOnly(['lastRoomCreatedTime', 'targetsList', 'targetsHistory', 'currentStreak', 'lastActiveDate', 'currentWeekKey', 'displayName', 'photoURL', 'followersCount', 'followingCount', 'bio', 'activeTheme', 'activeMentorPersona', 'celebratedAt', 'preferredName', 'email', 'uid']) &&
-                    (
-                      !('lastRoomCreatedTime' in request.resource.data) || request.resource.data.lastRoomCreatedTime == request.time
-                    );
+      allow create: if request.auth != null && request.auth.uid == userId;
 
       allow update: if request.auth != null &&
-                    request.resource.data.keys().hasOnly(['lastRoomCreatedTime', 'targetsList', 'targetsHistory', 'currentStreak', 'lastActiveDate', 'currentWeekKey', 'displayName', 'photoURL', 'followersCount', 'followingCount', 'bio', 'activeTheme', 'activeMentorPersona', 'celebratedAt', 'preferredName', 'email', 'uid']) &&
                     (
                       request.auth.uid == userId ||
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount'])
+                      (
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount']) &&
+                        request.resource.data.keys().hasOnly(['lastRoomCreatedTime', 'targetsList', 'targetsHistory', 'currentStreak', 'lastActiveDate', 'currentWeekKey', 'displayName', 'photoURL', 'followersCount', 'followingCount', 'bio', 'activeTheme', 'activeMentorPersona', 'celebratedAt', 'preferredName', 'email', 'uid'])
+                      )
                     ) &&
                     (
                       !('lastRoomCreatedTime' in request.resource.data) || 
