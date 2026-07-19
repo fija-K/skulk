@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { User } from 'firebase/auth';
 import type { Room } from '../App';
@@ -18,13 +18,22 @@ export function useSessionLogger(
     try {
       const userRef = doc(db, 'users', uid);
       const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) return;
+      const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+      if (!userSnap.exists()) {
+        // Automatically initialize user document with streak if it doesn't exist yet
+        await setDoc(userRef, {
+          lastActiveDate: todayStr,
+          currentStreak: 1
+        }, { merge: true });
+        console.log(`[STREAK] Initialized user document and streak for ${uid}`);
+        return;
+      }
 
       const userData = userSnap.data();
       const currentStreak = userData.currentStreak || 0;
       const lastActiveDate = userData.lastActiveDate || "";
 
-      const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toLocaleDateString('en-CA');
@@ -80,10 +89,11 @@ export function useSessionLogger(
       const durationMs = Date.now() - joinedAtTime;
       const durationMinutes = Math.max(1, Math.round(durationMs / 60000));
       const logRef = doc(db, 'users', uid, 'sessionLogs', sessionId);
-      await updateDoc(logRef, {
+      // Use setDoc with merge: true to avoid document-not-found errors if initialized and finalized in quick succession
+      await setDoc(logRef, {
         leftAt: new Date().toISOString(),
         durationMinutes
-      });
+      }, { merge: true });
       console.log(`[SESSION] Finalized session log for ${sessionId}: ${durationMinutes} minutes`);
     } catch (e) {
       console.warn("[SESSION] Failed to finalize session log:", e);
@@ -93,8 +103,8 @@ export function useSessionLogger(
   // Effect: Handle Session Creation, Heartbeat, and Clean Leave Finalization
   useEffect(() => {
     // 1. Transition to no room or auth loss
-    if (!currentRoom || !user || user.isAnonymous) {
-      if (activeSessionRef.current && user && !user.isAnonymous) {
+    if (!currentRoom || !user) {
+      if (activeSessionRef.current && user) {
         const { sessionId } = activeSessionRef.current;
         const joinedAtTime = localJoinTimeRef.current;
         if (sessionId && joinedAtTime) {
@@ -132,10 +142,10 @@ export function useSessionLogger(
         const durationMs = Date.now() - joinedAtTime;
         const durationMinutes = Math.max(1, Math.round(durationMs / 60000));
         const logRef = doc(db, 'users', user.uid, 'sessionLogs', sessionId);
-        await updateDoc(logRef, {
+        await setDoc(logRef, {
           leftAt: new Date().toISOString(),
           durationMinutes
-        });
+        }, { merge: true });
       } catch (e) {
         console.warn("[SESSION] Heartbeat write failed:", e);
       }
@@ -148,7 +158,7 @@ export function useSessionLogger(
 
   return {
     finalizeSession: () => {
-      if (activeSessionRef.current && user && !user.isAnonymous) {
+      if (activeSessionRef.current && user) {
         const { sessionId } = activeSessionRef.current;
         const joinedAtTime = localJoinTimeRef.current;
         if (sessionId && joinedAtTime) {
